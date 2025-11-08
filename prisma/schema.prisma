@@ -1,0 +1,35 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Contact {
+  id          Int      @id @default(autoincrement())
+  reportId    String
+  name        String?
+  email       String?
+  company     String?
+  phone       String?
+  syncedAt    DateTime @default(now())
+}
+
+model SalesforceToken {
+  id           Int      @id @default(autoincrement())
+  userId       String   @unique
+  accessToken  String
+  refreshToken String
+  instanceUrl  String
+  issuedAt     DateTime @default(now())
+}
+
+model SyncJob {
+  id          Int      @id @default(autoincrement())
+  reportId    String
+  records     Int
+  status      String
+  createdAt   DateTime @default(now())
+}
