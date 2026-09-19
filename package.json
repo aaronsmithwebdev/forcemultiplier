@@ -1,36 +1,42 @@
 {
-  "name": "salesforce-report-sync",
-  "version": "0.1.0",
+  "name": "forcemultiplier",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "postinstall": "prisma generate"
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "setup": "node scripts/setup.cjs",
+    "db:deploy": "node scripts/db-deploy.cjs",
+    "db:check": "node scripts/check-database.cjs",
+    "postinstall": "prisma generate",
+    "test:smoke": "node scripts/smoke.cjs",
+    "format:check": "prettier --check app components lib tests scripts proxy.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.16.1",
-    "@supabase/supabase-js": "^2.45.0",
-    "@tanstack/react-query": "^5.51.23",
-    "axios": "^1.6.7",
-    "class-variance-authority": "^0.7.0",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.441.0",
-    "next": "15.0.0-canary.39",
-    "next-secure-headers": "^3.0.0",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "@radix-ui/react-slot": "^1.1.1"
+    "@jetstreamapp/soql-parser-js": "^8.1.0",
+    "@prisma/client": "6.19.3",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.116.0",
+    "lucide-react": "^0.577.0",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^20.11.17",
-    "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19",
-    "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.35",
-    "prisma": "^5.16.1",
-    "tailwindcss": "^3.4.3",
-    "typescript": "^5.4.5"
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "prettier": "^3.9.8",
+    "prisma": "6.19.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
   }
 }

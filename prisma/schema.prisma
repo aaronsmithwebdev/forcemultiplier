@@ -1,35 +1,78 @@
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas = ["forcemultiplier"]
 }
-
 generator client {
   provider = "prisma-client-js"
 }
-
-model Contact {
-  id          Int      @id @default(autoincrement())
-  reportId    String
-  name        String?
-  email       String?
-  company     String?
-  phone       String?
-  syncedAt    DateTime @default(now())
+model Connection {
+  provider String @id
+  clientId String
+  secret String
+  loginUrl String
+  version Int @default(1)
+  tokens String?
+  externalId String?
+  label String?
+  instanceUrl String?
+  expiresAt DateTime?
+  checkedAt DateTime?
+  refreshLeaseUntil DateTime?
+  error String?
+  updatedAt DateTime @updatedAt
+  @@schema("forcemultiplier")
 }
-
-model SalesforceToken {
-  id           Int      @id @default(autoincrement())
-  userId       String   @unique
-  accessToken  String
-  refreshToken String
-  instanceUrl  String
-  issuedAt     DateTime @default(now())
+model OAuthAttempt {
+  id String @id
+  userId String
+  provider String
+  verifier String
+  connectionVersion Int
+  expiresAt DateTime
+  @@schema("forcemultiplier")
 }
-
-model SyncJob {
-  id          Int      @id @default(autoincrement())
-  reportId    String
-  records     Int
-  status      String
-  createdAt   DateTime @default(now())
+model Audience {
+  id String @id @default(cuid())
+  name String
+  sourceType String
+  sourceId String?
+  query String
+  fields Json @default("[]")
+  orgId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  runs PullRun[]
+  @@schema("forcemultiplier")
+}
+model PullRun {
+  id String @id @default(cuid())
+  audienceId String
+  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  status String @default("pending")
+  query String
+  fields Json
+  orgId String
+  cursor String?
+  total Int @default(0)
+  processed Int @default(0)
+  error String?
+  leaseUntil DateTime?
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  members AudienceMember[]
+  @@index([audienceId,createdAt])
+  @@schema("forcemultiplier")
+}
+model AudienceMember {
+  runId String
+  run PullRun @relation(fields:[runId], references:[id], onDelete:Cascade)
+  salesforceId String
+  email String?
+  name String?
+  optedOut Boolean @default(false)
+  data Json
+  @@id([runId,salesforceId])
+  @@schema("forcemultiplier")
 }

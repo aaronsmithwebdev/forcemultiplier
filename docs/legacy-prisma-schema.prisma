@@ -1,0 +1,103 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Contact {
+  id          Int               @id @default(autoincrement())
+  reportId    String
+  email       String?
+  firstName   String?
+  lastName    String?
+  company     String?
+  phone       String?
+  syncedAt    DateTime          @default(now())
+  properties  ContactProperty[]
+  syncEntries ListSyncContact[]
+}
+
+model SalesforceToken {
+  id           Int      @id @default(autoincrement())
+  userId       String   @unique
+  accessToken  String
+  refreshToken String
+  instanceUrl  String
+  issuedAt     DateTime @default(now())
+}
+
+model SyncJob {
+  id        Int      @id @default(autoincrement())
+  reportId  String
+  records   Int
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model ContactProperty {
+  id          Int      @id @default(autoincrement())
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId   Int
+  key         String
+  value       String
+  sourceField String?
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([contactId, key])
+}
+
+model IntegrationAccount {
+  id        Int      @id @default(autoincrement())
+  provider  String
+  name      String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fieldMappings IntegrationFieldMap[]
+  listSyncs     ListSync[]
+}
+
+model IntegrationFieldMap {
+  id                   Int                @id @default(autoincrement())
+  integrationAccount   IntegrationAccount @relation(fields: [integrationAccountId], references: [id], onDelete: Cascade)
+  integrationAccountId Int
+  propertyKey          String
+  remoteFieldName      String
+  required             Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+
+  @@unique([integrationAccountId, propertyKey, remoteFieldName])
+}
+
+model ListSync {
+  id                   Int                @id @default(autoincrement())
+  integrationAccount   IntegrationAccount @relation(fields: [integrationAccountId], references: [id], onDelete: Cascade)
+  integrationAccountId Int
+  reportId             String
+  providerListId       String?
+  status               String
+  startedAt            DateTime           @default(now())
+  finishedAt           DateTime?
+  notes                String?
+
+  contacts ListSyncContact[]
+}
+
+model ListSyncContact {
+  id          Int      @id @default(autoincrement())
+  listSync    ListSync @relation(fields: [listSyncId], references: [id], onDelete: Cascade)
+  listSyncId  Int
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId   Int
+  status      String
+  payloadHash String?
+  message     String?
+  syncedAt    DateTime @default(now())
+
+  @@unique([listSyncId, contactId])
+}

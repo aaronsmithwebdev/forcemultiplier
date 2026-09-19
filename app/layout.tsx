@@ -1,30 +1,17 @@
-import "./globals.css";
-
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import { ReactNode } from "react";
-
-import { QueryProvider } from "@/components/query-provider";
-import { ToastProvider, Toaster } from "@/components/ui/toaster";
-
-const inter = Inter({ subsets: ["latin"] });
-
+import "./globals.css";
 export const metadata: Metadata = {
-  title: "Salesforce Report Sync",
-  description: "Minimal starter to sync Salesforce reports into Supabase"
+  title: { default: "ForceMultiplier", template: "%s · ForceMultiplier" },
+  description: "Your Salesforce audiences, connected to Constant Contact.",
 };
-
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <QueryProvider>
-          <ToastProvider>
-            {children}
-            <Toaster />
-          </ToastProvider>
-        </QueryProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

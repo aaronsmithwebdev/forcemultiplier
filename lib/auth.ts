@@ -1,42 +1,24 @@
-import { cookies } from "next/headers";
+import { AppError } from "./errors";
+import { supabase } from "./supabase";
 
-import { prisma } from "@/lib/prisma";
-
-export const SALESFORCE_USER_COOKIE = "sf_user_id";
-
-export function getCurrentUserId() {
-  const cookieStore = cookies();
-  return cookieStore.get(SALESFORCE_USER_COOKIE)?.value ?? null;
+export async function session() {
+  const { data, error } = await (await supabase()).auth.getUser();
+  return error ? null : data.user;
 }
-
-export async function getSalesforceToken() {
-  const userId = getCurrentUserId();
-  if (!userId) return null;
-  return prisma.salesforceToken.findUnique({ where: { userId } });
+export async function requireSession() {
+  const value = await session();
+  if (!value) throw new AppError("Sign in to your workspace.", 401);
+  return value;
 }
-
-export async function upsertSalesforceToken(params: {
-  userId: string;
-  accessToken: string;
-  refreshToken?: string | null;
-  instanceUrl: string;
-}) {
-  const existing = await prisma.salesforceToken.findUnique({ where: { userId: params.userId } });
-  const refreshToken = params.refreshToken ?? existing?.refreshToken ?? "";
-
-  return prisma.salesforceToken.upsert({
-    where: { userId: params.userId },
-    update: {
-      accessToken: params.accessToken,
-      refreshToken,
-      instanceUrl: params.instanceUrl,
-      issuedAt: new Date()
-    },
-    create: {
-      userId: params.userId,
-      accessToken: params.accessToken,
-      refreshToken,
-      instanceUrl: params.instanceUrl
-    }
+export async function login(email: string, password: string) {
+  const { error } = await (
+    await supabase()
+  ).auth.signInWithPassword({
+    email,
+    password,
   });
+  if (error) throw new AppError("Email or password is incorrect.", 401);
+}
+export async function logout() {
+  await (await supabase()).auth.signOut();
 }

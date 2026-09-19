@@ -1,202 +1,123 @@
-# Salesforce Report Sync Starter
+# ForceMultiplier
 
-This project scaffolds a beginner-friendly SaaS-style dashboard that connects to Salesforce, lists available
-reports, previews them, and syncs contact-style data into Supabase using Prisma. Everything is written in
-TypeScript on top of the Next.js 15 App Router and styled with Tailwind CSS.
+A private workspace for connecting Salesforce and Constant Contact, defining Salesforce audiences, and pulling complete contact lists into Supabase. This rebuild replaces the previous report-sync prototype.
 
-The goal is to help you understand the full flow end-to-end:
+## Available now
 
-1. Authenticate with Salesforce via OAuth 2.0 (web server flow).
-2. Browse and filter reports from your Salesforce org.
-3. Preview a report, then sync the rows into Supabase.
-4. View synced contacts in a dedicated dashboard page.
+- Supabase Auth sign-in using users managed in the Supabase dashboard.
+- Separate Salesforce and Constant Contact connection settings, OAuth callbacks, encrypted credentials, automatic token refresh, connection testing, and disconnect/reconnect.
+- Audiences from Contact SOQL queries, Contact list views, Salesforce Campaign members, and supported standard Contacts report filters.
+- A metadata field explorer for Contact custom fields and parent relationships, including custom lookups. Selected fields are fetched separately from audience membership.
+- A 25-contact preview and resumable, paginated full pulls, including audiences larger than 2,000 records. Completed snapshots are saved in Supabase and remain visible during subsequent pulls.
+- Constant Contact list browsing, member inspection, empty-list creation, and custom-field catalog browsing.
+- Pull history with progress and recoverable errors.
 
-The codebase includes **generous comments, safe defaults, and explicit instructions** so you can follow along
-without guessing.
+**This milestone is for connecting accounts and pulling audiences.** It does not yet write contacts or memberships to Constant Contact, save field mappings, run scheduled jobs, or send unsubscribes back to Salesforce. Keep Cazoomi running until those features and a comparison/cutover exercise are complete. The next sync phase will use Salesforce as the contact-data source and make unsubscribe-only return updates configurable.
 
----
+## Start locally
 
-## Quickstart Checklist
+Use Node.js 22.12+ or a supported newer LTS release.
 
-### 1. Create the project locally
-
-```bash
-npx create-next-app@latest salesforce-report-sync --typescript
-cd salesforce-report-sync
-```
-
-> The repo already contains the generated structure, but running the command above locally ensures you have the
-> right dependencies installed.
-
-### 2. Install dependencies
-
-```bash
-npm install
-```
-
-The key dependencies are:
-
-- `next@15` + `react@18` for the App Router setup
-- `@tanstack/react-query` for data fetching and caching
-- `@prisma/client` + `prisma` to talk to Supabase/PostgreSQL
-- `axios` for Salesforce HTTP calls
-- Tailwind utility components (see `components/ui/*`)
-
-### 3. Configure environment variables
-
-Copy `.env.example` to `.env` and fill in the blanks:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Why it matters |
-| --- | --- |
-| `DATABASE_URL` | **Required.** Paste the Supabase connection string (Project → Settings → Database). |
-| `NEXT_PUBLIC_SUPABASE_URL` (optional) | Only needed if you call the Supabase client SDK from the browser. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional) | Companion to the public URL above. |
-| `SUPABASE_SERVICE_ROLE_KEY` (optional) | Only needed if you create admin-level Supabase server actions. |
-| `SALESFORCE_CLIENT_ID` & `SALESFORCE_CLIENT_SECRET` | Created automatically when you set up the Salesforce Connected App that powers OAuth. |
-| `SALESFORCE_REDIRECT_URI` | Must match the callback URL configured on that Connected App. |
-| `NEXTAUTH_SECRET` | Placeholder for when you plug in NextAuth or another session library later. |
-
-> ✅ Once the Connected App is configured, the OAuth flow will redirect you to the proper Salesforce login screen automatically—you do **not** need to hard-code any org-specific URLs beyond the optional sandbox override noted below.
-
-### 4. Prepare Prisma + Supabase
-
-1. Sign in to [Supabase](https://supabase.com/) and create a new project.
-   - **Region:** pick the one closest to you for the best latency.
-   - **Database password:** enter a strong password and store it somewhere safe—you need it for `DATABASE_URL`.
-   - **Security options → Connections:** leave the default **Data API + Connection String** enabled. This gives you
-     both the REST Data API and the standard Postgres connection string used by Prisma.
-   - **Data API configuration:** choose **Use public schema for the Data API** (default). The starter app does not
-     rely on a dedicated schema.
-   - **Postgres type:** keep **Postgres (default)** selected. Avoid the OrioleDB preview for production workloads.
-2. Once the project finishes provisioning, copy the **Connection string** and paste it into `DATABASE_URL` in `.env`.
-3. Create the database tables:
-
-```bash
-npx prisma migrate dev --name init
-npx prisma generate
-```
-
-The Prisma schema defines three tables:
-
-- `Contact`: stores synced contact data.
-- `SalesforceToken`: stores OAuth access/refresh tokens per Salesforce user.
-- `SyncJob`: keeps a basic history of sync attempts.
-
-### 5. Run the dev server
+For this existing workspace, dependencies, local secrets, and the private Supabase schema have already been prepared. Start with:
 
 ```bash
 npm run dev
 ```
 
-Visit `http://localhost:3000` and click **Connect to Salesforce**.
+Open **http://localhost:3000** and sign in with a user created under **Supabase → Authentication → Users**. In **Authentication → Sign In / Providers**, disable new-user signup for this private workspace. Then open **Connections** and configure both apps. Always use the same hostname as `APP_URL`; `localhost` and `127.0.0.1` are different OAuth/cookie origins.
 
-> If you see an OAuth error, double-check your Connected App callback URL and the client secret value.
+### Fresh installation
 
----
-
-## File Structure Overview
-
-```
-app/
-  layout.tsx              # Global layout, React Query + Toast providers
-  page.tsx                # Landing page with "Connect to Salesforce"
-  (dashboard)/            # Authenticated dashboard routes
-    layout.tsx            # Sidebar + topbar wrapper
-    reports/page.tsx      # Report search, filters, preview modal
-    contacts/page.tsx     # Supabase-backed contacts table
-    settings/page.tsx     # Future ideas + roadmap placeholder
-  api/
-    salesforce/
-      login/route.ts      # Redirect to Salesforce OAuth
-      callback/route.ts   # Handle OAuth callback & store tokens
-      reports/route.ts    # List available reports
-      report/route.ts     # Preview a single report
-      sync-report/route.ts# Sync report data into Supabase
-      identity/route.ts   # Fetch org/user identity for the UI
-    contacts/route.ts     # Fetch synced contacts from Supabase
-components/
-  sidebar.tsx, topbar.tsx, report-preview-modal.tsx, query-provider.tsx
-  ui/                     # Lightweight Tailwind-based UI primitives
-lib/
-  prisma.ts               # Prisma singleton client
-  auth.ts                 # Cookie helpers + token persistence
-  salesforceClient.ts     # Axios client with automatic token refresh
-  reportMapping.ts        # Simple heuristics to map report rows to contacts
-prisma/schema.prisma       # Database schema
+```bash
+cp .env.example .env
+# Fill in the database, project URL, and publishable-key values from Supabase Connect.
+npm install
+npm run setup
+npm run db:deploy
+npm run db:check
+npm run dev
 ```
 
----
+`npm run setup` generates a missing encryption key and targets the `forcemultiplier` PostgreSQL schema. It preserves existing keys. Back up `APP_ENCRYPTION_KEY`: replacing it makes saved app secrets and tokens unreadable. Provider application keys are entered in Connections and stored encrypted in the database; legacy `SALESFORCE_CLIENT_*` environment variables are unused.
 
-## Step-by-Step Feature Guide
+### Supabase Auth
 
-### 1. Salesforce OAuth Flow
+1. In the Supabase project, click **Connect**, choose the Next.js app/framework view, and copy the **Project URL** and **Publishable key** into `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `.env`.
+2. Open **Authentication → Users**, choose **Add user**, and create or invite the trusted user who will administer this workspace.
+3. Open the Authentication configuration and turn off **Allow new users to sign up**. The app has no signup screen, but disabling it also closes the public Auth signup endpoint.
+4. Restart `npm run dev`, then sign in at `http://localhost:3000`.
 
-1. **`/api/salesforce/login`** builds the authorize URL, saves a short-lived `sf_oauth_state` cookie, and redirects
-   the browser to Salesforce.
-2. **`/api/salesforce/callback`** validates the state, exchanges the code for tokens, fetches the identity profile,
-   and stores the access/refresh tokens in the `SalesforceToken` table. A persistent `sf_user_id` cookie keeps
-   track of the Salesforce user for subsequent API calls.
-3. Every API route uses `ensureSalesforceClient()` (in `lib/salesforceClient.ts`). The client automatically refreshes
-   expired access tokens using the stored refresh token.
+Use only the publishable key (normally `sb_publishable_...`). A Supabase secret or legacy service-role key is unnecessary and must not be exposed to this app. For Vercel, add the same two Auth variables plus `DATABASE_URL`, `DIRECT_URL`, `APP_ENCRYPTION_KEY`, and the hosted HTTPS `APP_URL` under the project’s Environment Variables. Redeploy after changing them.
 
-If anything goes wrong, the user is redirected back to `/` with a query parameter such as `?error=oauth_failed`.
+## Connect Salesforce
 
-### 2. Browsing Salesforce Reports
+1. In the production org, create an **External Client App** with OAuth enabled. Use the web-server authorization-code flow, require the client secret, and enable PKCE.
+2. Add `api`, `openid`, and `refresh_token` / `offline_access` scopes. Add the exact callback displayed in Connections:
+   `http://localhost:3000/api/oauth/salesforce/callback` for local use.
+3. Put the consumer key and secret in Connections. Use `https://login.salesforce.com` or your production My Domain as the login URL. Save, then select **Connect account**.
+4. Authorize a user with API access and read permissions for the intended Contacts, related objects, fields, reports, and list views. If the app uses admin-preauthorized policies, assign the appropriate access first.
+5. Use **Test connection**, then create a SOQL audience and preview it.
 
-- `/reports` uses React Query to call `/api/salesforce/reports` with optional search text and folder filters.
-- The table displays name, folder, and last modified date.
-- Clicking **Preview** opens `components/report-preview-modal.tsx`, which fetches the report details, displays the
-  first rows, and offers a **Sync report** button.
+Use `https://test.salesforce.com` or the sandbox My Domain for a sandbox. A refresh still requires reauthorization; production configuration avoids coupling the real integration to sandbox refreshes. Each audience is bound to its original org. Disconnect explicitly before switching orgs or application credentials.
 
-### 3. Syncing to Supabase
+The new app does not deploy Salesforce objects or Apex. A package is unnecessary for this milestone. ECA metadata and permission sets can be versioned/deployed later if you need installation across multiple orgs.
 
-- `/api/salesforce/sync-report` downloads the raw rows, converts each row into a contact-like object using
-  `lib/reportMapping.ts`, and stores the results with Prisma.
-- Existing contacts for that report are cleared before inserting new rows to keep the data fresh.
-- Every sync inserts a row into the `SyncJob` table with the status and record count.
+[Salesforce External Client Apps](https://developer.salesforce.com/docs/platform/external-client-apps/guide/eca-intro.html)
 
-### 4. Viewing Synced Contacts
+## Connect Constant Contact
 
-- `/contacts` queries `/api/contacts` (optionally filtered by `reportId`).
-- The page shows a Tailwind-styled table with Name, Email, Company, Phone, and Synced Date columns.
-- The filter dropdown is populated based on the report IDs present in the data set.
+1. Create an application in the [developer portal](https://app.constantcontact.com/pages/dma/portal/).
+2. Register the exact callback from Connections:
+   `http://localhost:3000/api/oauth/constant-contact/callback` for local use.
+3. Save its API key/client ID and client secret in Connections, then select **Connect account**. The app requests `contact_data`, `account_read`, and `offline_access`.
+4. Open **Constant Contact lists** to browse lists and members, inspect custom fields, or create an empty destination list. List creation immediately creates a real list in the connected account.
 
-### 5. Helpful UI Details
+New private apps must be authorized by their creator; follow Constant Contact's public-app process if other account users need to authorize your app. Refresh tokens rotate and are stored after each refresh.
 
-- **Sidebar / Topbar**: Provide navigation and display the connected Salesforce org + user.
-- **Toasts**: A lightweight toast system (`components/ui/toaster.tsx`) surfaces success/failure feedback.
-- **Skeleton loaders**: `components/ui/skeleton.tsx` gives instant visual feedback while data loads.
+[Constant Contact authorization-code flow](https://developer.constantcontact.com/api_guide/server_flow.html)
 
----
+## Build and pull an audience
 
-## Common Gotchas & Tips
+A typical query is:
 
-- **Refresh tokens**: Salesforce sometimes omits the refresh token on repeated authorizations. If that happens,
-  reset OAuth authorizations for the connected app and try again.
-- **Sandboxes**: Add `SALESFORCE_LOGIN_BASE_URL=https://test.salesforce.com` to `.env` if you need to connect to a sandbox org.
-- **Data volume**: The sync route currently fetches everything in one go. For very large reports, consider using
-  Salesforce’s `async` report APIs or pagination.
-- **Authentication**: This starter relies on the Salesforce session cookie. In production you should add proper
-  user authentication (NextAuth.js, Supabase Auth, etc.) and map Salesforce tokens to your application user IDs.
-- **Deployment**: Deploy the Next.js app to Vercel and plug in the same environment variables (without the quotes).
-  Supabase hosts your Postgres database, so no extra setup is required.
+```sql
+SELECT Id
+FROM Contact
+WHERE Email != null
+  AND HasOptedOutOfEmail = false
+  AND Account.BillingState = 'NSW'
+```
 
----
+Select related/custom fields through the explorer, such as `Account.Name` or a custom parent lookup's field. Save the audience and select **Pull audience**. The browser advances one page at a time; keep the page open. Closing the page stops further requests after the in-flight page. Resume from the audience page. If Salesforce expires a query cursor, cancel and start a new pull.
 
-## Next Steps for You
+Supported queries have `Contact` as the root, include `Id`, and select scalar or parent fields. Semi-joins can select Contacts through Campaigns or child/custom objects. Mutating clauses, aggregates, child subqueries in the SELECT list, and OFFSET are blocked. If intentionally using LIMIT, also use a deterministic ORDER BY with an Id tie-breaker. Membership is deduplicated by Salesforce Contact ID; email-address deduplication and destination conflict resolution belong to the outbound sync phase.
 
-1. **Run `npm run dev` and complete the OAuth flow.** Make sure you can see reports and sync contacts.
-2. **Inspect the database** via Supabase to verify new rows appear in `Contact` and `SyncJob`.
-3. **Customize field mapping** in `lib/reportMapping.ts` to better match your Salesforce schema.
-4. **Add background jobs** (Supabase Edge Functions, Vercel Cron) for automatic nightly syncs.
-5. **Layer in authentication** so only signed-in users can start a sync.
+Saved reports and list views are re-resolved before each new pull. The run records the query it actually used. Report translation is deliberately limited to the standard `ContactList` report type, organization-wide scope, All Time date range, and supported Contact/Account scalar filters and boolean logic. Custom report types, cross-filters, summary filters, relative dates, hierarchy scope, ambiguous field mappings, and unsupported operators require an independent reviewed SOQL query. Unsupported criteria do not silently disappear. Report extraction uses paginated SOQL, not the report-results API's 2,000-row response.
 
-> 💡 Pro tip: Commit your `.env` file to a password manager, never to git. The `.env.example` in the repo is safe to
-> share because it does not contain real secrets.
+Current limits: 30 additional fields, four parent relationship hops, Contact records only, 150,000 records per manual pull. Polymorphic relationships and child-to-one reductions require reviewed SOQL/aggregation design. Fields follow the connected user's visibility. Salesforce records can change while a multi-request pull is running; a completed pull means all query-result pages were received, not a transactionally frozen Salesforce database.
 
-Happy building! If you get stuck, read through the inline comments and console logs—they are written with beginners
-in mind.
+## Database and operational notes
+
+- Prisma connects server-side to Supabase PostgreSQL. Supabase Auth uses the browser-safe project URL and publishable key; no secret or service-role key is required.
+- New tables live in the private `forcemultiplier` schema, with RLS enabled and schema/table privileges revoked from public API roles. Do not expose this schema through the Supabase Data API.
+- The old `public` tables and their data remain as a rollback/reference archive. This app neither uses nor migrates their rows or old OAuth tokens.
+- Use `npm run db:deploy`, which checks both URLs target the private schema. Do not run `prisma migrate reset` on the existing project.
+- OAuth state is session-bound, expires, and is consumed once. Tokens/client secrets are encrypted with AES-256-GCM. Mutations require the configured origin. Token refresh and pull processing use database leases.
+- The app is a single-workspace deployment. Every enabled Supabase Auth user can administer it, so keep public signup disabled and create only trusted users.
+- Pull snapshots are retained until a future retention feature is added. Monitor database size during large repeated pulls.
+- A hosted deployment needs HTTPS `APP_URL`, persistent environment secrets, exact hosted OAuth callbacks, and a Node runtime. A durable worker is required before scheduled/automatic syncing is enabled. Manual pulls should first be validated against your intended hosting request-duration limits.
+
+## Verification
+
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run db:check
+# With the local app running and Chrome installed:
+npm run test:smoke
+```
+
+Unit tests cover OAuth state/replay/rotation, disconnect races, query restrictions, filter translation, encryption, pagination beyond 2,000, and interrupted/truncated pulls. The browser smoke test verifies the login/configuration state without credentials. Set `SUPABASE_SMOKE_EMAIL` and `SUPABASE_SMOKE_PASSWORD` temporarily to include signed-in desktop/mobile pages and protected APIs. It never authorizes or writes to either provider. End-to-end provider authorization and org-specific report comparisons still require your real app credentials.
+
+See [the overall replacement plan](docs/cazoomi-replacement-plan.md) and [Salesforce source design](docs/salesforce-audience-sources.md) for subsequent phases. Those documents describe the longer-term design; the implemented scope above is authoritative for this release.
