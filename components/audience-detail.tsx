@@ -27,8 +27,11 @@ export function AudienceDetail({ id }: { id: string }) {
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState<any>(null),
     [offset, setOffset] = useState(0),
+    [searchInput, setSearchInput] = useState(""),
     [search, setSearch] = useState(""),
+    [contactsLoading, setContactsLoading] = useState(false),
     [lists, setLists] = useState<any[]>([]),
+    [listSearch, setListSearch] = useState(""),
     [showSend, setShowSend] = useState(false),
     [sending, setSending] = useState(false),
     [delivery, setDelivery] = useState<any>(null),
@@ -37,17 +40,31 @@ export function AudienceDetail({ id }: { id: string }) {
   const loadVersion = useRef(0);
   const load = async () => {
     const version = ++loadVersion.current;
-    const row = await api(
-      `audiences/${id}?offset=${offset}&search=${encodeURIComponent(search)}`,
-    );
-    if (version === loadVersion.current) setData(row);
+    setContactsLoading(true);
+    try {
+      const row = await api(
+        `audiences/${id}?offset=${offset}&search=${encodeURIComponent(search)}`,
+      );
+      if (version === loadVersion.current) setData(row);
+    } finally {
+      if (version === loadVersion.current) setContactsLoading(false);
+    }
   };
   useEffect(() => {
     void load().catch((e) => setError(e.message));
+  }, [id, offset, search]);
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setOffset(0);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchInput]);
+  useEffect(() => {
     return () => {
       stop.current = true;
     };
-  }, [id, offset, search]);
+  }, []);
   async function pull() {
     setBusy(true);
     stop.current = false;
@@ -82,7 +99,7 @@ export function AudienceDetail({ id }: { id: string }) {
         );
         loaded.push(...(page.lists || []));
         const next = page._links?.next?.href || "";
-        if (next === cursor)
+        if (next && next === cursor)
           throw new Error("List pagination did not advance.");
         cursor = next;
       } while (cursor && loaded.length < 5000); // ponytail: add a server-side list picker if an account reaches 5,000 lists.
@@ -143,6 +160,9 @@ export function AudienceDetail({ id }: { id: string }) {
   );
   const run = busy ? progress : active;
   const sendingRun = delivery || activeDelivery;
+  const matchingLists = lists.filter((list) =>
+    list.name.toLowerCase().includes(listSearch.trim().toLowerCase()),
+  );
   return (
     <>
       <Link className="back-link" href="/audiences">
@@ -295,11 +315,8 @@ export function AudienceDetail({ id }: { id: string }) {
             <div className="search-box">
               <Search size={16} />
               <input
-                value={search}
-                onChange={(e) => {
-                  setOffset(0);
-                  setSearch(e.target.value);
-                }}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 aria-label="Search pulled contacts"
                 placeholder="Search names or emails…"
               />
@@ -319,6 +336,8 @@ export function AudienceDetail({ id }: { id: string }) {
             title="Ready for your first pull"
             description="Pull the full audience from Salesforce. This saves contacts here without adding them to Constant Contact."
           />
+        ) : contactsLoading ? (
+          <Loading />
         ) : (
           <>
             <div className="table-wrap">
@@ -487,17 +506,44 @@ export function AudienceDetail({ id }: { id: string }) {
                   void send(undefined, String(values.get("listId")));
                 }}
               >
-                <label>
-                  Destination list
-                  <select name="listId" required autoFocus>
-                    <option value="">Choose a Constant Contact list…</option>
-                    {lists.map((list) => (
-                      <option key={list.list_id} value={list.list_id}>
-                        {list.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <label>Destination list</label>
+                <div className="search-box modal-list-search">
+                  <Search size={16} />
+                  <input
+                    value={listSearch}
+                    onChange={(event) => setListSearch(event.target.value)}
+                    aria-label="Search Constant Contact lists"
+                    placeholder="Search Constant Contact lists…"
+                    autoFocus
+                  />
+                </div>
+                <div className="destination-list-picker">
+                  {matchingLists.map((list) => (
+                    <label key={list.list_id}>
+                      <input
+                        name="listId"
+                        type="radio"
+                        value={list.list_id}
+                        required
+                      />
+                      <span>
+                        <strong>{list.name}</strong>
+                        <small>
+                          {typeof list.membership_count === "number"
+                            ? `${list.membership_count.toLocaleString()} members`
+                            : "Constant Contact list"}
+                        </small>
+                      </span>
+                    </label>
+                  ))}
+                  {matchingLists.length === 0 && (
+                    <p className="empty-list-message">
+                      {lists.length
+                        ? "No lists match that search."
+                        : "No Constant Contact lists were found."}
+                    </p>
+                  )}
+                </div>
                 <label className="consent-check">
                   <input name="permission" type="checkbox" required />
                   <span>
