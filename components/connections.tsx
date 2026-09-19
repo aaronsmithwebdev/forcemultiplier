@@ -185,15 +185,26 @@ function ConnectionCard({
                     <strong>External Client App</strong>.
                   </li>
                   <li>
-                    Enable OAuth with <strong>api</strong>,{" "}
-                    <strong>openid</strong>, and{" "}
+                    Add the callback below. Enable OAuth with the{" "}
+                    <strong>api</strong>, <strong>openid</strong>, and{" "}
                     <strong>refresh_token / offline_access</strong> scopes.
-                    Enable PKCE.
                   </li>
                   <li>
-                    Add the callback below, then copy the consumer key and
-                    secret here. Authorize a user who can read your contacts and
-                    reports.
+                    Leave every <strong>Flow Enablement</strong> option off. In{" "}
+                    <strong>Security</strong>, require the secret for Web Server
+                    and Refresh Token flows, require PKCE, and enable Refresh
+                    Token Rotation. Leave JWT access tokens and the
+                    refresh-token IP allowlist off.
+                  </li>
+                  <li>
+                    Create the app. In <strong>Policies</strong>, choose{" "}
+                    <strong>Admin approved users are pre-authorized</strong> and
+                    assign the permission set for your integration user.
+                  </li>
+                  <li>
+                    Copy the consumer key and secret here, then authorize a user
+                    with API access and read access to the required contacts,
+                    related objects, fields, reports, and report folders.
                   </li>
                 </>
               ) : (
