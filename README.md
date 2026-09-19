@@ -11,10 +11,10 @@ A private workspace for connecting Salesforce and Constant Contact, defining Sal
 - A 25-contact preview and resumable, paginated full pulls, including audiences larger than 2,000 records. Completed snapshots are saved in Supabase and remain visible during subsequent pulls.
 - Constant Contact list browsing, member inspection, empty-list creation, and custom-field catalog browsing.
 - Search across pulled contact names, email addresses, and Salesforce IDs.
-- Resumable Constant Contact delivery of names and email addresses, with destination-list selection, Salesforce opt-out filtering, consent confirmation, provider activity checks, and delivery history.
+- Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, provider activity checks, and delivery history.
 - Pull and delivery history with progress and recoverable errors.
 
-**This milestone supports reviewed manual delivery of names and email addresses.** It does not yet save custom-field mappings, remove contacts who leave a Salesforce audience, run scheduled jobs, or send unsubscribes back to Salesforce. Keep Cazoomi running until those features and a comparison/cutover exercise are complete. The next sync phase will add explicit field mappings and make unsubscribe-only return updates configurable.
+**This milestone supports reviewed manual delivery of names, email addresses, and selected custom fields.** Each delivery lets you map Salesforce fields, including fields reached through parent relationships, to existing Constant Contact custom fields. It does not yet save reusable mapping templates, remove contacts who leave a Salesforce audience, run scheduled jobs, or send unsubscribes back to Salesforce. Keep Cazoomi running until those features and a comparison/cutover exercise are complete. The next sync phase will make mappings reusable and unsubscribe-only return updates configurable.
 
 ## Start locally
 

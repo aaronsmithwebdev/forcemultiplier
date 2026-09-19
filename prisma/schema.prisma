@@ -60,6 +60,7 @@ model DeliveryRun {
   activityId String?
   activityProgress Int @default(0)
   batch Json?
+  mappings Json @default("[]")
   total Int
   processed Int @default(0)
   submitted Int @default(0)

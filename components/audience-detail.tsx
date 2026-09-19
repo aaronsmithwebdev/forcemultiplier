@@ -31,6 +31,8 @@ export function AudienceDetail({ id }: { id: string }) {
     [search, setSearch] = useState(""),
     [contactsLoading, setContactsLoading] = useState(false),
     [lists, setLists] = useState<any[]>([]),
+    [constantContactFields, setConstantContactFields] = useState<any[]>([]),
+    [fieldMappings, setFieldMappings] = useState<Record<string, string>>({}),
     [listSearch, setListSearch] = useState(""),
     [showSend, setShowSend] = useState(false),
     [sending, setSending] = useState(false),
@@ -86,31 +88,67 @@ export function AudienceDetail({ id }: { id: string }) {
   }
   async function openDelivery() {
     setShowSend(true);
-    if (lists.length) return;
+    if (lists.length && constantContactFields.length) return;
     setSending(true);
     setError("");
     try {
-      const loaded: any[] = [];
-      let cursor = "";
-      do {
-        const page = await api(
-          "constant-contact/lists" +
-            (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""),
-        );
-        loaded.push(...(page.lists || []));
-        const next = page._links?.next?.href || "";
-        if (next && next === cursor)
-          throw new Error("List pagination did not advance.");
-        cursor = next;
-      } while (cursor && loaded.length < 5000); // ponytail: add a server-side list picker if an account reaches 5,000 lists.
+      const [loaded, fieldPage] = await Promise.all([
+        (async () => {
+          const results: any[] = [];
+          let cursor = "";
+          do {
+            const page = await api(
+              "constant-contact/lists" +
+                (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""),
+            );
+            results.push(...(page.lists || []));
+            const next = page._links?.next?.href || "";
+            if (next && next === cursor)
+              throw new Error("List pagination did not advance.");
+            cursor = next;
+          } while (cursor && results.length < 5000); // ponytail: add a server-side list picker if an account reaches 5,000 lists.
+          return results;
+        })(),
+        api("constant-contact/fields"),
+      ]);
+      const fields = fieldPage.custom_fields || [];
       setLists(loaded);
+      setConstantContactFields(fields);
+      setFieldMappings((current) => {
+        if (Object.keys(current).length) return current;
+        const normalize = (value: string) =>
+          value
+            .replace(/__c$/i, "")
+            .replace(/[^a-z0-9]/gi, "")
+            .toLowerCase();
+        const suggested = new Set<string>();
+        return Object.fromEntries(
+          data.fields.map((source: string) => {
+            const sourceName = source.split(".").at(-1)!;
+            const match = fields.find(
+              (field: any) =>
+                !suggested.has(field.custom_field_id) &&
+                (normalize(String(field.name || "")) ===
+                  normalize(sourceName) ||
+                  normalize(String(field.label || "")) ===
+                    normalize(sourceName)),
+            );
+            if (match) suggested.add(match.custom_field_id);
+            return [source, match?.custom_field_id || ""];
+          }),
+        );
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setSending(false);
     }
   }
-  async function send(run?: any, listId?: string) {
+  async function send(
+    run?: any,
+    listId?: string,
+    mappings: { source: string; targetId: string }[] = [],
+  ) {
     setSending(true);
     setError("");
     setMessage("");
@@ -120,6 +158,7 @@ export function AudienceDetail({ id }: { id: string }) {
         (await api(`audiences/${id}/deliveries`, "POST", {
           listId,
           permissionConfirmed: true,
+          mappings,
         }));
       setShowSend(false);
       setDelivery(current);
@@ -503,7 +542,13 @@ export function AudienceDetail({ id }: { id: string }) {
                 onSubmit={(event) => {
                   event.preventDefault();
                   const values = new FormData(event.currentTarget);
-                  void send(undefined, String(values.get("listId")));
+                  void send(
+                    undefined,
+                    String(values.get("listId")),
+                    Object.entries(fieldMappings)
+                      .filter(([, targetId]) => targetId)
+                      .map(([source, targetId]) => ({ source, targetId })),
+                  );
                 }}
               >
                 <label>Destination list</label>
@@ -544,6 +589,52 @@ export function AudienceDetail({ id }: { id: string }) {
                     </p>
                   )}
                 </div>
+                {data.fields.length > 0 && (
+                  <div className="field-mapping">
+                    <div>
+                      <label>Custom field mapping</label>
+                      <p>
+                        Choose where each Salesforce value should be saved.
+                        Blank values will not overwrite Constant Contact data.
+                      </p>
+                    </div>
+                    {data.fields.map((source: string) => {
+                      const selectedElsewhere = new Set(
+                        Object.entries(fieldMappings)
+                          .filter(([key]) => key !== source)
+                          .map(([, target]) => target),
+                      );
+                      return (
+                        <div className="mapping-row" key={source}>
+                          <code>{source}</code>
+                          <select
+                            aria-label={`Constant Contact field for ${source}`}
+                            value={fieldMappings[source] || ""}
+                            onChange={(event) =>
+                              setFieldMappings((current) => ({
+                                ...current,
+                                [source]: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Do not send</option>
+                            {constantContactFields.map((field) => (
+                              <option
+                                key={field.custom_field_id}
+                                value={field.custom_field_id}
+                                disabled={selectedElsewhere.has(
+                                  field.custom_field_id,
+                                )}
+                              >
+                                {field.label} ({field.type})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <label className="consent-check">
                   <input name="permission" type="checkbox" required />
                   <span>

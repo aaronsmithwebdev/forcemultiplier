@@ -261,9 +261,21 @@ async function handle(
         return json(await startPull(p[1]));
       if (p[2] === "deliveries" && method === "POST") {
         const data = z
-          .object({ listId: z.uuid(), permissionConfirmed: z.literal(true) })
+          .object({
+            listId: z.uuid(),
+            permissionConfirmed: z.literal(true),
+            mappings: z
+              .array(
+                z.object({
+                  source: z.string().min(1).max(200),
+                  targetId: z.uuid(),
+                }),
+              )
+              .max(25)
+              .default([]),
+          })
           .parse(await body(request));
-        return json(await startDelivery(p[1], data.listId), 201);
+        return json(await startDelivery(p[1], data.listId, data.mappings), 201);
       }
       if (p.length === 2 && method === "GET") {
         const audience = await db.audience.findUnique({

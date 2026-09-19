@@ -33,6 +33,50 @@ test("Constant Contact import excludes opt-outs and maps safe names and email", 
   );
 });
 
+test("Constant Contact import maps scalar and related Salesforce values", () => {
+  assert.deepEqual(
+    importContact(
+      {
+        email: "ada@example.com",
+        optedOut: false,
+        data: {
+          Donation__c: 125.5,
+          Account: { Member_Since__c: "2024-03-02T12:00:00.000Z" },
+          Empty__c: null,
+        },
+      },
+      [
+        {
+          source: "Donation__c",
+          targetId: "one",
+          targetName: "donation_amount",
+          targetLabel: "Donation amount",
+          targetType: "number",
+        },
+        {
+          source: "Account.Member_Since__c",
+          targetId: "two",
+          targetName: "member_since",
+          targetLabel: "Member since",
+          targetType: "date",
+        },
+        {
+          source: "Empty__c",
+          targetId: "three",
+          targetName: "empty",
+          targetLabel: "Empty",
+          targetType: "string",
+        },
+      ],
+    ),
+    {
+      email: "ada@example.com",
+      "cf:donation_amount": "125.5",
+      "cf:member_since": "2024-03-02",
+    },
+  );
+});
+
 test("a delivery waits for Constant Contact and commits exclusions once", async (t) => {
   let state: any = {
     id: "delivery",
@@ -45,6 +89,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     activityId: null,
     activityProgress: 0,
     batch: null,
+    mappings: [],
     total: 2,
     processed: 0,
     submitted: 0,

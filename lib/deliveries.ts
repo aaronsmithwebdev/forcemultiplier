@@ -10,12 +10,87 @@ type Batch = {
   submitted: number;
   skipped: number;
 };
+export type FieldMapping = {
+  source: string;
+  targetId: string;
+  targetName: string;
+  targetLabel: string;
+  targetType:
+    | "string"
+    | "text_area"
+    | "number"
+    | "currency"
+    | "date"
+    | "datetime"
+    | "boolean"
+    | "single_select"
+    | "multi_select";
+};
 
-export function importContact(member: {
-  email: string | null;
-  optedOut: boolean;
-  data: unknown;
-}) {
+function valueAt(value: unknown, path: string) {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (current, key) =>
+        current && typeof current === "object"
+          ? (current as Record<string, unknown>)[key]
+          : undefined,
+      value,
+    );
+}
+
+function customValue(value: unknown, mapping: FieldMapping) {
+  if (value === null || value === undefined || value === "") return null;
+  let result: string;
+  if (["number", "currency"].includes(mapping.targetType)) {
+    const number = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(number))
+      throw new AppError(
+        `${mapping.source} contains a value that is not a number.`,
+      );
+    result = String(number);
+  } else if (mapping.targetType === "date") {
+    result = String(value);
+    if (!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(result))
+      throw new AppError(
+        `${mapping.source} contains a value that is not a date.`,
+      );
+    result = result.slice(0, 10);
+  } else if (mapping.targetType === "datetime") {
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime()))
+      throw new AppError(
+        `${mapping.source} contains a value that is not a date and time.`,
+      );
+    result = date.toISOString();
+  } else if (mapping.targetType === "boolean") {
+    result = String(value).toLowerCase();
+    if (!["true", "false"].includes(result))
+      throw new AppError(
+        `${mapping.source} contains a value that is not true or false.`,
+      );
+  } else if (["string", "number", "boolean"].includes(typeof value)) {
+    result = String(value);
+  } else {
+    throw new AppError(
+      `${mapping.source} contains a value that cannot be sent.`,
+    );
+  }
+  if (result.length > 255)
+    throw new AppError(
+      `${mapping.source} contains a value longer than 255 characters.`,
+    );
+  return result;
+}
+
+export function importContact(
+  member: {
+    email: string | null;
+    optedOut: boolean;
+    data: unknown;
+  },
+  mappings: FieldMapping[] = [],
+) {
   const email = member.email?.trim();
   if (
     member.optedOut ||
@@ -25,16 +100,25 @@ export function importContact(member: {
   )
     return null;
   const data = member.data as Record<string, unknown>;
-  return {
+  const contact: Record<string, string> = {
     email,
     ...(data.FirstName
       ? { first_name: String(data.FirstName).slice(0, 50) }
       : {}),
     ...(data.LastName ? { last_name: String(data.LastName).slice(0, 50) } : {}),
   };
+  for (const mapping of mappings) {
+    const value = customValue(valueAt(data, mapping.source), mapping);
+    if (value !== null) contact[`cf:${mapping.targetName}`] = value;
+  }
+  return contact;
 }
 
-export async function startDelivery(audienceId: string, listId: string) {
+export async function startDelivery(
+  audienceId: string,
+  listId: string,
+  requestedMappings: { source: string; targetId: string }[],
+) {
   const config = await connection("constant-contact");
   if (!config.tokens || !config.externalId)
     throw new AppError("Connect Constant Contact first.", 409);
@@ -44,6 +128,19 @@ export async function startDelivery(audienceId: string, listId: string) {
   });
   if (!source)
     throw new AppError("Complete a Salesforce pull before sending.", 409);
+  const sources = Array.isArray(source.fields)
+    ? source.fields.filter(
+        (field): field is string => typeof field === "string",
+      )
+    : [];
+  if (
+    new Set(requestedMappings.map((mapping) => mapping.source)).size !==
+      requestedMappings.length ||
+    new Set(requestedMappings.map((mapping) => mapping.targetId)).size !==
+      requestedMappings.length ||
+    requestedMappings.some((mapping) => !sources.includes(mapping.source))
+  )
+    throw new AppError("The custom field mapping is invalid.");
   const total = await db.audienceMember.count({
     where: { runId: source.id },
   });
@@ -57,6 +154,43 @@ export async function startDelivery(audienceId: string, listId: string) {
       "Constant Contact did not return the selected list.",
       502,
     );
+  const catalog = await providerRequest(
+    "constant-contact",
+    "/v3/contact_custom_fields?limit=100",
+  );
+  const fields = Array.isArray(catalog?.custom_fields)
+    ? catalog.custom_fields
+    : [];
+  const mappings: FieldMapping[] = requestedMappings.map((requested) => {
+    const field = fields.find(
+      (candidate: any) => candidate.custom_field_id === requested.targetId,
+    );
+    if (
+      !field ||
+      typeof field.name !== "string" ||
+      typeof field.label !== "string" ||
+      ![
+        "string",
+        "text_area",
+        "number",
+        "currency",
+        "date",
+        "datetime",
+        "boolean",
+        "single_select",
+        "multi_select",
+      ].includes(field.type)
+    )
+      throw new AppError(
+        "A selected Constant Contact custom field is unavailable.",
+      );
+    return {
+      ...requested,
+      targetName: field.name,
+      targetLabel: field.label,
+      targetType: field.type,
+    };
+  });
   const existing = await db.deliveryRun.findFirst({
     where: { audienceId, status: { in: active } },
   });
@@ -76,6 +210,7 @@ export async function startDelivery(audienceId: string, listId: string) {
         accountId: config.externalId,
         listId,
         listName: list.name,
+        mappings: mappings as unknown as Prisma.InputJsonValue,
         total,
       },
     });
@@ -137,7 +272,12 @@ export async function deliveryStep(id: string) {
         );
       return complete(run.id, lease, run.failed);
     }
-    const contacts = members.map(importContact).filter((row) => row !== null);
+    const mappings = Array.isArray(run.mappings)
+      ? (run.mappings as unknown as FieldMapping[])
+      : [];
+    const contacts = members
+      .map((member) => importContact(member, mappings))
+      .filter((row) => row !== null);
     const batch: Batch = {
       cursor: members.at(-1)!.salesforceId,
       processed: members.length,

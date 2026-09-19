@@ -1262,6 +1262,32 @@ td strong {
   color: var(--muted);
   font-weight: 400;
 }
+.field-mapping {
+  border-top: 1px solid var(--line);
+  padding-top: 17px;
+  margin-bottom: 18px;
+}
+.field-mapping > div:first-child {
+  margin-bottom: 12px;
+}
+.field-mapping p {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 9px;
+}
+.mapping-row code {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.mapping-row select {
+  margin: 0;
+}
 .empty-list-message {
   padding: 20px;
   text-align: center;
