@@ -44,6 +44,32 @@ model Audience {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   runs PullRun[]
+  deliveries DeliveryRun[]
+  @@schema("forcemultiplier")
+}
+model DeliveryRun {
+  id String @id @default(cuid())
+  audienceId String
+  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  sourceRunId String
+  accountId String
+  listId String
+  listName String
+  status String @default("pending")
+  cursor String?
+  activityId String?
+  activityProgress Int @default(0)
+  batch Json?
+  total Int
+  processed Int @default(0)
+  submitted Int @default(0)
+  skipped Int @default(0)
+  failed Int @default(0)
+  error String?
+  leaseUntil DateTime?
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  @@index([audienceId,createdAt])
   @@schema("forcemultiplier")
 }
 model PullRun {

@@ -1,7 +1,15 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Download, Pause, X, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  Pause,
+  X,
+  RefreshCw,
+  Search,
+  Send,
+} from "lucide-react";
 import {
   api,
   Badge,
@@ -18,18 +26,28 @@ export function AudienceDetail({ id }: { id: string }) {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState<any>(null),
-    [offset, setOffset] = useState(0);
+    [offset, setOffset] = useState(0),
+    [search, setSearch] = useState(""),
+    [lists, setLists] = useState<any[]>([]),
+    [showSend, setShowSend] = useState(false),
+    [sending, setSending] = useState(false),
+    [delivery, setDelivery] = useState<any>(null),
+    [message, setMessage] = useState("");
   const stop = useRef(false);
+  const loadVersion = useRef(0);
   const load = async () => {
-    const row = await api(`audiences/${id}?offset=${offset}`);
-    setData(row);
+    const version = ++loadVersion.current;
+    const row = await api(
+      `audiences/${id}?offset=${offset}&search=${encodeURIComponent(search)}`,
+    );
+    if (version === loadVersion.current) setData(row);
   };
   useEffect(() => {
     void load().catch((e) => setError(e.message));
     return () => {
       stop.current = true;
     };
-  }, [id, offset]);
+  }, [id, offset, search]);
   async function pull() {
     setBusy(true);
     stop.current = false;
@@ -49,6 +67,67 @@ export function AudienceDetail({ id }: { id: string }) {
       setBusy(false);
     }
   }
+  async function openDelivery() {
+    setShowSend(true);
+    if (lists.length) return;
+    setSending(true);
+    setError("");
+    try {
+      const loaded: any[] = [];
+      let cursor = "";
+      do {
+        const page = await api(
+          "constant-contact/lists" +
+            (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""),
+        );
+        loaded.push(...(page.lists || []));
+        const next = page._links?.next?.href || "";
+        if (next === cursor)
+          throw new Error("List pagination did not advance.");
+        cursor = next;
+      } while (cursor && loaded.length < 5000); // ponytail: add a server-side list picker if an account reaches 5,000 lists.
+      setLists(loaded);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+  async function send(run?: any, listId?: string) {
+    setSending(true);
+    setError("");
+    setMessage("");
+    try {
+      let current =
+        run ||
+        (await api(`audiences/${id}/deliveries`, "POST", {
+          listId,
+          permissionConfirmed: true,
+        }));
+      setShowSend(false);
+      setDelivery(current);
+      while (
+        !stop.current &&
+        ["pending", "running", "paused"].includes(current.status)
+      ) {
+        current = await api(`deliveries/${current.id}/step`, "POST");
+        setDelivery(current);
+        if (current.activityId)
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+      setMessage(
+        current.status === "completed"
+          ? `${current.submitted.toLocaleString()} contacts were sent to ${current.listName}.`
+          : `Delivery finished with ${current.failed.toLocaleString()} import errors.`,
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+      await load().catch(() => {});
+    } finally {
+      setSending(false);
+    }
+  }
   if (!data)
     return (
       <>
@@ -59,7 +138,11 @@ export function AudienceDetail({ id }: { id: string }) {
   const active = data.runs.find((r: any) =>
     ["pending", "running", "paused"].includes(r.status),
   );
+  const activeDelivery = data.deliveries.find((r: any) =>
+    ["pending", "running", "paused"].includes(r.status),
+  );
   const run = busy ? progress : active;
+  const sendingRun = delivery || activeDelivery;
   return (
     <>
       <Link className="back-link" href="/audiences">
@@ -71,13 +154,29 @@ export function AudienceDetail({ id }: { id: string }) {
         title={data.name}
         description="Pull contacts into your workspace and inspect a complete snapshot."
         action={
-          <Button busy={busy} disabled={busy} onClick={pull}>
-            <Download size={17} />
-            {active ? "Resume pull" : "Pull contacts"}
-          </Button>
+          <div className="button-row">
+            <Button busy={busy} disabled={busy || sending} onClick={pull}>
+              <Download size={17} />
+              {active ? "Resume pull" : "Pull contacts"}
+            </Button>
+            {data.completeRun && (
+              <Button
+                variant="secondary"
+                busy={sending}
+                disabled={busy || sending}
+                onClick={() =>
+                  activeDelivery ? send(activeDelivery) : openDelivery()
+                }
+              >
+                <Send size={16} />
+                {activeDelivery ? "Resume delivery" : "Send to a list"}
+              </Button>
+            )}
+          </div>
         }
       />
       <Notice message={error} />
+      <Notice message={message} success />
       {run && (
         <section className="card pull-progress">
           <div>
@@ -134,6 +233,32 @@ export function AudienceDetail({ id }: { id: string }) {
           </div>
         </section>
       )}
+      {sendingRun &&
+        ["pending", "running", "paused"].includes(sendingRun.status) && (
+          <section className="card pull-progress">
+            <div>
+              <h3>Sending to {sendingRun.listName}…</h3>
+              <p>
+                {sendingRun.processed.toLocaleString()} of{" "}
+                {sendingRun.total.toLocaleString()} Salesforce contacts checked
+                · {sendingRun.submitted.toLocaleString()} submitted ·{" "}
+                {sendingRun.skipped.toLocaleString()} excluded
+              </p>
+            </div>
+            <div className="progress-track">
+              <div
+                style={{
+                  width:
+                    Math.min(
+                      100,
+                      (sendingRun.processed / sendingRun.total) * 100,
+                    ) + "%",
+                }}
+              />
+            </div>
+            <Notice message={sendingRun.error || ""} />
+          </section>
+        )}
       <div className="audience-meta">
         <Badge>{data.sourceType}</Badge>
         <span>
@@ -166,14 +291,28 @@ export function AudienceDetail({ id }: { id: string }) {
                 : "Your contacts will appear after the first complete pull."}
             </p>
           </div>
-          <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => load().catch((e) => setError(e.message))}
-          >
-            <RefreshCw size={15} />
-            Refresh
-          </Button>
+          <div className="toolbar-actions">
+            <div className="search-box">
+              <Search size={16} />
+              <input
+                value={search}
+                onChange={(e) => {
+                  setOffset(0);
+                  setSearch(e.target.value);
+                }}
+                aria-label="Search pulled contacts"
+                placeholder="Search names or emails…"
+              />
+            </div>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => load().catch((e) => setError(e.message))}
+            >
+              <RefreshCw size={15} />
+              Refresh
+            </Button>
+          </div>
         </div>
         {!data.completeRun ? (
           <Empty
@@ -217,9 +356,9 @@ export function AudienceDetail({ id }: { id: string }) {
             </div>
             <div className="pagination">
               <span>
-                {data.memberCount === 0
+                {data.filteredCount === 0
                   ? "No contacts"
-                  : `${offset + 1}–${Math.min(offset + 50, data.memberCount)} of ${data.memberCount}`}
+                  : `${offset + 1}–${Math.min(offset + 50, data.filteredCount)} of ${data.filteredCount}${search ? " matches" : ""}`}
               </span>
               <Button
                 variant="ghost"
@@ -230,7 +369,7 @@ export function AudienceDetail({ id }: { id: string }) {
               </Button>
               <Button
                 variant="ghost"
-                disabled={offset + 50 >= data.memberCount || busy}
+                disabled={offset + 50 >= data.filteredCount || busy}
                 onClick={() => setOffset(offset + 50)}
               >
                 Next
@@ -239,6 +378,43 @@ export function AudienceDetail({ id }: { id: string }) {
           </>
         )}
       </section>
+      {data.deliveries.length > 0 && (
+        <section className="card history-section">
+          <div className="section-toolbar">
+            <h2>Constant Contact deliveries</h2>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Started</th>
+                  <th>List</th>
+                  <th>Status</th>
+                  <th>Submitted</th>
+                  <th>Excluded</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.deliveries.map((r: any) => (
+                  <tr key={r.id}>
+                    <td>{date(r.createdAt)}</td>
+                    <td>{r.listName}</td>
+                    <td>
+                      <Badge
+                        tone={r.status === "completed" ? "green" : "amber"}
+                      >
+                        {r.status.replaceAll("_", " ")}
+                      </Badge>
+                    </td>
+                    <td>{r.submitted.toLocaleString()}</td>
+                    <td>{r.skipped.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <section className="card history-section">
         <div className="section-toolbar">
           <h2>Recent pulls</h2>
@@ -276,6 +452,70 @@ export function AudienceDetail({ id }: { id: string }) {
           </table>
         </div>
       </section>
+      {showSend && (
+        <div className="modal-backdrop">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="send-list-title"
+            className="modal"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="send-list-title">Send to Constant Contact</h2>
+                <p>
+                  Add eligible contacts from the last complete pull to one list.
+                </p>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Close"
+                disabled={sending}
+                onClick={() => setShowSend(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <Notice message={error} />
+            {sending && lists.length === 0 ? (
+              <Loading />
+            ) : (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const values = new FormData(event.currentTarget);
+                  void send(undefined, String(values.get("listId")));
+                }}
+              >
+                <label>
+                  Destination list
+                  <select name="listId" required autoFocus>
+                    <option value="">Choose a Constant Contact list…</option>
+                    {lists.map((list) => (
+                      <option key={list.list_id} value={list.list_id}>
+                        {list.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="consent-check">
+                  <input name="permission" type="checkbox" required />
+                  <span>
+                    These contacts have permission to receive email. Salesforce
+                    email opt-outs, missing emails, and invalid emails will be
+                    excluded. Existing Constant Contact unsubscribe status will
+                    be preserved.
+                  </span>
+                </label>
+                <Button type="submit" busy={sending}>
+                  <Send size={16} />
+                  Start delivery
+                </Button>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
     </>
   );
 }

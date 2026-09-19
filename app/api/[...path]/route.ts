@@ -24,6 +24,7 @@ import {
 } from "@/lib/salesforce";
 import { previewQuery, validateQuery, sfId } from "@/lib/soql";
 import { createAudience, pullStep, startPull } from "@/lib/audiences";
+import { deliveryStep, startDelivery } from "@/lib/deliveries";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -258,6 +259,12 @@ async function handle(
     if (p[0] === "audiences" && p[1]) {
       if (p[2] === "pull" && method === "POST")
         return json(await startPull(p[1]));
+      if (p[2] === "deliveries" && method === "POST") {
+        const data = z
+          .object({ listId: z.uuid(), permissionConfirmed: z.literal(true) })
+          .parse(await body(request));
+        return json(await startDelivery(p[1], data.listId), 201);
+      }
       if (p.length === 2 && method === "GET") {
         const audience = await db.audience.findUnique({
           where: { id: p[1] },
@@ -272,9 +279,27 @@ async function handle(
           0,
           Math.min(150000, Number(params.get("offset")) || 0),
         );
+        const search = (params.get("search") ?? "").trim().slice(0, 100);
+        const memberWhere = {
+          runId: complete?.id ?? "",
+          ...(search
+            ? {
+                OR: [
+                  { name: { contains: search, mode: "insensitive" as const } },
+                  { email: { contains: search, mode: "insensitive" as const } },
+                  {
+                    salesforceId: {
+                      contains: search,
+                      mode: "insensitive" as const,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        };
         const members = complete
           ? await db.audienceMember.findMany({
-              where: { runId: complete.id },
+              where: memberWhere,
               orderBy: { salesforceId: "asc" },
               skip: offset,
               take: 50,
@@ -287,10 +312,20 @@ async function handle(
           memberCount: complete
             ? await db.audienceMember.count({ where: { runId: complete.id } })
             : 0,
+          filteredCount: complete
+            ? await db.audienceMember.count({ where: memberWhere })
+            : 0,
+          deliveries: await db.deliveryRun.findMany({
+            where: { audienceId: audience.id },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+          }),
           offset,
         });
       }
     }
+    if (p[0] === "deliveries" && p[1] && p[2] === "step" && method === "POST")
+      return json(await deliveryStep(p[1]));
     if (p[0] === "runs" && p[1]) {
       if (p[2] === "step" && method === "POST")
         return json(await pullStep(p[1]));

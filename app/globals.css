@@ -1219,6 +1219,17 @@ td strong {
 .modal .table-wrap {
   margin-top: 22px;
 }
+.consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.consent-check input {
+  width: auto;
+  margin: 3px 0 0;
+}
 .login {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -194,8 +194,8 @@ export function Audiences() {
         )}
       </section>
       <div className="footnote">
-        <Database size={15} /> Pulling an audience saves a snapshot here.
-        Contact writes and scheduled syncing are not enabled in this release.
+        <Database size={15} /> Pulling an audience saves a snapshot here. Open a
+        completed audience to review and send it to a Constant Contact list.
       </div>
     </>
   );
