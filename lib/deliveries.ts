@@ -1,15 +1,17 @@
 import { Prisma } from "@prisma/client";
 import { db } from "./db";
+import { normalizedEmail } from "./email";
 import { AppError, publicError } from "./errors";
 import { connection, providerRequest } from "./providers";
 
-const active = ["pending", "running", "paused"];
-type Batch = {
+const active = ["pending", "running", "paused", "reconciling"];
+type ImportBatch = {
   cursor: string;
   processed: number;
   submitted: number;
   skipped: number;
 };
+type RemovalBatch = { emails: string[]; contactIds: string[] };
 export type FieldMapping = {
   source: string;
   targetId: string;
@@ -97,14 +99,8 @@ export function importContact(
   },
   mappings: FieldMapping[] = [],
 ) {
-  const email = member.email?.trim();
-  if (
-    member.optedOut ||
-    !email ||
-    email.length > 50 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  )
-    return null;
+  const email = normalizedEmail(member.email);
+  if (member.optedOut || !email) return null;
   const data = member.data as Record<string, unknown>;
   const contact: Record<string, string> = {
     email,
@@ -239,7 +235,6 @@ async function createDelivery(
   const total = await db.audienceMember.count({
     where: { runId: sourceRunId },
   });
-  if (!total) throw new AppError("This audience has no contacts to send.");
   const existing = await db.deliveryRun.findFirst({
     where: { audienceId, status: { in: active } },
   });
@@ -252,8 +247,15 @@ async function createDelivery(
         `Finish the current delivery to ${existing.listName} before choosing another list.`,
         409,
       );
-    return existing;
+    const managedList = await claimManagedList(audienceId, destination);
+    return existing.managedListId
+      ? existing
+      : db.deliveryRun.update({
+          where: { id: existing.id },
+          data: { managedListId: managedList.id },
+        });
   }
+  const managedList = await claimManagedList(audienceId, destination);
   try {
     return await db.deliveryRun.create({
       data: {
@@ -262,6 +264,7 @@ async function createDelivery(
         accountId: destination.accountId,
         listId: destination.listId,
         listName: destination.listName,
+        managedListId: managedList.id,
         mappings: destination.mappings as unknown as Prisma.InputJsonValue,
         total,
       },
@@ -286,6 +289,63 @@ async function createDelivery(
   }
 }
 
+export async function assertDestinationAvailable(
+  audienceId: string,
+  destination: Destination,
+) {
+  const where = {
+    accountId_listId: {
+      accountId: destination.accountId,
+      listId: destination.listId,
+    },
+  };
+  const existing = await db.managedList.findUnique({
+    where,
+    include: { audience: { select: { name: true } } },
+  });
+  if (existing) {
+    if (existing.audienceId !== audienceId)
+      throw new AppError(
+        `This list is already managed by the ${existing.audience.name} audience. Choose another list so one audience cannot remove another audience's contacts.`,
+        409,
+      );
+    return existing;
+  }
+  return null;
+}
+
+async function claimManagedList(
+  audienceId: string,
+  destination: Destination,
+): Promise<{ id: string }> {
+  const existing = await assertDestinationAvailable(audienceId, destination);
+  if (existing) {
+    if (existing.listName !== destination.listName)
+      await db.managedList.update({
+        where: { id: existing.id },
+        data: { listName: destination.listName },
+      });
+    return existing;
+  }
+  try {
+    return await db.managedList.create({
+      data: {
+        audienceId,
+        accountId: destination.accountId,
+        listId: destination.listId,
+        listName: destination.listName,
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    )
+      return claimManagedList(audienceId, destination);
+    throw error;
+  }
+}
+
 export async function deliveryStep(id: string) {
   const lease = new Date(Date.now() + 90000);
   const acquired = await db.deliveryRun.updateMany({
@@ -294,7 +354,7 @@ export async function deliveryStep(id: string) {
       status: { in: active },
       OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
     },
-    data: { leaseUntil: lease, status: "running", error: null },
+    data: { leaseUntil: lease, error: null },
   });
   if (!acquired.count) {
     const run = await db.deliveryRun.findUnique({ where: { id } });
@@ -305,14 +365,31 @@ export async function deliveryStep(id: string) {
     );
   }
   try {
-    const run = await db.deliveryRun.findUniqueOrThrow({ where: { id } });
+    let run = await db.deliveryRun.findUniqueOrThrow({ where: { id } });
     const config = await connection("constant-contact");
     if (!config.tokens || config.externalId !== run.accountId)
       throw new AppError(
         "Reconnect the Constant Contact account that owns this delivery.",
         409,
       );
+    if (!run.managedListId) {
+      const managedList = await claimManagedList(run.audienceId, {
+        accountId: run.accountId,
+        listId: run.listId,
+        listName: run.listName,
+        mappings: [],
+      });
+      run = await db.deliveryRun.update({
+        where: { id: run.id },
+        data: { managedListId: managedList.id },
+      });
+    }
     if (run.activityId) return await finishActivity(run, lease);
+    if (run.status === "reconciling") return await reconcileStep(run, lease);
+    await db.deliveryRun.updateMany({
+      where: { id: run.id, leaseUntil: lease },
+      data: { status: "running" },
+    });
 
     const members = await db.audienceMember.findMany({
       where: {
@@ -328,7 +405,7 @@ export async function deliveryStep(id: string) {
           "The saved Salesforce snapshot changed during delivery.",
           409,
         );
-      return complete(run.id, lease, run.failed);
+      return beginReconciliation(run.id, lease);
     }
     const mappings = Array.isArray(run.mappings)
       ? (run.mappings as unknown as FieldMapping[])
@@ -336,7 +413,7 @@ export async function deliveryStep(id: string) {
     const contacts = members
       .map((member) => importContact(member, mappings))
       .filter((row) => row !== null);
-    const batch: Batch = {
+    const batch: ImportBatch = {
       cursor: members.at(-1)!.salesforceId,
       processed: members.length,
       submitted: contacts.length,
@@ -360,6 +437,7 @@ export async function deliveryStep(id: string) {
       where: { id: run.id, leaseUntil: lease, activityId: null },
       data: {
         activityId: activity.activity_id,
+        activityKind: "import",
         activityProgress: Number(activity.percent_done) || 0,
         batch: batch as unknown as Prisma.InputJsonValue,
         leaseUntil: null,
@@ -368,7 +446,7 @@ export async function deliveryStep(id: string) {
     return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
   } catch (error) {
     await db.deliveryRun.updateMany({
-      where: { id, leaseUntil: lease, status: "running" },
+      where: { id, leaseUntil: lease, status: { in: active } },
       data: {
         status: "paused",
         error: publicError(error).error,
@@ -383,6 +461,7 @@ async function finishActivity(
   run: Awaited<ReturnType<typeof db.deliveryRun.findUniqueOrThrow>>,
   lease: Date,
 ) {
+  const removing = run.activityKind === "remove";
   const activity = await providerRequest(
     "constant-contact",
     `/v3/activities/${run.activityId}`,
@@ -410,12 +489,13 @@ async function finishActivity(
         activityProgress: 0,
         batch: Prisma.JsonNull,
         error:
-          errors.join(" ").slice(0, 1000) || `Import ${state || "failed"}.`,
+          errors.join(" ").slice(0, 1000) ||
+          `${removing ? "List cleanup" : "Import"} ${state || "failed"}.`,
         leaseUntil: null,
       },
     });
     throw new AppError(
-      "Constant Contact could not finish this batch. Resume to retry it.",
+      `Constant Contact could not finish this ${removing ? "list cleanup" : "import"} batch. Resume to retry it.`,
       502,
     );
   }
@@ -424,13 +504,54 @@ async function finishActivity(
     Number(activity.status?.cannot_add_to_list_count) || 0,
     errors.length,
   );
-  return commitBatch(run, lease, run.batch as unknown as Batch, failed);
+  if (removing) {
+    if (failed) {
+      await db.deliveryRun.updateMany({
+        where: { id: run.id, leaseUntil: lease },
+        data: {
+          status: "paused",
+          activityId: null,
+          activityKind: null,
+          activityProgress: 0,
+          batch: Prisma.JsonNull,
+          error: `${failed} list memberships could not be removed. Resume to retry them.`,
+          leaseUntil: null,
+        },
+      });
+      throw new AppError(
+        "Constant Contact could not remove every stale list membership. Resume to retry them.",
+        502,
+      );
+    }
+    const batch = run.batch as unknown as RemovalBatch;
+    await db.$transaction([
+      db.managedListMember.deleteMany({
+        where: {
+          managedListId: run.managedListId!,
+          email: { in: batch.emails },
+        },
+      }),
+      db.deliveryRun.updateMany({
+        where: { id: run.id, leaseUntil: lease },
+        data: {
+          removed: { increment: batch.emails.length },
+          activityId: null,
+          activityKind: null,
+          activityProgress: 0,
+          batch: Prisma.JsonNull,
+          leaseUntil: null,
+        },
+      }),
+    ]);
+    return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
+  }
+  return commitBatch(run, lease, run.batch as unknown as ImportBatch, failed);
 }
 
 async function commitBatch(
   run: Awaited<ReturnType<typeof db.deliveryRun.findUniqueOrThrow>>,
   lease: Date,
-  batch: Batch,
+  batch: ImportBatch,
   failed: number,
 ) {
   const processed = run.processed + batch.processed;
@@ -447,32 +568,230 @@ async function commitBatch(
       skipped: { increment: batch.skipped },
       failed: { increment: failed },
       activityId: null,
+      activityKind: null,
       activityProgress: 0,
       batch: Prisma.JsonNull,
-      status: done
-        ? totalFailed
-          ? "completed_with_errors"
-          : "completed"
-        : "running",
-      finishedAt: done ? new Date() : null,
-      error:
-        done && totalFailed
-          ? `${totalFailed} contact rows could not be imported.`
-          : null,
+      status: done ? "reconciling" : "running",
+      error: null,
       leaseUntil: null,
     },
   });
   return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
 }
 
-async function complete(id: string, lease: Date, failed: number) {
+async function beginReconciliation(id: string, lease: Date) {
   await db.deliveryRun.updateMany({
     where: { id, leaseUntil: lease },
     data: {
-      status: failed ? "completed_with_errors" : "completed",
-      finishedAt: new Date(),
+      status: "reconciling",
+      activityId: null,
+      activityKind: null,
+      activityProgress: 0,
+      batch: Prisma.JsonNull,
       leaseUntil: null,
     },
   });
+  return db.deliveryRun.findUniqueOrThrow({ where: { id } });
+}
+
+type ListContact = {
+  contact_id?: unknown;
+  email_address?: { address?: unknown };
+};
+
+export function managedContactRows(
+  contacts: ListContact[],
+  desired: Set<string>,
+  managed: Map<string, { desiredDeliveryId: string | null }>,
+  deliveryId: string,
+) {
+  return contacts.flatMap((contact) => {
+    const email = normalizedEmail(
+      typeof contact.email_address?.address === "string"
+        ? contact.email_address.address
+        : null,
+    );
+    if (!email || typeof contact.contact_id !== "string") return [];
+    const current = managed.get(email);
+    if (!desired.has(email) && !current) return [];
+    return [
+      {
+        email,
+        contactId: contact.contact_id,
+        seenDeliveryId: deliveryId,
+        desiredDeliveryId: desired.has(email)
+          ? deliveryId
+          : current!.desiredDeliveryId,
+      },
+    ];
+  });
+}
+
+async function reconcileStep(
+  run: Awaited<ReturnType<typeof db.deliveryRun.findUniqueOrThrow>>,
+  lease: Date,
+) {
+  const managedList = await db.managedList.findUniqueOrThrow({
+    where: { id: run.managedListId! },
+  });
+  if (!run.reconcileScannedAt) {
+    const path =
+      run.reconcileCursor ||
+      `/v3/contacts?lists=${encodeURIComponent(run.listId)}&status=all&limit=500`;
+    const page = await providerRequest("constant-contact", path);
+    if (!Array.isArray(page?.contacts))
+      throw new AppError(
+        "Constant Contact returned an incomplete list page. No contacts were removed.",
+        502,
+      );
+    const emails = page.contacts
+      .map((contact: ListContact) =>
+        normalizedEmail(
+          typeof contact.email_address?.address === "string"
+            ? contact.email_address.address
+            : null,
+        ),
+      )
+      .filter((email: string | null): email is string => Boolean(email));
+    const [desiredMembers, existingMembers] = await Promise.all([
+      db.audienceMember.findMany({
+        where: {
+          runId: run.sourceRunId,
+          optedOut: false,
+          normalizedEmail: { in: emails },
+        },
+        distinct: ["normalizedEmail"],
+        select: { normalizedEmail: true },
+      }),
+      db.managedListMember.findMany({
+        where: { managedListId: managedList.id, email: { in: emails } },
+        select: { email: true, desiredDeliveryId: true },
+      }),
+    ]);
+    const rows = managedContactRows(
+      page.contacts,
+      new Set(
+        desiredMembers.flatMap((member) =>
+          member.normalizedEmail ? [member.normalizedEmail] : [],
+        ),
+      ),
+      new Map(existingMembers.map((member) => [member.email, member])),
+      run.id,
+    );
+    if (rows.length) {
+      const values = Prisma.join(
+        rows.map(
+          (row) =>
+            Prisma.sql`(${managedList.id}, ${row.email}, ${row.contactId}, ${row.seenDeliveryId}, ${row.desiredDeliveryId})`,
+        ),
+      );
+      await db.$executeRaw(Prisma.sql`
+        INSERT INTO "forcemultiplier"."ManagedListMember"
+          ("managedListId", "email", "contactId", "seenDeliveryId", "desiredDeliveryId")
+        VALUES ${values}
+        ON CONFLICT ("managedListId", "email") DO UPDATE SET
+          "contactId" = EXCLUDED."contactId",
+          "seenDeliveryId" = EXCLUDED."seenDeliveryId",
+          "desiredDeliveryId" = EXCLUDED."desiredDeliveryId"
+      `);
+    }
+    const next =
+      typeof page?._links?.next?.href === "string"
+        ? page._links.next.href
+        : null;
+    if (next && next === path)
+      throw new AppError(
+        "Constant Contact list pagination did not advance. No contacts were removed.",
+        502,
+      );
+    if (next) {
+      await db.deliveryRun.updateMany({
+        where: { id: run.id, leaseUntil: lease },
+        data: { reconcileCursor: next, leaseUntil: null },
+      });
+      return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
+    }
+    await db.$transaction([
+      db.managedListMember.deleteMany({
+        where: {
+          managedListId: managedList.id,
+          OR: [
+            { seenDeliveryId: { not: run.id } },
+            { seenDeliveryId: { equals: "" } },
+          ],
+        },
+      }),
+      db.deliveryRun.updateMany({
+        where: { id: run.id, leaseUntil: lease },
+        data: { reconcileScannedAt: new Date() },
+      }),
+    ]);
+    if (!managedList.initializedAt) return finishReconciliation(run.id, lease);
+    await db.deliveryRun.updateMany({
+      where: { id: run.id, leaseUntil: lease },
+      data: { leaseUntil: null },
+    });
+    return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
+  }
+
+  const stale = await db.managedListMember.findMany({
+    where: {
+      managedListId: managedList.id,
+      seenDeliveryId: run.id,
+      OR: [{ desiredDeliveryId: null }, { desiredDeliveryId: { not: run.id } }],
+    },
+    take: 500,
+  });
+  if (!stale.length) return finishReconciliation(run.id, lease);
+  const batch: RemovalBatch = {
+    emails: stale.map((member) => member.email),
+    contactIds: stale.map((member) => member.contactId),
+  };
+  const activity = await providerRequest(
+    "constant-contact",
+    "/v3/activities/remove_list_memberships",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        source: { contact_ids: batch.contactIds },
+        list_ids: [run.listId],
+      }),
+    },
+  );
+  if (typeof activity?.activity_id !== "string")
+    throw new AppError("Constant Contact did not start list cleanup.", 502);
+  await db.deliveryRun.updateMany({
+    where: { id: run.id, leaseUntil: lease, activityId: null },
+    data: {
+      activityId: activity.activity_id,
+      activityKind: "remove",
+      activityProgress: Number(activity.percent_done) || 0,
+      batch: batch as unknown as Prisma.InputJsonValue,
+      leaseUntil: null,
+    },
+  });
+  return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
+}
+
+async function finishReconciliation(id: string, lease: Date) {
+  const run = await db.deliveryRun.findUniqueOrThrow({ where: { id } });
+  const status = run.failed ? "completed_with_errors" : "completed";
+  await db.$transaction([
+    db.managedList.updateMany({
+      where: { id: run.managedListId!, initializedAt: null },
+      data: { initializedAt: new Date() },
+    }),
+    db.deliveryRun.updateMany({
+      where: { id, status: "reconciling", leaseUntil: lease },
+      data: {
+        status,
+        finishedAt: new Date(),
+        leaseUntil: null,
+        error: run.failed
+          ? `${run.failed} contact rows could not be imported.`
+          : null,
+      },
+    }),
+  ]);
   return db.deliveryRun.findUniqueOrThrow({ where: { id } });
 }

@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../lib/db";
-import { deliveryStep, importContact } from "../lib/deliveries";
+import {
+  deliveryStep,
+  importContact,
+  managedContactRows,
+} from "../lib/deliveries";
 import { encrypt } from "../lib/security";
 
 process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
@@ -84,9 +88,11 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     accountId: "account",
     listId: "11111111-1111-4111-8111-111111111111",
     listName: "Members",
+    managedListId: "managed",
     status: "pending",
     cursor: null,
     activityId: null,
+    activityKind: null,
     activityProgress: 0,
     batch: null,
     mappings: [],
@@ -95,6 +101,9 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     submitted: 0,
     skipped: 0,
     failed: 0,
+    removed: 0,
+    reconcileCursor: null,
+    reconcileScannedAt: null,
     leaseUntil: null,
   };
   const update = async ({ where, data }: any) => {
@@ -170,11 +179,49 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
       last_name: "Lovelace",
     },
   ]);
-  const completed = await deliveryStep("delivery");
-  assert.equal(completed.status, "completed");
-  assert.equal(completed.processed, 2);
-  assert.equal(completed.submitted, 1);
-  assert.equal(completed.skipped, 1);
+  const imported = await deliveryStep("delivery");
+  assert.equal(imported.status, "reconciling");
+  assert.equal(imported.processed, 2);
+  assert.equal(imported.submitted, 1);
+  assert.equal(imported.skipped, 1);
+});
+
+test("list reconciliation tracks desired contacts and preserves unrelated members", () => {
+  assert.deepEqual(
+    managedContactRows(
+      [
+        {
+          contact_id: "desired-id",
+          email_address: { address: "Desired@Example.com" },
+        },
+        {
+          contact_id: "stale-id",
+          email_address: { address: "stale@example.com" },
+        },
+        {
+          contact_id: "unrelated-id",
+          email_address: { address: "staff-added@example.com" },
+        },
+      ],
+      new Set(["desired@example.com"]),
+      new Map([["stale@example.com", { desiredDeliveryId: "old-delivery" }]]),
+      "new-delivery",
+    ),
+    [
+      {
+        email: "desired@example.com",
+        contactId: "desired-id",
+        seenDeliveryId: "new-delivery",
+        desiredDeliveryId: "new-delivery",
+      },
+      {
+        email: "stale@example.com",
+        contactId: "stale-id",
+        seenDeliveryId: "new-delivery",
+        desiredDeliveryId: "old-delivery",
+      },
+    ],
+  );
 });
 
 function mockMethod(t: any, target: any, name: string, fn: any) {

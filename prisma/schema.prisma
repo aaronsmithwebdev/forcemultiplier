@@ -45,6 +45,7 @@ model Audience {
   updatedAt DateTime @updatedAt
   runs PullRun[]
   deliveries DeliveryRun[]
+  managedLists ManagedList[]
   schedule SyncSchedule?
   @@schema("forcemultiplier")
 }
@@ -105,9 +106,12 @@ model DeliveryRun {
   accountId String
   listId String
   listName String
+  managedListId String?
+  managedList ManagedList? @relation(fields:[managedListId], references:[id], onDelete:SetNull)
   status String @default("pending")
   cursor String?
   activityId String?
+  activityKind String?
   activityProgress Int @default(0)
   batch Json?
   mappings Json @default("[]")
@@ -116,11 +120,41 @@ model DeliveryRun {
   submitted Int @default(0)
   skipped Int @default(0)
   failed Int @default(0)
+  removed Int @default(0)
+  reconcileCursor String?
+  reconcileScannedAt DateTime?
   error String?
   leaseUntil DateTime?
   createdAt DateTime @default(now())
   finishedAt DateTime?
   @@index([audienceId,createdAt])
+  @@schema("forcemultiplier")
+}
+model ManagedList {
+  id String @id @default(cuid())
+  accountId String
+  listId String
+  listName String
+  audienceId String
+  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  initializedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  members ManagedListMember[]
+  deliveries DeliveryRun[]
+  @@unique([accountId,listId])
+  @@schema("forcemultiplier")
+}
+model ManagedListMember {
+  managedListId String
+  managedList ManagedList @relation(fields:[managedListId], references:[id], onDelete:Cascade)
+  email String
+  contactId String
+  seenDeliveryId String
+  desiredDeliveryId String?
+  @@id([managedListId,email])
+  @@index([managedListId,seenDeliveryId])
+  @@index([managedListId,desiredDeliveryId])
   @@schema("forcemultiplier")
 }
 model PullRun {
@@ -147,9 +181,11 @@ model AudienceMember {
   run PullRun @relation(fields:[runId], references:[id], onDelete:Cascade)
   salesforceId String
   email String?
+  normalizedEmail String?
   name String?
   optedOut Boolean @default(false)
   data Json
   @@id([runId,salesforceId])
+  @@index([runId,normalizedEmail])
   @@schema("forcemultiplier")
 }

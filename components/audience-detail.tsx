@@ -195,7 +195,7 @@ export function AudienceDetail({ id }: { id: string }) {
       setDelivery(current);
       while (
         !stop.current &&
-        ["pending", "running", "paused"].includes(current.status)
+        ["pending", "running", "paused", "reconciling"].includes(current.status)
       ) {
         current = await api(`deliveries/${current.id}/step`, "POST");
         setDelivery(current);
@@ -204,7 +204,7 @@ export function AudienceDetail({ id }: { id: string }) {
       }
       setMessage(
         current.status === "completed"
-          ? `${current.submitted.toLocaleString()} contacts were sent to ${current.listName}.`
+          ? `${current.submitted.toLocaleString()} contacts were sent to ${current.listName}; ${current.removed.toLocaleString()} stale memberships were removed.`
           : `Delivery finished with ${current.failed.toLocaleString()} import errors.`,
       );
       await load();
@@ -268,7 +268,7 @@ export function AudienceDetail({ id }: { id: string }) {
     ["pending", "running", "paused"].includes(r.status),
   );
   const activeDelivery = data.deliveries.find((r: any) =>
-    ["pending", "running", "paused"].includes(r.status),
+    ["pending", "running", "paused", "reconciling"].includes(r.status),
   );
   const run = busy ? progress : active;
   const sendingRun = delivery || activeDelivery;
@@ -391,25 +391,36 @@ export function AudienceDetail({ id }: { id: string }) {
         </section>
       )}
       {sendingRun &&
-        ["pending", "running", "paused"].includes(sendingRun.status) && (
+        ["pending", "running", "paused", "reconciling"].includes(
+          sendingRun.status,
+        ) && (
           <section className="card pull-progress">
             <div>
-              <h3>Sending to {sendingRun.listName}…</h3>
+              <h3>
+                {sendingRun.status === "reconciling"
+                  ? `Reconciling ${sendingRun.listName}…`
+                  : `Sending to ${sendingRun.listName}…`}
+              </h3>
               <p>
                 {sendingRun.processed.toLocaleString()} of{" "}
                 {sendingRun.total.toLocaleString()} Salesforce contacts checked
                 · {sendingRun.submitted.toLocaleString()} submitted ·{" "}
-                {sendingRun.skipped.toLocaleString()} excluded
+                {sendingRun.skipped.toLocaleString()} excluded ·{" "}
+                {sendingRun.removed.toLocaleString()} removed
               </p>
             </div>
             <div className="progress-track">
               <div
                 style={{
                   width:
-                    Math.min(
-                      100,
-                      (sendingRun.processed / sendingRun.total) * 100,
-                    ) + "%",
+                    (sendingRun.total
+                      ? Math.min(
+                          100,
+                          (sendingRun.processed / sendingRun.total) * 100,
+                        )
+                      : sendingRun.status === "reconciling"
+                        ? 100
+                        : 0) + "%",
                 }}
               />
             </div>
@@ -648,6 +659,7 @@ export function AudienceDetail({ id }: { id: string }) {
                   <th>Status</th>
                   <th>Submitted</th>
                   <th>Excluded</th>
+                  <th>Removed</th>
                 </tr>
               </thead>
               <tbody>
@@ -664,6 +676,7 @@ export function AudienceDetail({ id }: { id: string }) {
                     </td>
                     <td>{r.submitted.toLocaleString()}</td>
                     <td>{r.skipped.toLocaleString()}</td>
+                    <td>{r.removed.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -915,7 +928,10 @@ export function AudienceDetail({ id }: { id: string }) {
                     These contacts have permission to receive email. Salesforce
                     email opt-outs, missing emails, and invalid emails will be
                     excluded. Existing Constant Contact unsubscribe status will
-                    be preserved.
+                    be preserved. After the first delivery establishes a safe
+                    baseline, contacts previously managed by this audience who
+                    are no longer eligible will be removed from this list. Other
+                    list members will be preserved.
                   </span>
                 </label>
                 <Button type="submit" busy={sending}>

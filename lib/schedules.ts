@@ -3,6 +3,7 @@ import { db } from "./db";
 import { startPull, pullStep } from "./audiences";
 import {
   resolveDestination,
+  assertDestinationAvailable,
   startScheduledDelivery,
   deliveryStep,
   type Destination,
@@ -137,6 +138,7 @@ export async function saveSchedule(audienceId: string, input: ScheduleInput) {
     input.listId,
     input.mappings,
   );
+  await assertDestinationAvailable(audienceId, destination);
   const now = new Date();
   const recurrence: Recurrence = {
     cadence: input.cadence,
@@ -362,7 +364,7 @@ async function failOrRetry(id: string, lease: Date, error: unknown) {
     db.deliveryRun.updateMany({
       where: {
         id: run.deliveryRunId ?? "",
-        status: { in: ["pending", "running", "paused"] },
+        status: { in: ["pending", "running", "paused", "reconciling"] },
       },
       data: { status: "failed", error: message, finishedAt, leaseUntil: null },
     }),
@@ -411,10 +413,6 @@ async function processRun(id: string, lease: Date, deadline: number) {
           data: { error: null },
         });
         if (pull.status !== "completed") continue;
-        if (!pull.total) {
-          await finishSync(id, lease, "completed", null);
-          return;
-        }
         await db.syncRun.updateMany({
           where: { id, leaseUntil: lease },
           data: { status: "delivering" },

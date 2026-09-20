@@ -4,6 +4,7 @@ import { connection, sfQuery } from "./providers";
 import { sourceQuery, validatePaths, enrich } from "./salesforce";
 import { validateQuery } from "./soql";
 import { Prisma } from "@prisma/client";
+import { normalizedEmail } from "./email";
 export async function createAudience(input: {
   name: string;
   sourceType: string;
@@ -171,6 +172,7 @@ export async function pullStep(id: string) {
             runId: id,
             salesforceId: record.Id,
             email: record.Email || null,
+            normalizedEmail: normalizedEmail(record.Email),
             name: [record.FirstName, record.LastName].filter(Boolean).join(" "),
             optedOut: record.HasOptedOutOfEmail === true,
             data: JSON.parse(JSON.stringify(record)),
