@@ -634,6 +634,19 @@ async function reconcileStep(
   const managedList = await db.managedList.findUniqueOrThrow({
     where: { id: run.managedListId! },
   });
+  const previousDelivery = !managedList.initializedAt
+    ? await db.deliveryRun.findFirst({
+        where: {
+          id: { not: run.id },
+          audienceId: run.audienceId,
+          accountId: run.accountId,
+          listId: run.listId,
+          status: { in: ["completed", "completed_with_errors"] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, sourceRunId: true },
+      })
+    : null;
   if (!run.reconcileScannedAt) {
     const path =
       run.reconcileCursor ||
@@ -653,31 +666,47 @@ async function reconcileStep(
         ),
       )
       .filter((email: string | null): email is string => Boolean(email));
-    const [desiredMembers, existingMembers] = await Promise.all([
+    const sourceRunIds = [
+      run.sourceRunId,
+      ...(previousDelivery ? [previousDelivery.sourceRunId] : []),
+    ];
+    const [sourceMembers, existingMembers] = await Promise.all([
       db.audienceMember.findMany({
         where: {
-          runId: run.sourceRunId,
+          runId: { in: sourceRunIds },
           optedOut: false,
           normalizedEmail: { in: emails },
         },
-        distinct: ["normalizedEmail"],
-        select: { normalizedEmail: true },
+        distinct: ["runId", "normalizedEmail"],
+        select: { runId: true, normalizedEmail: true },
       }),
       db.managedListMember.findMany({
         where: { managedListId: managedList.id, email: { in: emails } },
         select: { email: true, desiredDeliveryId: true },
       }),
     ]);
-    const rows = managedContactRows(
-      page.contacts,
-      new Set(
-        desiredMembers.flatMap((member) =>
-          member.normalizedEmail ? [member.normalizedEmail] : [],
-        ),
+    const desired = new Set(
+      sourceMembers.flatMap((member) =>
+        member.runId === run.sourceRunId && member.normalizedEmail
+          ? [member.normalizedEmail]
+          : [],
       ),
-      new Map(existingMembers.map((member) => [member.email, member])),
-      run.id,
     );
+    const managed = new Map(
+      existingMembers.map((member) => [member.email, member]),
+    );
+    if (previousDelivery)
+      for (const member of sourceMembers)
+        if (
+          member.runId === previousDelivery.sourceRunId &&
+          member.normalizedEmail &&
+          !managed.has(member.normalizedEmail)
+        )
+          managed.set(member.normalizedEmail, {
+            email: member.normalizedEmail,
+            desiredDeliveryId: previousDelivery.id,
+          });
+    const rows = managedContactRows(page.contacts, desired, managed, run.id);
     if (rows.length) {
       const values = Prisma.join(
         rows.map(
@@ -725,8 +754,17 @@ async function reconcileStep(
         where: { id: run.id, leaseUntil: lease },
         data: { reconcileScannedAt: new Date() },
       }),
+      ...(previousDelivery
+        ? [
+            db.managedList.updateMany({
+              where: { id: managedList.id, initializedAt: null },
+              data: { initializedAt: new Date() },
+            }),
+          ]
+        : []),
     ]);
-    if (!managedList.initializedAt) return finishReconciliation(run.id, lease);
+    if (!managedList.initializedAt && !previousDelivery)
+      return finishReconciliation(run.id, lease);
     await db.deliveryRun.updateMany({
       where: { id: run.id, leaseUntil: lease },
       data: { leaseUntil: null },
