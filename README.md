@@ -12,9 +12,10 @@ A private workspace for connecting Salesforce and Constant Contact, defining Sal
 - Constant Contact list browsing, member inspection, empty-list creation, and custom-field catalog browsing.
 - Search across pulled contact names, email addresses, and Salesforce IDs.
 - Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, provider activity checks, and delivery history.
+- Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - Pull and delivery history with progress and recoverable errors.
 
-**This milestone supports reviewed manual delivery of names, email addresses, and selected custom fields.** Each delivery lets you map Salesforce fields, including fields reached through parent relationships, to existing Constant Contact custom fields. It does not yet save reusable mapping templates, remove contacts who leave a Salesforce audience, run scheduled jobs, or send unsubscribes back to Salesforce. Keep Cazoomi running until those features and a comparison/cutover exercise are complete. The next sync phase will make mappings reusable and unsubscribe-only return updates configurable.
+**This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. It does not yet remove contacts who leave a Salesforce audience or send unsubscribes back to Salesforce. Keep Cazoomi running until those features and a comparison/cutover exercise are complete. The next sync phase will make unsubscribe-only return updates configurable.
 
 ## Start locally
 
@@ -49,7 +50,7 @@ npm run dev
 3. Open the Authentication configuration and turn off **Allow new users to sign up**. The app has no signup screen, but disabling it also closes the public Auth signup endpoint.
 4. Restart `npm run dev`, then sign in at `http://localhost:3000`.
 
-Use only the publishable key (normally `sb_publishable_...`). A Supabase secret or legacy service-role key is unnecessary and must not be exposed to this app. For Vercel, add the same two Auth variables plus `DATABASE_URL`, `DIRECT_URL`, `APP_ENCRYPTION_KEY`, and the hosted HTTPS `APP_URL` under the project’s Environment Variables. Redeploy after changing them.
+Use only the publishable key (normally `sb_publishable_...`). A Supabase secret or legacy service-role key is unnecessary and must not be exposed to this app. For Vercel, add the same two Auth variables plus `DATABASE_URL`, `DIRECT_URL`, `APP_ENCRYPTION_KEY`, `CRON_SECRET`, and the hosted HTTPS `APP_URL` under the project’s Environment Variables. Redeploy after changing them.
 
 ## Connect Salesforce
 
@@ -94,6 +95,8 @@ Select related/custom fields through the explorer, such as `Account.Name` or a c
 
 After a complete pull, search the saved snapshot by name, email address, or Salesforce ID. Select **Send to a list**, choose the Constant Contact destination, and confirm that the eligible contacts have permission to receive email. The delivery excludes Salesforce email opt-outs, missing emails, and invalid emails. Constant Contact's JSON import creates or updates contacts by email, preserves existing contacts' email permission state, and adds eligible contacts to the selected list. New contacts receive Constant Contact's default implicit permission, so do not send purchased, borrowed, or otherwise unconsented addresses. Deliveries are chunked, tracked, and resumable; keep the page open while it advances, or use **Resume delivery** later.
 
+Select **Schedule sync** on an audience to choose the destination list, custom-field mappings, and a daily, weekly, or 1–168 hour recurrence. Scheduled times use the saved IANA time zone and account for daylight-saving changes. Vercel calls the secured worker once per minute; database leases prevent overlapping runs, and interrupted provider work resumes with backoff. Add the locally generated `CRON_SECRET` to Vercel Production environment variables before saving a schedule.
+
 Supported queries have `Contact` as the root, include `Id`, and select scalar or parent fields. Semi-joins can select Contacts through Campaigns or child/custom objects. Mutating clauses, aggregates, child subqueries in the SELECT list, and OFFSET are blocked. If intentionally using LIMIT, also use a deterministic ORDER BY with an Id tie-breaker. Membership is deduplicated by Salesforce Contact ID; email-address deduplication and destination conflict resolution belong to the outbound sync phase.
 
 Saved reports and list views are re-resolved before each new pull. The run records the query it actually used. Report translation is deliberately limited to the standard `ContactList` report type, organization-wide scope, All Time date range, and supported Contact/Account scalar filters and boolean logic. Custom report types, cross-filters, summary filters, relative dates, hierarchy scope, ambiguous field mappings, and unsupported operators require an independent reviewed SOQL query. Unsupported criteria do not silently disappear. Report extraction uses paginated SOQL, not the report-results API's 2,000-row response.
@@ -106,10 +109,10 @@ Current limits: 30 additional fields, four parent relationship hops, Contact rec
 - New tables live in the private `forcemultiplier` schema, with RLS enabled and schema/table privileges revoked from public API roles. Do not expose this schema through the Supabase Data API.
 - The old `public` tables and their data remain as a rollback/reference archive. This app neither uses nor migrates their rows or old OAuth tokens.
 - Use `npm run db:deploy`, which checks both URLs target the private schema. Do not run `prisma migrate reset` on the existing project.
-- OAuth state is session-bound, expires, and is consumed once. Tokens/client secrets are encrypted with AES-256-GCM. Mutations require the configured origin. Token refresh, pull processing, and manual deliveries use database leases.
+- OAuth state is session-bound, expires, and is consumed once. Tokens/client secrets are encrypted with AES-256-GCM. Mutations require the configured origin. Token refresh, pull processing, deliveries, and scheduled runs use database leases.
 - The app is a single-workspace deployment. Every enabled Supabase Auth user can administer it, so keep public signup disabled and create only trusted users.
 - Pull snapshots are retained until a future retention feature is added. Monitor database size during large repeated pulls.
-- A hosted deployment needs HTTPS `APP_URL`, persistent environment secrets, exact hosted OAuth callbacks, and a Node runtime. A durable worker is required before scheduled/automatic syncing is enabled. Manual pulls should first be validated against your intended hosting request-duration limits.
+- A hosted deployment needs HTTPS `APP_URL`, persistent environment secrets, exact hosted OAuth callbacks, and a Node runtime. The included Vercel Cron job requires a Pro plan for its once-per-minute frequency and a Production `CRON_SECRET` environment variable.
 
 ## Verification
 

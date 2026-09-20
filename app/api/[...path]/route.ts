@@ -25,6 +25,12 @@ import {
 import { previewQuery, validateQuery, sfId } from "@/lib/soql";
 import { createAudience, pullStep, startPull } from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
+import {
+  runScheduleNow,
+  runScheduler,
+  saveSchedule,
+  setScheduleEnabled,
+} from "@/lib/schedules";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -59,6 +65,15 @@ async function handle(
   const method = request.method;
   const params = request.nextUrl.searchParams;
   try {
+    if (key === "cron/sync" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await runScheduler());
+    }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {
       const data = credentials.parse(await body(request));
@@ -277,10 +292,41 @@ async function handle(
           .parse(await body(request));
         return json(await startDelivery(p[1], data.listId, data.mappings), 201);
       }
+      if (p[2] === "schedule" && method === "PUT") {
+        const data = z
+          .object({
+            listId: z.uuid(),
+            permissionConfirmed: z.literal(true),
+            mappings: z
+              .array(
+                z.object({
+                  source: z.string().min(1).max(200),
+                  targetId: z.uuid(),
+                }),
+              )
+              .max(25)
+              .default([]),
+            cadence: z.enum(["hours", "daily", "weekly"]),
+            intervalHours: z.number().int().min(1).max(168).nullable(),
+            localTime: z
+              .string()
+              .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+              .nullable(),
+            weekday: z.number().int().min(0).max(6).nullable(),
+            timeZone: z.string().trim().min(1).max(100),
+          })
+          .parse(await body(request));
+        return json(await saveSchedule(p[1], data));
+      }
       if (p.length === 2 && method === "GET") {
         const audience = await db.audience.findUnique({
           where: { id: p[1] },
-          include: { runs: { take: 10, orderBy: { createdAt: "desc" } } },
+          include: {
+            runs: { take: 10, orderBy: { createdAt: "desc" } },
+            schedule: {
+              include: { runs: { take: 10, orderBy: { createdAt: "desc" } } },
+            },
+          },
         });
         if (!audience) throw new AppError("Audience not found.", 404);
         const complete = await db.pullRun.findFirst({
@@ -332,9 +378,20 @@ async function handle(
             orderBy: { createdAt: "desc" },
             take: 10,
           }),
+          schedulerReady: Boolean(process.env.CRON_SECRET),
           offset,
         });
       }
+    }
+    if (p[0] === "schedules" && p[1]) {
+      if (p[2] === "enabled" && method === "POST") {
+        const data = z
+          .object({ enabled: z.boolean() })
+          .parse(await body(request));
+        return json(await setScheduleEnabled(p[1], data.enabled));
+      }
+      if (p[2] === "run" && method === "POST")
+        return json(await runScheduleNow(p[1]), 201);
     }
     if (p[0] === "deliveries" && p[1] && p[2] === "step" && method === "POST")
       return json(await deliveryStep(p[1]));

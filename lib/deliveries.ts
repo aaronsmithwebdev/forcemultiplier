@@ -26,6 +26,12 @@ export type FieldMapping = {
     | "single_select"
     | "multi_select";
 };
+export type Destination = {
+  accountId: string;
+  listId: string;
+  listName: string;
+  mappings: FieldMapping[];
+};
 
 function valueAt(value: unknown, path: string) {
   return path
@@ -114,24 +120,16 @@ export function importContact(
   return contact;
 }
 
-export async function startDelivery(
-  audienceId: string,
+export async function resolveDestination(
+  sourceFields: unknown,
   listId: string,
   requestedMappings: { source: string; targetId: string }[],
-) {
+): Promise<Destination> {
   const config = await connection("constant-contact");
   if (!config.tokens || !config.externalId)
     throw new AppError("Connect Constant Contact first.", 409);
-  const source = await db.pullRun.findFirst({
-    where: { audienceId, status: "completed" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!source)
-    throw new AppError("Complete a Salesforce pull before sending.", 409);
-  const sources = Array.isArray(source.fields)
-    ? source.fields.filter(
-        (field): field is string => typeof field === "string",
-      )
+  const sources = Array.isArray(sourceFields)
+    ? sourceFields.filter((field): field is string => typeof field === "string")
     : [];
   if (
     new Set(requestedMappings.map((mapping) => mapping.source)).size !==
@@ -141,10 +139,6 @@ export async function startDelivery(
     requestedMappings.some((mapping) => !sources.includes(mapping.source))
   )
     throw new AppError("The custom field mapping is invalid.");
-  const total = await db.audienceMember.count({
-    where: { runId: source.id },
-  });
-  if (!total) throw new AppError("This audience has no contacts to send.");
   const list = await providerRequest(
     "constant-contact",
     `/v3/contact_lists/${listId}`,
@@ -161,7 +155,7 @@ export async function startDelivery(
   const fields = Array.isArray(catalog?.custom_fields)
     ? catalog.custom_fields
     : [];
-  const mappings: FieldMapping[] = requestedMappings.map((requested) => {
+  const mappings = requestedMappings.map((requested): FieldMapping => {
     const field = fields.find(
       (candidate: any) => candidate.custom_field_id === requested.targetId,
     );
@@ -191,11 +185,69 @@ export async function startDelivery(
       targetType: field.type,
     };
   });
+  return {
+    accountId: config.externalId,
+    listId,
+    listName: list.name,
+    mappings,
+  };
+}
+
+export async function startDelivery(
+  audienceId: string,
+  listId: string,
+  requestedMappings: { source: string; targetId: string }[],
+) {
+  const source = await db.pullRun.findFirst({
+    where: { audienceId, status: "completed" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!source)
+    throw new AppError("Complete a Salesforce pull before sending.", 409);
+  const destination = await resolveDestination(
+    source.fields,
+    listId,
+    requestedMappings,
+  );
+  return createDelivery(audienceId, source.id, destination);
+}
+
+export async function startScheduledDelivery(
+  audienceId: string,
+  sourceRunId: string,
+  destination: Destination,
+) {
+  const config = await connection("constant-contact");
+  if (!config.tokens || config.externalId !== destination.accountId)
+    throw new AppError(
+      "Reconnect the Constant Contact account used by this schedule.",
+      409,
+    );
+  const source = await db.pullRun.findFirst({
+    where: { id: sourceRunId, audienceId, status: "completed" },
+  });
+  if (!source)
+    throw new AppError("The scheduled Salesforce pull is not complete.", 409);
+  return createDelivery(audienceId, source.id, destination);
+}
+
+async function createDelivery(
+  audienceId: string,
+  sourceRunId: string,
+  destination: Destination,
+) {
+  const total = await db.audienceMember.count({
+    where: { runId: sourceRunId },
+  });
+  if (!total) throw new AppError("This audience has no contacts to send.");
   const existing = await db.deliveryRun.findFirst({
     where: { audienceId, status: { in: active } },
   });
   if (existing) {
-    if (existing.listId !== listId)
+    if (
+      existing.listId !== destination.listId ||
+      existing.sourceRunId !== sourceRunId
+    )
       throw new AppError(
         `Finish the current delivery to ${existing.listName} before choosing another list.`,
         409,
@@ -206,11 +258,11 @@ export async function startDelivery(
     return await db.deliveryRun.create({
       data: {
         audienceId,
-        sourceRunId: source.id,
-        accountId: config.externalId,
-        listId,
-        listName: list.name,
-        mappings: mappings as unknown as Prisma.InputJsonValue,
+        sourceRunId,
+        accountId: destination.accountId,
+        listId: destination.listId,
+        listName: destination.listName,
+        mappings: destination.mappings as unknown as Prisma.InputJsonValue,
         total,
       },
     });
@@ -222,7 +274,13 @@ export async function startDelivery(
       const run = await db.deliveryRun.findFirst({
         where: { audienceId, status: { in: active } },
       });
-      if (run) return run;
+      if (run?.listId === destination.listId && run.sourceRunId === sourceRunId)
+        return run;
+      if (run)
+        throw new AppError(
+          `Finish the current delivery to ${run.listName} before choosing another list.`,
+          409,
+        );
     }
     throw error;
   }

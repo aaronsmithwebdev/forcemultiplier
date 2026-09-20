@@ -9,6 +9,8 @@ import {
   RefreshCw,
   Search,
   Send,
+  CalendarClock,
+  Play,
 } from "lucide-react";
 import {
   api,
@@ -33,8 +35,14 @@ export function AudienceDetail({ id }: { id: string }) {
     [lists, setLists] = useState<any[]>([]),
     [constantContactFields, setConstantContactFields] = useState<any[]>([]),
     [fieldMappings, setFieldMappings] = useState<Record<string, string>>({}),
+    [selectedListId, setSelectedListId] = useState(""),
     [listSearch, setListSearch] = useState(""),
-    [showSend, setShowSend] = useState(false),
+    [dialog, setDialog] = useState<"" | "send" | "schedule">(""),
+    [cadence, setCadence] = useState("daily"),
+    [intervalHours, setIntervalHours] = useState(24),
+    [scheduleTime, setScheduleTime] = useState("09:00"),
+    [weekday, setWeekday] = useState(1),
+    [timeZone, setTimeZone] = useState("Australia/Sydney"),
     [sending, setSending] = useState(false),
     [delivery, setDelivery] = useState<any>(null),
     [message, setMessage] = useState("");
@@ -86,8 +94,30 @@ export function AudienceDetail({ id }: { id: string }) {
       setBusy(false);
     }
   }
-  async function openDelivery() {
-    setShowSend(true);
+  async function openDelivery(mode: "send" | "schedule" = "send") {
+    setDialog(mode);
+    const saved = mode === "schedule" ? data.schedule : null;
+    if (saved) {
+      setSelectedListId(saved.listId);
+      setFieldMappings(
+        Object.fromEntries(
+          (saved.mappings || []).map((mapping: any) => [
+            mapping.source,
+            mapping.targetId,
+          ]),
+        ),
+      );
+      setCadence(saved.cadence);
+      setIntervalHours(saved.intervalHours || 24);
+      setScheduleTime(saved.localTime || "09:00");
+      setWeekday(saved.weekday ?? 1);
+      setTimeZone(saved.timeZone);
+    } else if (mode === "schedule") {
+      setSelectedListId("");
+      setTimeZone(
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "Australia/Sydney",
+      );
+    }
     if (lists.length && constantContactFields.length) return;
     setSending(true);
     setError("");
@@ -114,30 +144,31 @@ export function AudienceDetail({ id }: { id: string }) {
       const fields = fieldPage.custom_fields || [];
       setLists(loaded);
       setConstantContactFields(fields);
-      setFieldMappings((current) => {
-        if (Object.keys(current).length) return current;
-        const normalize = (value: string) =>
-          value
-            .replace(/__c$/i, "")
-            .replace(/[^a-z0-9]/gi, "")
-            .toLowerCase();
-        const suggested = new Set<string>();
-        return Object.fromEntries(
-          data.fields.map((source: string) => {
-            const sourceName = source.split(".").at(-1)!;
-            const match = fields.find(
-              (field: any) =>
-                !suggested.has(field.custom_field_id) &&
-                (normalize(String(field.name || "")) ===
-                  normalize(sourceName) ||
-                  normalize(String(field.label || "")) ===
-                    normalize(sourceName)),
-            );
-            if (match) suggested.add(match.custom_field_id);
-            return [source, match?.custom_field_id || ""];
-          }),
-        );
-      });
+      if (!saved)
+        setFieldMappings((current) => {
+          if (Object.keys(current).length) return current;
+          const normalize = (value: string) =>
+            value
+              .replace(/__c$/i, "")
+              .replace(/[^a-z0-9]/gi, "")
+              .toLowerCase();
+          const suggested = new Set<string>();
+          return Object.fromEntries(
+            data.fields.map((source: string) => {
+              const sourceName = source.split(".").at(-1)!;
+              const match = fields.find(
+                (field: any) =>
+                  !suggested.has(field.custom_field_id) &&
+                  (normalize(String(field.name || "")) ===
+                    normalize(sourceName) ||
+                    normalize(String(field.label || "")) ===
+                      normalize(sourceName)),
+              );
+              if (match) suggested.add(match.custom_field_id);
+              return [source, match?.custom_field_id || ""];
+            }),
+          );
+        });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -160,7 +191,7 @@ export function AudienceDetail({ id }: { id: string }) {
           permissionConfirmed: true,
           mappings,
         }));
-      setShowSend(false);
+      setDialog("");
       setDelivery(current);
       while (
         !stop.current &&
@@ -184,6 +215,48 @@ export function AudienceDetail({ id }: { id: string }) {
       setSending(false);
     }
   }
+  async function saveSyncSchedule() {
+    setSending(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`audiences/${id}/schedule`, "PUT", {
+        listId: selectedListId,
+        permissionConfirmed: true,
+        mappings: Object.entries(fieldMappings)
+          .filter(([, targetId]) => targetId)
+          .map(([source, targetId]) => ({ source, targetId })),
+        cadence,
+        intervalHours: cadence === "hours" ? intervalHours : null,
+        localTime: cadence === "hours" ? null : scheduleTime,
+        weekday: cadence === "weekly" ? weekday : null,
+        timeZone,
+      });
+      setDialog("");
+      setMessage("Scheduled sync settings were saved.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+  async function scheduleAction(path: string, body?: unknown) {
+    setSending(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(path, "POST", body);
+      setMessage(
+        path.endsWith("/run") ? "Scheduled sync queued." : "Schedule updated.",
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
   if (!data)
     return (
       <>
@@ -199,6 +272,23 @@ export function AudienceDetail({ id }: { id: string }) {
   );
   const run = busy ? progress : active;
   const sendingRun = delivery || activeDelivery;
+  const schedule = data.schedule;
+  const weekdays = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const scheduleLabel = schedule
+    ? schedule.cadence === "hours"
+      ? `Every ${schedule.intervalHours} hour${schedule.intervalHours === 1 ? "" : "s"}`
+      : schedule.cadence === "daily"
+        ? `Daily at ${schedule.localTime}`
+        : `${weekdays[schedule.weekday]} at ${schedule.localTime}`
+    : "";
   const matchingLists = lists.filter((list) =>
     list.name.toLowerCase().includes(listSearch.trim().toLowerCase()),
   );
@@ -224,13 +314,21 @@ export function AudienceDetail({ id }: { id: string }) {
                 busy={sending}
                 disabled={busy || sending}
                 onClick={() =>
-                  activeDelivery ? send(activeDelivery) : openDelivery()
+                  activeDelivery ? send(activeDelivery) : openDelivery("send")
                 }
               >
                 <Send size={16} />
                 {activeDelivery ? "Resume delivery" : "Send to a list"}
               </Button>
             )}
+            <Button
+              variant="secondary"
+              disabled={busy || sending}
+              onClick={() => openDelivery("schedule")}
+            >
+              <CalendarClock size={16} />
+              {schedule ? "Edit schedule" : "Schedule sync"}
+            </Button>
           </div>
         }
       />
@@ -325,6 +423,106 @@ export function AudienceDetail({ id }: { id: string }) {
         </span>
         <span>Updated {date(data.completeRun?.finishedAt)}</span>
       </div>
+      <section className="card schedule-card">
+        <div className="section-toolbar">
+          <div>
+            <h2>Scheduled sync</h2>
+            <p>
+              {schedule
+                ? `${scheduleLabel} · ${schedule.timeZone} · ${schedule.listName}`
+                : "Automatically pull Salesforce and deliver to Constant Contact."}
+            </p>
+          </div>
+          <div className="button-row">
+            {schedule ? (
+              <>
+                <Button
+                  variant="ghost"
+                  busy={sending}
+                  disabled={sending || !schedule.enabled}
+                  onClick={() => scheduleAction(`schedules/${schedule.id}/run`)}
+                >
+                  <Play size={15} /> Run now
+                </Button>
+                <Button
+                  variant="secondary"
+                  busy={sending}
+                  onClick={() =>
+                    scheduleAction(`schedules/${schedule.id}/enabled`, {
+                      enabled: !schedule.enabled,
+                    })
+                  }
+                >
+                  {schedule.enabled ? "Pause" : "Resume"}
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                onClick={() => openDelivery("schedule")}
+              >
+                <CalendarClock size={15} /> Set schedule
+              </Button>
+            )}
+          </div>
+        </div>
+        {schedule && (
+          <div className="schedule-summary">
+            <span>
+              <strong>Status</strong>
+              <Badge tone={schedule.enabled ? "green" : "amber"}>
+                {schedule.enabled
+                  ? schedule.runs[0]?.status || "ready"
+                  : "paused"}
+              </Badge>
+            </span>
+            <span>
+              <strong>Next run</strong>
+              {schedule.enabled ? date(schedule.nextRunAt) : "Paused"}
+            </span>
+            <span>
+              <strong>Last completed</strong>
+              {date(schedule.lastCompletedAt)}
+            </span>
+          </div>
+        )}
+        {schedule?.error && <Notice message={schedule.error} />}
+        {!data.schedulerReady && (
+          <Notice message="Add CRON_SECRET in Vercel before saving a schedule." />
+        )}
+        {schedule?.runs?.length > 0 && (
+          <div className="table-wrap schedule-history">
+            <table>
+              <thead>
+                <tr>
+                  <th>Scheduled</th>
+                  <th>Status</th>
+                  <th>Finished</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedule.runs.slice(0, 5).map((item: any) => (
+                  <tr key={item.id}>
+                    <td>{date(item.scheduledFor)}</td>
+                    <td>
+                      <Badge
+                        tone={item.status === "completed" ? "green" : "amber"}
+                      >
+                        {item.status.replaceAll("_", " ")}
+                      </Badge>
+                    </td>
+                    <td>{date(item.finishedAt)}</td>
+                    <td>
+                      {item.error || (item.manual ? "Run now" : "Scheduled")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
       <details className="card query-details">
         <summary>Audience criteria and selected fields</summary>
         <pre>{data.query}</pre>
@@ -510,7 +708,7 @@ export function AudienceDetail({ id }: { id: string }) {
           </table>
         </div>
       </section>
-      {showSend && (
+      {dialog && (
         <div className="modal-backdrop">
           <section
             role="dialog"
@@ -520,16 +718,22 @@ export function AudienceDetail({ id }: { id: string }) {
           >
             <div className="modal-header">
               <div>
-                <h2 id="send-list-title">Send to Constant Contact</h2>
+                <h2 id="send-list-title">
+                  {dialog === "schedule"
+                    ? "Schedule this sync"
+                    : "Send to Constant Contact"}
+                </h2>
                 <p>
-                  Add eligible contacts from the last complete pull to one list.
+                  {dialog === "schedule"
+                    ? "Choose when this audience should be pulled and delivered."
+                    : "Add eligible contacts from the last complete pull to one list."}
                 </p>
               </div>
               <button
                 className="icon-button"
                 aria-label="Close"
                 disabled={sending}
-                onClick={() => setShowSend(false)}
+                onClick={() => setDialog("")}
               >
                 <X size={20} />
               </button>
@@ -541,14 +745,15 @@ export function AudienceDetail({ id }: { id: string }) {
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  const values = new FormData(event.currentTarget);
-                  void send(
-                    undefined,
-                    String(values.get("listId")),
-                    Object.entries(fieldMappings)
-                      .filter(([, targetId]) => targetId)
-                      .map(([source, targetId]) => ({ source, targetId })),
-                  );
+                  if (dialog === "schedule") void saveSyncSchedule();
+                  else
+                    void send(
+                      undefined,
+                      selectedListId,
+                      Object.entries(fieldMappings)
+                        .filter(([, targetId]) => targetId)
+                        .map(([source, targetId]) => ({ source, targetId })),
+                    );
                 }}
               >
                 <label>Destination list</label>
@@ -569,6 +774,8 @@ export function AudienceDetail({ id }: { id: string }) {
                         name="listId"
                         type="radio"
                         value={list.list_id}
+                        checked={selectedListId === list.list_id}
+                        onChange={() => setSelectedListId(list.list_id)}
                         required
                       />
                       <span>
@@ -635,6 +842,73 @@ export function AudienceDetail({ id }: { id: string }) {
                     })}
                   </div>
                 )}
+                {dialog === "schedule" && (
+                  <div className="schedule-fields">
+                    <label>
+                      Frequency
+                      <select
+                        value={cadence}
+                        onChange={(e) => setCadence(e.target.value)}
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="hours">Every number of hours</option>
+                      </select>
+                    </label>
+                    {cadence === "hours" ? (
+                      <label>
+                        Hours between syncs
+                        <input
+                          type="number"
+                          min="1"
+                          max="168"
+                          required
+                          value={intervalHours}
+                          onChange={(e) =>
+                            setIntervalHours(Number(e.target.value))
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        {cadence === "weekly" && (
+                          <label>
+                            Day
+                            <select
+                              value={weekday}
+                              onChange={(e) =>
+                                setWeekday(Number(e.target.value))
+                              }
+                            >
+                              {weekdays.map((day, index) => (
+                                <option key={day} value={index}>
+                                  {day}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        <label>
+                          Time
+                          <input
+                            type="time"
+                            required
+                            value={scheduleTime}
+                            onChange={(e) => setScheduleTime(e.target.value)}
+                          />
+                        </label>
+                      </>
+                    )}
+                    <label>
+                      Time zone
+                      <input
+                        required
+                        value={timeZone}
+                        onChange={(e) => setTimeZone(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                )}
                 <label className="consent-check">
                   <input name="permission" type="checkbox" required />
                   <span>
@@ -645,8 +919,12 @@ export function AudienceDetail({ id }: { id: string }) {
                   </span>
                 </label>
                 <Button type="submit" busy={sending}>
-                  <Send size={16} />
-                  Start delivery
+                  {dialog === "schedule" ? (
+                    <CalendarClock size={16} />
+                  ) : (
+                    <Send size={16} />
+                  )}
+                  {dialog === "schedule" ? "Save schedule" : "Start delivery"}
                 </Button>
               </form>
             )}

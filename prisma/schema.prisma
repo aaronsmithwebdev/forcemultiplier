@@ -45,6 +45,56 @@ model Audience {
   updatedAt DateTime @updatedAt
   runs PullRun[]
   deliveries DeliveryRun[]
+  schedule SyncSchedule?
+  @@schema("forcemultiplier")
+}
+model SyncSchedule {
+  id String @id @default(cuid())
+  audienceId String @unique
+  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  accountId String
+  listId String
+  listName String
+  mappings Json @default("[]")
+  cadence String
+  intervalHours Int?
+  localTime String?
+  weekday Int?
+  timeZone String
+  enabled Boolean @default(true)
+  version Int @default(1)
+  nextRunAt DateTime
+  lastRunAt DateTime?
+  lastCompletedAt DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  runs SyncRun[]
+  @@index([enabled,nextRunAt])
+  @@schema("forcemultiplier")
+}
+model SyncRun {
+  id String @id @default(cuid())
+  scheduleId String
+  schedule SyncSchedule @relation(fields:[scheduleId], references:[id], onDelete:Cascade)
+  scheduleVersion Int
+  status String @default("pending")
+  manual Boolean @default(false)
+  scheduledFor DateTime
+  accountId String
+  listId String
+  listName String
+  mappings Json @default("[]")
+  pullRunId String?
+  deliveryRunId String?
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  leaseUntil DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  @@index([status,availableAt])
+  @@index([scheduleId,createdAt])
   @@schema("forcemultiplier")
 }
 model DeliveryRun {

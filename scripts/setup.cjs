@@ -14,6 +14,8 @@ function put(key, val) {
 }
 if (!value("APP_ENCRYPTION_KEY"))
   put("APP_ENCRYPTION_KEY", crypto.randomBytes(32).toString("hex"));
+if (!value("CRON_SECRET"))
+  put("CRON_SECRET", crypto.randomBytes(32).toString("base64url"));
 if (!value("APP_URL")) put("APP_URL", "http://localhost:3000");
 for (const key of ["DATABASE_URL", "DIRECT_URL"])
   if (value(key)) {
