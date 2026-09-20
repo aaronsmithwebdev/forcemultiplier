@@ -5,7 +5,9 @@ import {
   Check,
   ExternalLink,
   KeyRound,
+  Play,
   RefreshCw,
+  ShieldCheck,
   Unplug,
 } from "lucide-react";
 import {
@@ -30,6 +32,23 @@ type Connection = {
   checkedAt?: string;
   error?: string;
   callbackUrl: string;
+  writeback?: {
+    enabled: boolean;
+    field: string;
+    scanning?: boolean;
+    lastRunAt?: string;
+    lastCompletedAt?: string;
+    error?: string;
+    counts: Record<string, number>;
+    recent?: {
+      contactId: string;
+      email: string;
+      optOutAt: string;
+      status: string;
+      salesforceId?: string;
+      error?: string;
+    }[];
+  };
 };
 export function Connections() {
   const [rows, setRows] = useState<Connection[] | null>(null),
@@ -92,6 +111,7 @@ function ConnectionCard({
     [secret, setSecret] = useState(""),
     [loginUrl, setLoginUrl] = useState(row.loginUrl),
     [busy, setBusy] = useState(""),
+    [includeExisting, setIncludeExisting] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   useEffect(() => {
@@ -170,6 +190,152 @@ function ConnectionCard({
               Disconnect
             </Button>
           </div>
+          {sf && row.writeback && (
+            <div className="writeback-settings">
+              <div className="writeback-title">
+                <span>
+                  <ShieldCheck size={17} />
+                  <strong>Unsubscribe writeback</strong>
+                </span>
+                <Badge tone={row.writeback.enabled ? "green" : ""}>
+                  {row.writeback.enabled ? "Active" : "Off"}
+                </Badge>
+              </div>
+              <p>
+                Sets <code>{row.writeback.field}</code> to true for Constant
+                Contact unsubscribes previously sent by ForceMultiplier. It
+                never clears an opt-out.
+              </p>
+              <Notice message={row.writeback.error || ""} />
+              {row.writeback.enabled ? (
+                <>
+                  <small>
+                    Last checked {date(row.writeback.lastRunAt)} · Last complete
+                    scan {date(row.writeback.lastCompletedAt)}
+                  </small>
+                  <div className="writeback-counts">
+                    <span>
+                      <strong>
+                        {(row.writeback.counts.written || 0) +
+                          (row.writeback.counts.already_opted_out || 0)}
+                      </strong>
+                      updated or already opted out
+                    </span>
+                    <span>
+                      <strong>{row.writeback.counts.pending || 0}</strong>
+                      pending
+                    </span>
+                    <span>
+                      <strong>
+                        {(row.writeback.counts.failed || 0) +
+                          (row.writeback.counts.unmatched || 0) +
+                          (row.writeback.counts.ambiguous || 0)}
+                      </strong>
+                      needs review
+                    </span>
+                  </div>
+                  <div className="button-row">
+                    <Button
+                      variant="secondary"
+                      busy={busy === "writeback-run"}
+                      disabled={!!busy}
+                      onClick={() =>
+                        action("writeback-run", async () => {
+                          await api("unsubscribe-sync/run", "POST");
+                          setMessage("Unsubscribe check completed.");
+                        })
+                      }
+                    >
+                      <Play size={15} /> Run now
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={!!busy}
+                      onClick={() =>
+                        action("writeback-retry", async () => {
+                          const result = await api(
+                            "unsubscribe-sync/retry",
+                            "POST",
+                          );
+                          setMessage(
+                            `${result.retried} unresolved unsubscribe${result.retried === 1 ? "" : "s"} queued to retry.`,
+                          );
+                        })
+                      }
+                    >
+                      Retry unresolved
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={!!busy}
+                      onClick={() =>
+                        action("writeback-disable", () =>
+                          api("unsubscribe-sync", "PUT", { enabled: false }),
+                        )
+                      }
+                    >
+                      Turn off
+                    </Button>
+                  </div>
+                  {!!row.writeback.recent?.length && (
+                    <details className="writeback-events">
+                      <summary>Recent unsubscribe results</summary>
+                      {row.writeback.recent.map((event) => (
+                        <p key={event.contactId}>
+                          <span>{event.email}</span>
+                          <Badge
+                            tone={
+                              ["written", "already_opted_out"].includes(
+                                event.status,
+                              )
+                                ? "green"
+                                : event.status === "pending"
+                                  ? ""
+                                  : "amber"
+                            }
+                          >
+                            {event.status.replaceAll("_", " ")}
+                          </Badge>
+                          {event.error && <small>{event.error}</small>}
+                        </p>
+                      ))}
+                    </details>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label className="inline-check">
+                    <input
+                      type="checkbox"
+                      checked={includeExisting}
+                      onChange={(event) =>
+                        setIncludeExisting(event.target.checked)
+                      }
+                    />
+                    Include existing Constant Contact unsubscribes
+                  </label>
+                  <Button
+                    variant="secondary"
+                    busy={busy === "writeback-enable"}
+                    disabled={!!busy}
+                    onClick={() =>
+                      action("writeback-enable", async () => {
+                        await api("unsubscribe-sync", "PUT", {
+                          enabled: true,
+                          includeExisting,
+                        });
+                        setMessage(
+                          "Unsubscribe writeback enabled. It will check every five minutes.",
+                        );
+                      })
+                    }
+                  >
+                    Enable writeback
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>

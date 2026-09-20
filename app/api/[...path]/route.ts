@@ -32,6 +32,12 @@ import {
   saveSchedule,
   setScheduleEnabled,
 } from "@/lib/schedules";
+import {
+  retryUnsubscribeEvents,
+  runUnsubscribeSync,
+  setUnsubscribeSync,
+  unsubscribeState,
+} from "@/lib/unsubscribes";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -84,6 +90,15 @@ async function handle(
         throw new AppError("Cron authorization failed.", 401);
       return json(await purgeExpiredDeliveryIssues());
     }
+    if (key === "cron/unsubscribes" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await runUnsubscribeSync());
+    }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {
       const data = credentials.parse(await body(request));
@@ -115,7 +130,10 @@ async function handle(
       }
     }
     if (key === "connections" && method === "GET") {
-      const rows = await db.connection.findMany();
+      const [rows, writeback] = await Promise.all([
+        db.connection.findMany(),
+        unsubscribeState(),
+      ]);
       return json(
         ["salesforce", "constant-contact"].map((provider) => {
           const row = rows.find((r) => r.provider === provider);
@@ -133,10 +151,24 @@ async function handle(
             callbackUrl: callbackUrl(
               provider as "salesforce" | "constant-contact",
             ),
+            ...(provider === "salesforce" ? { writeback } : {}),
           };
         }),
       );
     }
+    if (key === "unsubscribe-sync" && method === "PUT") {
+      const data = z
+        .object({
+          enabled: z.boolean(),
+          includeExisting: z.boolean().default(false),
+        })
+        .parse(await body(request));
+      return json(await setUnsubscribeSync(data.enabled, data.includeExisting));
+    }
+    if (key === "unsubscribe-sync/run" && method === "POST")
+      return json(await runUnsubscribeSync());
+    if (key === "unsubscribe-sync/retry" && method === "POST")
+      return json(await retryUnsubscribeEvents());
     if (p[0] === "connections" && isProvider(p[1])) {
       const provider = p[1];
       if (method === "PUT") {
@@ -204,6 +236,7 @@ async function handle(
             refreshLeaseUntil: null,
           },
         });
+        await setUnsubscribeSync(false);
         return json({ ok: true });
       }
       if (p[2] === "test" && method === "POST")

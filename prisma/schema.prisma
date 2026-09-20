@@ -206,3 +206,37 @@ model AudienceMember {
   @@index([runId,normalizedEmail])
   @@schema("forcemultiplier")
 }
+model UnsubscribeSync {
+  id String @id @default("default")
+  enabled Boolean @default(false)
+  accountId String?
+  orgId String?
+  cursor DateTime?
+  scanCursor String?
+  scanUntil DateTime?
+  leaseUntil DateTime?
+  error String?
+  lastRunAt DateTime?
+  lastCompletedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@schema("forcemultiplier")
+}
+model UnsubscribeEvent {
+  accountId String
+  orgId String
+  contactId String
+  email String
+  optOutAt DateTime
+  optOutSource String?
+  status String @default("pending")
+  salesforceId String?
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  error String?
+  discoveredAt DateTime @default(now())
+  processedAt DateTime?
+  @@id([accountId,orgId,contactId])
+  @@index([accountId,orgId,status,availableAt])
+  @@index([accountId,email])
+  @@schema("forcemultiplier")
+}

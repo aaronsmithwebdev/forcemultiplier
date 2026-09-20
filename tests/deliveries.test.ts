@@ -111,6 +111,20 @@ test("delivery issues explain local exclusions and provider row errors", () => {
     "Opted out in Salesforce",
   );
   assert.equal(
+    prepareContact(
+      {
+        salesforceId: "003-cc-opted-out",
+        name: "Constant Contact Opt-out",
+        email: "out-in-cc@example.com",
+        optedOut: false,
+        data: {},
+      },
+      [],
+      true,
+    ).issue?.reason,
+    "Unsubscribed in Constant Contact",
+  );
+  assert.equal(
     activityIssues(
       ["{Line 2: Error: first_name}"],
       [
@@ -193,6 +207,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
       data: { FirstName: "No" },
     },
   ]);
+  mockMethod(t, db.unsubscribeEvent, "findMany", async () => []);
   mockMethod(t, db.connection, "findUnique", async () => ({
     provider: "constant-contact",
     version: 1,

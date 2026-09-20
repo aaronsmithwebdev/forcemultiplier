@@ -861,6 +861,73 @@ td strong {
 .connected-details strong {
   overflow-wrap: anywhere;
 }
+.writeback-settings {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 14px;
+  padding-top: 20px;
+}
+.writeback-title,
+.writeback-title > span {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.writeback-title {
+  justify-content: space-between;
+}
+.writeback-settings p {
+  font-size: 11px;
+}
+.inline-check {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 3px 0;
+}
+.inline-check input {
+  margin: 0;
+  width: auto;
+}
+.writeback-counts {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+}
+.writeback-counts span {
+  background: #f7f8f3;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  padding: 8px;
+}
+.writeback-counts strong {
+  color: var(--ink);
+  display: block;
+  font-size: 15px;
+}
+.writeback-events summary {
+  color: var(--green);
+  font-size: 11px;
+}
+.writeback-events p {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 0;
+}
+.writeback-events p span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.writeback-events p small {
+  grid-column: 1 / -1;
+}
 .back-link {
   display: flex;
   align-items: center;

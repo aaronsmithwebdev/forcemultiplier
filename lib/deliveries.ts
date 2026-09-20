@@ -127,6 +127,7 @@ export function prepareContact(
     data: unknown;
   },
   mappings: FieldMapping[] = [],
+  unsubscribedInConstantContact = false,
 ) {
   const issue = (
     category: DeliveryIssueInput["category"],
@@ -145,6 +146,8 @@ export function prepareContact(
     } satisfies DeliveryIssueInput,
   });
   if (member.optedOut) return issue("salesforce", "Opted out in Salesforce");
+  if (unsubscribedInConstantContact)
+    return issue("constant_contact", "Unsubscribed in Constant Contact");
   if (!member.email?.trim())
     return issue("validation", "Missing email address");
   const email = normalizedEmail(member.email);
@@ -466,7 +469,29 @@ export async function deliveryStep(id: string) {
     const mappings = Array.isArray(run.mappings)
       ? (run.mappings as unknown as FieldMapping[])
       : [];
-    const prepared = members.map((member) => prepareContact(member, mappings));
+    const knownUnsubscribes = new Set(
+      (
+        await db.unsubscribeEvent.findMany({
+          where: {
+            accountId: run.accountId,
+            email: {
+              in: members.flatMap((member) =>
+                member.normalizedEmail ? [member.normalizedEmail] : [],
+              ),
+            },
+          },
+          select: { email: true },
+        })
+      ).map((event) => event.email),
+    );
+    const prepared = members.map((member) =>
+      prepareContact(
+        member,
+        mappings,
+        !!member.normalizedEmail &&
+          knownUnsubscribes.has(member.normalizedEmail),
+      ),
+    );
     const contacts = prepared.flatMap((row) =>
       row.contact ? [row.contact] : [],
     );
