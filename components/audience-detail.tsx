@@ -660,6 +660,7 @@ export function AudienceDetail({ id }: { id: string }) {
                   <th>Submitted</th>
                   <th>Excluded</th>
                   <th>Removed</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
@@ -677,6 +678,35 @@ export function AudienceDetail({ id }: { id: string }) {
                     <td>{r.submitted.toLocaleString()}</td>
                     <td>{r.skipped.toLocaleString()}</td>
                     <td>{r.removed.toLocaleString()}</td>
+                    <td>
+                      {r._count?.issues ? (
+                        <details className="delivery-issues">
+                          <summary>
+                            {r._count.issues.toLocaleString()} issues
+                          </summary>
+                          <div>
+                            {r.issues.map((issue: any) => (
+                              <p key={issue.key}>
+                                <strong>{issue.reason}</strong>
+                                <span>
+                                  {[issue.name, issue.email]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </span>
+                                {issue.detail && <small>{issue.detail}</small>}
+                              </p>
+                            ))}
+                            {r._count.issues > r.issues.length && (
+                              <small>
+                                Showing the first {r.issues.length} issues.
+                              </small>
+                            )}
+                          </div>
+                        </details>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

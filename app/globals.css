@@ -634,6 +634,38 @@ summary {
 .table-wrap {
   overflow-x: auto;
 }
+
+.delivery-issues {
+  min-width: 180px;
+}
+
+.delivery-issues > div {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  width: min(440px, calc(100vw - 80px));
+}
+
+.delivery-issues p {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 0;
+}
+
+.delivery-issues p:last-child {
+  border-bottom: 0;
+}
+
+.delivery-issues span,
+.delivery-issues small {
+  color: var(--muted);
+}
 table {
   border-collapse: collapse;
   width: 100%;

@@ -5,6 +5,8 @@ import {
   deliveryStep,
   importContact,
   managedContactRows,
+  prepareContact,
+  activityIssues,
 } from "../lib/deliveries";
 import { encrypt } from "../lib/security";
 
@@ -81,6 +83,49 @@ test("Constant Contact import maps scalar and related Salesforce values", () => 
   );
 });
 
+test("delivery issues explain local exclusions and provider row errors", () => {
+  assert.equal(
+    prepareContact(
+      {
+        salesforceId: "003-missing",
+        name: "No Address",
+        email: null,
+        optedOut: false,
+        data: {},
+      },
+      [],
+    ).issue?.reason,
+    "Missing email address",
+  );
+  assert.equal(
+    prepareContact(
+      {
+        salesforceId: "003-opted-out",
+        name: "Opted Out",
+        email: "out@example.com",
+        optedOut: true,
+        data: {},
+      },
+      [],
+    ).issue?.reason,
+    "Opted out in Salesforce",
+  );
+  assert.equal(
+    activityIssues(
+      ["{Line 2: Error: first_name}"],
+      [
+        {
+          salesforceId: "003-provider",
+          name: "Provider Error",
+          email: "error@example.com",
+        },
+      ],
+      "batch",
+    )[0].email,
+    "error@example.com",
+  );
+});
+
 test("a delivery waits for Constant Contact and commits exclusions once", async (t) => {
   let state: any = {
     id: "delivery",
@@ -128,6 +173,12 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   mockMethod(t, db.deliveryRun, "findUniqueOrThrow", async () => ({
     ...state,
   }));
+  mockMethod(t, db.deliveryIssue, "createMany", async ({ data }: any) => ({
+    count: data.length,
+  }));
+  mockMethod(t, db, "$transaction", async (operations: any) =>
+    Array.isArray(operations) ? Promise.all(operations) : operations(db),
+  );
   mockMethod(t, db.audienceMember, "findMany", async () => [
     {
       salesforceId: "003000000000000001",

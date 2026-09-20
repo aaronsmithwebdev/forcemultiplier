@@ -10,8 +10,24 @@ type ImportBatch = {
   processed: number;
   submitted: number;
   skipped: number;
+  contacts: SubmittedContact[];
+  issues: DeliveryIssueInput[];
 };
 type RemovalBatch = { emails: string[]; contactIds: string[] };
+type SubmittedContact = {
+  salesforceId: string;
+  name: string | null;
+  email: string;
+};
+type DeliveryIssueInput = {
+  key: string;
+  category: "salesforce" | "validation" | "constant_contact";
+  reason: string;
+  salesforceId?: string | null;
+  name?: string | null;
+  email?: string | null;
+  detail?: string | null;
+};
 export type FieldMapping = {
   source: string;
   targetId: string;
@@ -99,8 +115,40 @@ export function importContact(
   },
   mappings: FieldMapping[] = [],
 ) {
+  return prepareContact(member, mappings).contact;
+}
+
+export function prepareContact(
+  member: {
+    salesforceId?: string;
+    name?: string | null;
+    email: string | null;
+    optedOut: boolean;
+    data: unknown;
+  },
+  mappings: FieldMapping[] = [],
+) {
+  const issue = (
+    category: DeliveryIssueInput["category"],
+    reason: string,
+    detail?: string,
+  ) => ({
+    contact: null,
+    issue: {
+      key: `salesforce:${member.salesforceId ?? member.email ?? reason}`,
+      category,
+      reason,
+      salesforceId: member.salesforceId,
+      name: member.name,
+      email: member.email,
+      detail,
+    } satisfies DeliveryIssueInput,
+  });
+  if (member.optedOut) return issue("salesforce", "Opted out in Salesforce");
+  if (!member.email?.trim())
+    return issue("validation", "Missing email address");
   const email = normalizedEmail(member.email);
-  if (member.optedOut || !email) return null;
+  if (!email) return issue("validation", "Invalid email address");
   const data = member.data as Record<string, unknown>;
   const contact: Record<string, string> = {
     email,
@@ -109,11 +157,19 @@ export function importContact(
       : {}),
     ...(data.LastName ? { last_name: String(data.LastName).slice(0, 50) } : {}),
   };
-  for (const mapping of mappings) {
-    const value = customValue(valueAt(data, mapping.source), mapping);
-    if (value !== null) contact[`cf:${mapping.targetName}`] = value;
+  try {
+    for (const mapping of mappings) {
+      const value = customValue(valueAt(data, mapping.source), mapping);
+      if (value !== null) contact[`cf:${mapping.targetName}`] = value;
+    }
+  } catch (error) {
+    return issue(
+      "validation",
+      "Custom field value could not be sent",
+      error instanceof Error ? error.message : String(error),
+    );
   }
-  return contact;
+  return { contact, issue: null };
 }
 
 export async function resolveDestination(
@@ -410,14 +466,27 @@ export async function deliveryStep(id: string) {
     const mappings = Array.isArray(run.mappings)
       ? (run.mappings as unknown as FieldMapping[])
       : [];
-    const contacts = members
-      .map((member) => importContact(member, mappings))
-      .filter((row) => row !== null);
+    const prepared = members.map((member) => prepareContact(member, mappings));
+    const contacts = prepared.flatMap((row) =>
+      row.contact ? [row.contact] : [],
+    );
     const batch: ImportBatch = {
       cursor: members.at(-1)!.salesforceId,
       processed: members.length,
       submitted: contacts.length,
       skipped: members.length - contacts.length,
+      contacts: prepared.flatMap((row, index) =>
+        row.contact
+          ? [
+              {
+                salesforceId: members[index].salesforceId,
+                name: members[index].name,
+                email: row.contact.email,
+              },
+            ]
+          : [],
+      ),
+      issues: prepared.flatMap((row) => (row.issue ? [row.issue] : [])),
     };
     if (!contacts.length) return commitBatch(run, lease, batch, 0);
     const payload = JSON.stringify({
@@ -545,7 +614,34 @@ async function finishActivity(
     ]);
     return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
   }
-  return commitBatch(run, lease, run.batch as unknown as ImportBatch, failed);
+  const batch = run.batch as unknown as ImportBatch;
+  batch.issues = [
+    ...(batch.issues ?? []),
+    ...activityIssues(errors, batch.contacts ?? [], batch.cursor),
+  ];
+  return commitBatch(run, lease, batch, failed);
+}
+
+export function activityIssues(
+  errors: string[],
+  contacts: SubmittedContact[],
+  batchKey: string,
+): DeliveryIssueInput[] {
+  return errors.map((detail, index) => {
+    const line = Number(detail.match(/\bLine\s+(\d+)/i)?.[1]);
+    const contact = Number.isInteger(line) ? contacts[line - 2] : undefined;
+    return {
+      key: contact?.email
+        ? `provider:${contact.email}`
+        : `provider:${batchKey}:${index}`,
+      category: "constant_contact",
+      reason: "Constant Contact rejected this contact's data",
+      salesforceId: contact?.salesforceId,
+      name: contact?.name,
+      email: contact?.email,
+      detail,
+    };
+  });
 }
 
 async function commitBatch(
@@ -559,23 +655,36 @@ async function commitBatch(
   const done = processed === run.total;
   if (processed > run.total)
     throw new AppError("Delivery progress exceeds the source snapshot.", 409);
-  await db.deliveryRun.updateMany({
-    where: { id: run.id, leaseUntil: lease },
-    data: {
-      cursor: batch.cursor,
-      processed,
-      submitted: { increment: batch.submitted },
-      skipped: { increment: batch.skipped },
-      failed: { increment: failed },
-      activityId: null,
-      activityKind: null,
-      activityProgress: 0,
-      batch: Prisma.JsonNull,
-      status: done ? "reconciling" : "running",
-      error: null,
-      leaseUntil: null,
-    },
-  });
+  await db.$transaction([
+    db.deliveryRun.updateMany({
+      where: { id: run.id, leaseUntil: lease },
+      data: {
+        cursor: batch.cursor,
+        processed,
+        submitted: { increment: batch.submitted },
+        skipped: { increment: batch.skipped },
+        failed: { increment: failed },
+        activityId: null,
+        activityKind: null,
+        activityProgress: 0,
+        batch: Prisma.JsonNull,
+        status: done ? "reconciling" : "running",
+        error: null,
+        leaseUntil: null,
+      },
+    }),
+    ...((batch.issues ?? []).length
+      ? [
+          db.deliveryIssue.createMany({
+            data: batch.issues.map((issue) => ({
+              deliveryId: run.id,
+              ...issue,
+            })),
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
+  ]);
   return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
 }
 
@@ -763,6 +872,7 @@ async function reconcileStep(
           ]
         : []),
     ]);
+    await recordMissingContacts(run);
     if (!managedList.initializedAt && !previousDelivery)
       return finishReconciliation(run.id, lease);
     await db.deliveryRun.updateMany({
@@ -809,6 +919,100 @@ async function reconcileStep(
     },
   });
   return db.deliveryRun.findUniqueOrThrow({ where: { id: run.id } });
+}
+
+async function recordMissingContacts(
+  run: Awaited<ReturnType<typeof db.deliveryRun.findUniqueOrThrow>>,
+) {
+  await db.$executeRaw(Prisma.sql`
+    INSERT INTO "forcemultiplier"."DeliveryIssue"
+      ("deliveryId", "key", "category", "reason", "salesforceId", "name", "email", "detail")
+    SELECT
+      ${run.id},
+      'provider:' || member."normalizedEmail",
+      'constant_contact',
+      'Not added to the selected Constant Contact list',
+      min(member."salesforceId"),
+      min(member."name"),
+      min(member."email"),
+      CASE WHEN count(*) > 1
+        THEN count(*)::text || ' Salesforce contacts share this email address.'
+        ELSE NULL
+      END
+    FROM "forcemultiplier"."AudienceMember" member
+    WHERE member."runId" = ${run.sourceRunId}
+      AND member."optedOut" = false
+      AND member."normalizedEmail" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "forcemultiplier"."ManagedListMember" managed
+        WHERE managed."managedListId" = ${run.managedListId}
+          AND managed."email" = member."normalizedEmail"
+          AND managed."desiredDeliveryId" = ${run.id}
+      )
+    GROUP BY member."normalizedEmail"
+    ON CONFLICT ("deliveryId", "key") DO NOTHING
+  `);
+
+  // ponytail: diagnose 25 addresses inline; add a queued diagnostic phase if large failed imports become common.
+  const issues = await db.deliveryIssue.findMany({
+    where: {
+      deliveryId: run.id,
+      category: "constant_contact",
+      reason: "Not added to the selected Constant Contact list",
+      email: { not: null },
+    },
+    take: 25,
+  });
+  const results = await Promise.allSettled(
+    issues.map(async (issue) => {
+      const page = await providerRequest(
+        "constant-contact",
+        `/v3/contacts?email=${encodeURIComponent(issue.email!)}&status=all&limit=1`,
+      );
+      const contact = Array.isArray(page?.contacts) ? page.contacts[0] : null;
+      const permission = String(
+        contact?.email_address?.permission_to_send || "",
+      );
+      const labels: Record<string, string> = {
+        unsubscribed: "Unsubscribed in Constant Contact",
+        temp_hold: "On temporary hold in Constant Contact",
+        pending_confirmation: "Awaiting confirmation in Constant Contact",
+        not_set: "No email permission in Constant Contact",
+        deleted: "Deleted in Constant Contact",
+      };
+      const optOutReason = contact?.email_address?.opt_out_reason;
+      return {
+        key: issue.key,
+        reason:
+          labels[permission] ||
+          (contact
+            ? "Constant Contact did not add this contact to the selected list"
+            : "Constant Contact did not create this contact"),
+        detail:
+          [
+            issue.detail,
+            typeof optOutReason === "string" && optOutReason
+              ? `Opt-out reason: ${optOutReason}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || null,
+      };
+    }),
+  );
+  const diagnosed = results.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+  if (diagnosed.length)
+    await db.$transaction(
+      diagnosed.map((issue) =>
+        db.deliveryIssue.update({
+          where: { deliveryId_key: { deliveryId: run.id, key: issue.key } },
+          data: { reason: issue.reason, detail: issue.detail },
+        }),
+      ),
+    );
 }
 
 async function finishReconciliation(id: string, lease: Date) {

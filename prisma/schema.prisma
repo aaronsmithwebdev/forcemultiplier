@@ -102,6 +102,7 @@ model DeliveryRun {
   id String @id @default(cuid())
   audienceId String
   audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  issues DeliveryIssue[]
   sourceRunId String
   accountId String
   listId String
@@ -128,6 +129,21 @@ model DeliveryRun {
   createdAt DateTime @default(now())
   finishedAt DateTime?
   @@index([audienceId,createdAt])
+  @@schema("forcemultiplier")
+}
+model DeliveryIssue {
+  deliveryId String
+  delivery DeliveryRun @relation(fields:[deliveryId], references:[id], onDelete:Cascade)
+  key String
+  category String
+  reason String
+  salesforceId String?
+  name String?
+  email String?
+  detail String?
+  createdAt DateTime @default(now())
+  @@id([deliveryId,key])
+  @@index([deliveryId,category])
   @@schema("forcemultiplier")
 }
 model ManagedList {

@@ -377,6 +377,13 @@ async function handle(
             where: { audienceId: audience.id },
             orderBy: { createdAt: "desc" },
             take: 10,
+            include: {
+              issues: {
+                orderBy: [{ category: "asc" }, { name: "asc" }],
+                take: 100,
+              },
+              _count: { select: { issues: true } },
+            },
           }),
           schedulerReady: Boolean(process.env.CRON_SECRET),
           offset,
