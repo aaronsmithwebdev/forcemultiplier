@@ -704,7 +704,11 @@ export function AudienceDetail({ id }: { id: string }) {
                           </div>
                         </details>
                       ) : (
-                        "—"
+                        <span className="muted">
+                          {r.skipped || r.failed
+                            ? "Details expired or unavailable"
+                            : "—"}
+                        </span>
                       )}
                     </td>
                   </tr>

@@ -144,6 +144,7 @@ model DeliveryIssue {
   createdAt DateTime @default(now())
   @@id([deliveryId,key])
   @@index([deliveryId,category])
+  @@index([createdAt])
   @@schema("forcemultiplier")
 }
 model ManagedList {

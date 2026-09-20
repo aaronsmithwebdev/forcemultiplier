@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextRunAt } from "../lib/schedules";
+import { deliveryIssueCutoff, nextRunAt } from "../lib/schedules";
+
+test("delivery issue details expire after 90 days", () => {
+  assert.equal(
+    deliveryIssueCutoff(new Date("2026-09-20T03:00:00.000Z")).toISOString(),
+    "2026-06-22T03:00:00.000Z",
+  );
+});
 
 test("daily and weekly schedules use the saved local time zone", () => {
   const after = new Date("2026-09-20T22:30:00.000Z");

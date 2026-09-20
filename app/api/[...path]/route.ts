@@ -28,6 +28,7 @@ import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import {
   runScheduleNow,
   runScheduler,
+  purgeExpiredDeliveryIssues,
   saveSchedule,
   setScheduleEnabled,
 } from "@/lib/schedules";
@@ -73,6 +74,15 @@ async function handle(
       )
         throw new AppError("Cron authorization failed.", 401);
       return json(await runScheduler());
+    }
+    if (key === "cron/cleanup" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await purgeExpiredDeliveryIssues());
     }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {

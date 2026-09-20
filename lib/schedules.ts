@@ -12,6 +12,9 @@ import {
 import { AppError, publicError } from "./errors";
 
 const active = ["pending", "pulling", "delivering"];
+export const DELIVERY_ISSUE_RETENTION_DAYS = 90;
+export const deliveryIssueCutoff = (now: Date) =>
+  new Date(now.getTime() - DELIVERY_ISSUE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 type Recurrence = {
   cadence: string;
   intervalHours: number | null;
@@ -500,4 +503,12 @@ export async function runScheduler() {
     processed: processed.length,
     durationMs: Date.now() - started,
   };
+}
+
+export async function purgeExpiredDeliveryIssues(now = new Date()) {
+  const cutoff = deliveryIssueCutoff(now);
+  const result = await db.deliveryIssue.deleteMany({
+    where: { createdAt: { lt: cutoff } },
+  });
+  return { ok: true, deleted: result.count, cutoff };
 }
