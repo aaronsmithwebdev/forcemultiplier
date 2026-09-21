@@ -1,6 +1,6 @@
 # ForceMultiplier
 
-A private workspace for connecting Salesforce and Constant Contact, defining Salesforce audiences, pulling complete contact lists into Supabase, and sending reviewed snapshots to Constant Contact lists. This rebuild replaces the previous report-sync prototype.
+A private workspace for building Salesforce-derived audiences and, today, syncing them to Constant Contact. The [target product plan](docs/email-marketing-platform-plan.md) expands ForceMultiplier into the email marketing platform that will replace our use of Constant Contact, with Resend for sending and Templatical for email building. The features below describe the current implementation, not the completed target.
 
 ## Available now
 
@@ -16,7 +16,7 @@ A private workspace for connecting Salesforce and Constant Contact, defining Sal
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
 - Pull and delivery history with progress and recoverable errors.
 
-**This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience; they do not send unsubscribes back to Salesforce. Keep Cazoomi running until unsubscribe return updates and a comparison/cutover exercise are complete. The next sync phase will make unsubscribe-only return updates configurable.
+**This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields to Constant Contact.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience. Configurable unsubscribe-only writeback from Constant Contact to Salesforce is implemented separately. Keep the existing sending workflows active until the Resend migration and comparison/cutover exercise are complete.
 
 ## Start locally
 
@@ -140,4 +140,4 @@ npm run test:smoke
 
 Unit tests cover OAuth state/replay/rotation, disconnect races, query restrictions, filter translation, encryption, pagination beyond 2,000, interrupted/truncated pulls, and outbound eligibility mapping. The browser smoke test verifies the login/configuration state without credentials. Set `SUPABASE_SMOKE_EMAIL` and `SUPABASE_SMOKE_PASSWORD` temporarily to include signed-in desktop/mobile pages and protected APIs. It never authorizes or writes to either provider. End-to-end provider authorization, Constant Contact imports, and org-specific report comparisons still require your real app credentials.
 
-See [the overall replacement plan](docs/cazoomi-replacement-plan.md) and [Salesforce source design](docs/salesforce-audience-sources.md) for subsequent phases. Those documents describe the longer-term design; the implemented scope above is authoritative for this release.
+See [the email marketing platform plan](docs/email-marketing-platform-plan.md) for the target product and Constant Contact cutover, [Salesforce source design](docs/salesforce-audience-sources.md) for audience extraction, and the [earlier Cazoomi replacement plan](docs/cazoomi-replacement-plan.md) for implementation history. The implemented scope above is authoritative for this release.

@@ -1,6 +1,8 @@
 # ForceMultiplier: Salesforce → Constant Contact replacement plan
 
-Prepared 18 September 2026. This is an implementation plan, not a claim that the new integration is built or connected.
+> Historical plan. The [email marketing platform plan](email-marketing-platform-plan.md) is now the target scope: ForceMultiplier will replace Constant Contact itself, using Resend and Templatical. The details below document the earlier integration design and should not be used as the current delivery roadmap.
+
+Prepared 18 September 2026. This records the original integration design, not the current product scope or an assertion that each feature below was built.
 
 ## Confirmed scope and recommended defaults
 

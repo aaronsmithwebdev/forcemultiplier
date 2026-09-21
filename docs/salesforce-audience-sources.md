@@ -1,12 +1,12 @@
 # Salesforce audience sources and optimization
 
-Plan updated 19 September 2026. The user is comfortable composing SOQL and wants to retain Salesforce reports as editable audience definitions where their criteria can be translated. This extends the [Cazoomi replacement plan](cazoomi-replacement-plan.md); it does not implement the new sources or change live data.
+Plan updated 19 September 2026. The user is comfortable composing SOQL and wants to retain Salesforce reports as editable audience definitions where their criteria can be translated. The Salesforce extraction design remains relevant to the [email marketing platform plan](email-marketing-platform-plan.md). References below to Constant Contact describe the former destination, not the new target of Resend. This document does not implement new sources or change live data.
 
 ## Recommendation
 
 Use SOQL as the primary extraction engine. Support both directly authored SOQL and a saved Salesforce report whose supported metadata is translated into an equivalent audience query. Retain Campaigns, list views, and raw report results as additional sources, all feeding the same identity, consent, mapping, and sync engine. Prioritize the query editor, report-definition translator, and related-field browser over a complete visual condition builder.
 
-An audience answers “which Salesforce contacts qualify?” A mapping answers “which values should accompany those contacts?” A sync connects the audience to a CC list, with a schedule and membership policy. Several audiences can feed the same list; one audience can be reused for several lists without rerunning its extraction for each destination.
+An audience answers “which Salesforce contacts qualify?” A mapping answers “which values should accompany those contacts?” A sync publishes eligible contacts to a sending destination, with a schedule and membership policy. An audience can be reused without rerunning its extraction for every destination. The previous CC-list design below remains historical; the new plan maps audiences to Resend segments and campaigns.
 
 ## Available approaches
 
@@ -219,4 +219,4 @@ For child-object sums, latest records, and combined values, prefer a small numbe
 
 High-value regression scenarios: an Account change adds a previously excluded contact; an Account change removes a current member; a membership is deleted or reparented; expiry passes with no edits; a formula changes; a query revision changes eligibility; a filtered change query would miss exits; a failed exclusion source must stop publication; Bulk-incompatible queries use a valid strategy; and a CC unsubscribe remains protected regardless of query contents.
 
-The existing unsubscribe-only Salesforce writeback setting, CC list ownership rules, and Cazoomi cutover gates are unchanged. No new Salesforce-side writes are introduced by these source options.
+These source options introduce no new Salesforce-side writes. The [email marketing platform plan](email-marketing-platform-plan.md) replaces the earlier CC list ownership and Cazoomi cutover design with a Resend migration and a full Constant Contact cutover.
