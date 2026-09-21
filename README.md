@@ -15,6 +15,7 @@ A private workspace for building Salesforce-derived audiences and, today, syncin
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
 - Pull and delivery history with progress and recoverable errors.
+- A read-only Resend domain check on Connections when a server-side API key is configured; no Resend contacts or broadcasts are created yet.
 
 **This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields to Constant Contact.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience. Configurable unsubscribe-only writeback from Constant Contact to Salesforce is implemented separately. Keep the existing sending workflows active until the Resend migration and comparison/cutover exercise are complete.
 
@@ -79,6 +80,12 @@ The new app does not deploy Salesforce objects or Apex. A package is unnecessary
 New private apps must be authorized by their creator; follow Constant Contact's public-app process if other account users need to authorize your app. Refresh tokens rotate and are stored after each refresh.
 
 [Constant Contact authorization-code flow](https://developer.constantcontact.com/api_guide/server_flow.html)
+
+## Check Resend readiness
+
+Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability only. It does not create contacts, segments, or broadcasts. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
+
+The [migration inventory](docs/constant-contact-migration-inventory.md) records the first read-only Constant Contact and database baseline. Keep the existing sender active until the planned workflow-by-workflow cutover.
 
 ## Run a resubscription job
 

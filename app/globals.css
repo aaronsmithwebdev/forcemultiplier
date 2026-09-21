@@ -753,6 +753,10 @@ td strong {
   background: #f2ecfb;
   color: #7655a4;
 }
+.provider-logo.resend {
+  background: #fce8e4;
+  color: #b74434;
+}
 .connection-card h2 {
   font-size: 23px;
 }

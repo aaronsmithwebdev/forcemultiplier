@@ -50,6 +50,11 @@ type Connection = {
     }[];
   };
 };
+type ResendStatus = {
+  configured: boolean;
+  domains: { name: string; status: string; sending: boolean }[];
+  hasMore: boolean;
+};
 export function Connections() {
   const [rows, setRows] = useState<Connection[] | null>(null),
     [error, setError] = useState(""),
@@ -84,6 +89,7 @@ export function Connections() {
           {rows.map((row) => (
             <ConnectionCard key={row.provider} row={row} refresh={load} />
           ))}
+          <ResendCard />
         </div>
       )}
       <div className="info-strip">
@@ -97,6 +103,86 @@ export function Connections() {
         </div>
       </div>
     </>
+  );
+}
+function ResendCard() {
+  const [status, setStatus] = useState<ResendStatus | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function check() {
+    setBusy(true);
+    setError("");
+    try {
+      setStatus(await api("resend/status"));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    void check();
+  }, []);
+  return (
+    <section className="card connection-card">
+      <div className="connection-card-top">
+        <span className="provider-logo resend">re</span>
+        <Badge
+          tone={
+            status?.domains.some(
+              (domain) => domain.status === "verified" && domain.sending,
+            )
+              ? "green"
+              : ""
+          }
+        >
+          {error
+            ? "Check failed"
+            : status?.configured
+              ? "Key configured"
+              : "Not configured"}
+        </Badge>
+      </div>
+      <h2>Resend</h2>
+      <p className="card-description">
+        The future sending service. This check only reads domain status.
+      </p>
+      <Notice message={error} />
+      {!status && !error ? <Loading /> : null}
+      {status?.configured ? (
+        <div className="connected-details">
+          {status.domains.length ? (
+            status.domains.map((domain) => (
+              <p key={domain.name}>
+                <strong>{domain.name}</strong> · {domain.status} · sending{" "}
+                {domain.sending ? "enabled" : "disabled"}
+              </p>
+            ))
+          ) : (
+            <p>No sending domains are configured in Resend.</p>
+          )}
+          {status.hasMore && (
+            <small>More domains are available in the Resend dashboard.</small>
+          )}
+          <Button variant="secondary" busy={busy} onClick={() => void check()}>
+            <RefreshCw size={16} /> Check again
+          </Button>
+        </div>
+      ) : (
+        <div className="connected-details">
+          {status && (
+            <p>
+              Create a Resend Full access API key, then set{" "}
+              <code>RESEND_API_KEY</code> in your local and Vercel environment
+              variables.
+            </p>
+          )}
+          <Button variant="secondary" busy={busy} onClick={() => void check()}>
+            <RefreshCw size={16} /> Check connection
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 function ConnectionCard({

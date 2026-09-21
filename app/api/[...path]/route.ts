@@ -30,6 +30,7 @@ import {
   updateAudienceQuery,
 } from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
+import { resendStatus } from "@/lib/resend";
 import {
   runScheduleNow,
   runScheduler,
@@ -129,6 +130,8 @@ async function handle(
       return json({ ok: true });
     }
     const user = await requireSession();
+    if (key === "resend/status" && method === "GET")
+      return json(await resendStatus());
     if (key === "resubscriptions" && method === "GET")
       return json(await resubscribeState());
     if (key === "resubscriptions" && method === "POST")
