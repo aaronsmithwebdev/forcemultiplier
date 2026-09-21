@@ -564,6 +564,10 @@ async function handle(
           params.get("cursor") || "/v3/contact_custom_fields?limit=100",
         ),
       );
+    if (key === "constant-contact/campaign-access" && method === "GET") {
+      await providerRequest("constant-contact", "/v3/emails?limit=1");
+      return json({ ok: true });
+    }
     if (
       p[0] === "constant-contact" &&
       p[1] === "lists" &&

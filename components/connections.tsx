@@ -69,7 +69,7 @@ export function Connections() {
     setError(params.get("error") || "");
     if (params.has("connected"))
       setMessage(
-        "Account connected. You can now browse its lists and sources.",
+        "Account authorized. Check campaign access below if you reauthorized Constant Contact.",
       );
     window.history.replaceState(null, "", "/connections");
   }, []);
@@ -217,6 +217,10 @@ function ConnectionCard({
       setBusy("");
     }
   }
+  async function authorize() {
+    const data = await api(`oauth/${row.provider}/start`, "POST");
+    window.location.assign(data.url);
+  }
   return (
     <section className="card connection-card">
       <div className="connection-card-top">
@@ -275,6 +279,31 @@ function ConnectionCard({
               <Unplug size={16} />
               Disconnect
             </Button>
+            {!sf && (
+              <>
+                <Button
+                  variant="secondary"
+                  busy={busy === "campaign"}
+                  disabled={!!busy}
+                  onClick={() =>
+                    action("campaign", async () => {
+                      await api("constant-contact/campaign-access");
+                      setMessage("Campaign access verified.");
+                    })
+                  }
+                >
+                  Check campaign access
+                </Button>
+                <Button
+                  variant="secondary"
+                  busy={busy === "reauthorize"}
+                  disabled={!!busy}
+                  onClick={() => action("reauthorize", authorize)}
+                >
+                  Reauthorize <ArrowUpRight size={16} />
+                </Button>
+              </>
+            )}
           </div>
           {sf && row.writeback && (
             <div className="writeback-settings">
@@ -477,9 +506,10 @@ function ConnectionCard({
                     secret here.
                   </li>
                   <li>
-                    Authorize the account with contacts, account-read, and
-                    offline access. New private apps must be authorized by their
-                    creator.
+                    Authorize the account with contacts, campaigns,
+                    account-read, and offline access. The user needs campaign
+                    read permission. New private apps must be authorized by
+                    their creator.
                   </li>
                 </>
               )}
@@ -562,15 +592,7 @@ function ConnectionCard({
                   !!secret
                 }
                 busy={busy === "connect"}
-                onClick={() =>
-                  action("connect", async () => {
-                    const data = await api(
-                      `oauth/${row.provider}/start`,
-                      "POST",
-                    );
-                    window.location.assign(data.url);
-                  })
-                }
+                onClick={() => action("connect", authorize)}
               >
                 Connect account
                 <ArrowUpRight size={16} />

@@ -76,6 +76,29 @@ test("Salesforce OAuth uses PKCE and rejects a different browser session and rep
   assert.equal(exchanges, 1);
 });
 
+test("Constant Contact authorization requests campaign access without disconnecting", async (t) => {
+  const config = {
+    ...row("constant-contact"),
+    tokens: encrypt(
+      JSON.stringify({
+        accessToken: "existing",
+        refreshToken: "existing-refresh",
+      }),
+    ),
+  };
+  mockMethod(t, db.connection, "findUnique", async () => config);
+  mockMethod(t, db.oAuthAttempt, "deleteMany", async () => ({ count: 0 }));
+  mockMethod(t, db.oAuthAttempt, "create", async ({ data }: any) => data);
+  const url = new URL(await startOAuth("constant-contact", "session"));
+  assert.deepEqual(url.searchParams.get("scope")?.split(" "), [
+    "contact_data",
+    "campaign_data",
+    "account_read",
+    "offline_access",
+  ]);
+  assert.ok(config.tokens);
+});
+
 test("expired OAuth and changed application settings never exchange a code", async (t) => {
   mockMethod(t, globalThis, "fetch", async () => {
     throw new Error("Unexpected network request");

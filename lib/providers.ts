@@ -54,7 +54,7 @@ export async function startOAuth(provider: Provider, userId: string) {
     scope:
       provider === "salesforce"
         ? "api refresh_token openid"
-        : "contact_data account_read offline_access",
+        : "contact_data campaign_data account_read offline_access",
   });
   if (provider === "salesforce") {
     params.set(
