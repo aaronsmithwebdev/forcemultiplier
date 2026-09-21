@@ -1,6 +1,6 @@
 # ForceMultiplier
 
-A private workspace for building Salesforce-derived audiences and, today, syncing them to Constant Contact. The [target product plan](docs/email-marketing-platform-plan.md) expands ForceMultiplier into the email marketing platform that will replace our use of Constant Contact, with Resend for sending and Templatical for email building. The features below describe the current implementation, not the completed target.
+A private workspace for building Salesforce-derived audiences and, today, syncing them to Constant Contact. The [target product plan](docs/email-marketing-platform-plan.md) expands ForceMultiplier into the email marketing platform that will replace our use of Constant Contact: Salesforce and later Funraisin provide audiences, Resend sends, and Templatical builds emails. The features below describe the current implementation, not the completed target.
 
 ## Available now
 
@@ -85,7 +85,7 @@ New private apps must be authorized by their creator; follow Constant Contact's 
 
 Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability only. It does not create contacts, segments, or broadcasts. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
 
-The [migration inventory](docs/constant-contact-migration-inventory.md) records the first read-only Constant Contact and database baseline. Keep the existing sender active until the planned workflow-by-workflow cutover.
+The [migration inventory](docs/constant-contact-migration-inventory.md) records read-only Constant Contact, Resend, Funraisin, and database checks. The target does **not** copy Constant Contact lists: audiences come from Salesforce and later Funraisin entrants. The [historical email strategy](docs/template-archive-strategy.md) preserves past sent campaigns as an archive and converts selected examples into editable Templatical templates. Keep the existing sender active until the planned workflow-by-workflow cutover.
 
 ## Run a resubscription job
 
