@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FolderPlus, Plus, Search, X } from "lucide-react";
-import { api, Button, Loading, Notice } from "./common";
+import { api, Button, Notice } from "./common";
 import {
   buildContactQuery,
   QueryFilter,
@@ -109,10 +109,17 @@ export function ContactQueryBuilder({
       conjunction: "AND",
       items: [],
     }),
-    [targetGroup, setTargetGroup] = useState(0),
+    [targetGroup, setTargetGroup] = useState<number | null>(null),
     [search, setSearch] = useState(""),
     [error, setError] = useState("");
   const nextId = useRef(1);
+  const focusTarget = useRef("");
+  useEffect(() => {
+    if (focusTarget.current) {
+      document.getElementById(focusTarget.current)?.focus();
+      focusTarget.current = "";
+    }
+  });
   useEffect(() => {
     let live = true;
     api("salesforce/metadata?object=Contact")
@@ -132,7 +139,7 @@ export function ContactQueryBuilder({
   useEffect(() => onChange(generated.query), [generated.query, onChange]);
   const groups = useMemo(() => allGroups(root), [root]);
   useEffect(() => {
-    if (!groups.some((group) => group.id === targetGroup)) setTargetGroup(0);
+    if (!groups.some((group) => group.id === targetGroup)) setTargetGroup(null);
   }, [groups, targetGroup]);
   const totalFilters = filterCount(root);
   const matches = (fields ?? [])
@@ -142,9 +149,9 @@ export function ContactQueryBuilder({
         !unsupported.has(field.type) &&
         `${field.label} ${field.name}`
           .toLowerCase()
-          .includes(search.toLowerCase()),
+          .includes(search.trim().toLowerCase()),
     )
-    .slice(0, 12);
+    .sort((a, b) => a.label.localeCompare(b.label));
   function updateFilter(id: number, patch: Partial<Filter>) {
     setRoot((current) => ({
       ...current,
@@ -155,7 +162,7 @@ export function ContactQueryBuilder({
     }));
   }
   function add(field: Field) {
-    if (totalFilters >= 20) return;
+    if (totalFilters >= 20 || targetGroup === null) return;
     const filter: Filter = {
       id: nextId.current++,
       field: field.name,
@@ -172,6 +179,8 @@ export function ContactQueryBuilder({
         items: [...group.items, filter],
       })),
     );
+    focusTarget.current = `query-value-${filter.id}`;
+    setTargetGroup(null);
     setSearch("");
   }
   function addGroup(parentId: number) {
@@ -183,16 +192,23 @@ export function ContactQueryBuilder({
         items: [...group.items, { id, conjunction: "AND", items: [] }],
       })),
     );
+    setSearch("");
     setTargetGroup(id);
+    focusTarget.current = `query-search-${id}`;
   }
-  function renderFilter(filter: Filter, index: number, conjunction: string) {
+  function closePicker() {
+    focusTarget.current = `query-add-${targetGroup}`;
+    setTargetGroup(null);
+  }
+  function renderFilter(filter: Filter) {
     const noValue = ["is_null", "not_null"].includes(filter.operator);
     return (
-      <div className="query-filter" key={filter.id}>
-        <strong>{index === 0 ? "Where" : conjunction}</strong>
-        <span className="query-filter-field">
+      <div
+        className={`query-filter ${noValue ? "query-filter-no-value" : ""}`}
+        key={filter.id}
+      >
+        <span className="query-filter-field" title={filter.field}>
           {filter.label}
-          <small>{filter.field}</small>
         </span>
         <select
           aria-label={`${filter.label} operator`}
@@ -210,6 +226,7 @@ export function ContactQueryBuilder({
         {!noValue &&
           (filter.type === "boolean" ? (
             <select
+              id={`query-value-${filter.id}`}
               aria-label={`${filter.label} value`}
               value={filter.value}
               onChange={(event) =>
@@ -221,6 +238,7 @@ export function ContactQueryBuilder({
             </select>
           ) : filter.values?.length ? (
             <select
+              id={`query-value-${filter.id}`}
               aria-label={`${filter.label} value`}
               value={filter.value}
               onChange={(event) =>
@@ -238,6 +256,7 @@ export function ContactQueryBuilder({
             </select>
           ) : (
             <input
+              id={`query-value-${filter.id}`}
               aria-label={`${filter.label} value`}
               type={
                 numeric.has(filter.type)
@@ -252,11 +271,12 @@ export function ContactQueryBuilder({
               onChange={(event) =>
                 updateFilter(filter.id, { value: event.target.value })
               }
-              placeholder="Value"
+              placeholder="Enter a value…"
             />
           ))}
         <Button
           variant="ghost"
+          className="query-remove"
           aria-label={`Remove ${filter.label} filter`}
           onClick={() => setRoot((current) => removeItem(current, filter.id))}
         >
@@ -268,38 +288,49 @@ export function ContactQueryBuilder({
   function renderGroup(group: Group, depth = 0) {
     return (
       <div
-        className={`query-group ${group.id === targetGroup ? "selected" : ""}`}
+        className="query-group"
+        role="group"
+        aria-label={
+          group.id === 0 ? "Audience conditions" : `Condition group ${group.id}`
+        }
         key={group.id}
       >
         <div className="query-group-heading">
-          <strong>{group.id === 0 ? "Main group" : `Group ${group.id}`}</strong>
-          <label>
-            Match
-            <select
-              value={group.conjunction}
-              onChange={(event) =>
-                setRoot((current) =>
-                  changeGroup(current, group.id, (item) => ({
-                    ...item,
-                    conjunction: event.target.value as "AND" | "OR",
-                  })),
-                )
-              }
-            >
-              <option value="AND">all conditions (AND)</option>
-              <option value="OR">any condition (OR)</option>
-            </select>
-          </label>
-          <Button
-            variant="ghost"
-            disabled={depth >= 3 || groups.length >= 10}
-            onClick={() => addGroup(group.id)}
+          <fieldset
+            className="query-logic-switch"
+            aria-label={
+              group.id === 0
+                ? "Audience match logic"
+                : `Group ${group.id} match logic`
+            }
           >
-            <FolderPlus size={14} /> Add group
-          </Button>
+            {(["AND", "OR"] as const).map((conjunction) => (
+              <label key={conjunction}>
+                <input
+                  type="radio"
+                  name={`query-logic-${group.id}`}
+                  value={conjunction}
+                  checked={group.conjunction === conjunction}
+                  onChange={() =>
+                    setRoot((current) =>
+                      changeGroup(current, group.id, (item) => ({
+                        ...item,
+                        conjunction,
+                      })),
+                    )
+                  }
+                />
+                <span>{conjunction}</span>
+              </label>
+            ))}
+          </fieldset>
+          <span className="query-logic-description">
+            Match {group.conjunction === "AND" ? "all" : "any"} conditions
+          </span>
           {group.id !== 0 && (
             <Button
               variant="ghost"
+              className="query-remove"
               aria-label={`Remove group ${group.id}`}
               onClick={() =>
                 setRoot((current) => removeItem(current, group.id))
@@ -311,77 +342,113 @@ export function ContactQueryBuilder({
         </div>
         <div className="query-group-items">
           {group.items.length === 0 && (
-            <p className="muted">Add a field to this group.</p>
+            <p className="query-empty">
+              {group.id === 0
+                ? "Start with a condition to narrow your audience."
+                : "Add a condition to this group."}
+            </p>
           )}
-          {group.items.map((item, index) =>
-            isGroup(item)
-              ? renderGroup(item, depth + 1)
-              : renderFilter(item, index, group.conjunction),
+          {group.items.map((item) =>
+            isGroup(item) ? renderGroup(item, depth + 1) : renderFilter(item),
           )}
         </div>
+        <div className="query-group-actions">
+          <Button
+            id={`query-add-${group.id}`}
+            variant="ghost"
+            disabled={!fields || totalFilters >= 20}
+            aria-expanded={targetGroup === group.id}
+            aria-controls={
+              targetGroup === group.id ? `query-picker-${group.id}` : undefined
+            }
+            onClick={() => {
+              setSearch("");
+              setTargetGroup(targetGroup === group.id ? null : group.id);
+              focusTarget.current = `query-search-${group.id}`;
+            }}
+          >
+            <Plus size={15} /> Add condition
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!fields || depth >= 3 || groups.length >= 10}
+            onClick={() => addGroup(group.id)}
+          >
+            <FolderPlus size={15} /> Add group
+          </Button>
+        </div>
+        {targetGroup === group.id && (
+          <div
+            className="query-field-picker"
+            id={`query-picker-${group.id}`}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                closePicker();
+              }
+            }}
+          >
+            <div className="query-picker-heading">
+              <div className="search-box query-field-search">
+                <Search size={16} aria-hidden="true" />
+                <input
+                  id={`query-search-${group.id}`}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search Contact fields…"
+                  aria-label="Find a Contact field"
+                />
+              </div>
+              <Button
+                variant="ghost"
+                aria-label="Close field picker"
+                onClick={closePicker}
+              >
+                <X size={16} />
+              </Button>
+            </div>
+            <div className="query-field-results">
+              {matches.map((field) => (
+                <button
+                  type="button"
+                  key={field.name}
+                  onClick={() => add(field)}
+                >
+                  <span>
+                    {field.label}
+                    <small>{field.name}</small>
+                  </span>
+                  <Plus size={15} aria-hidden="true" />
+                </button>
+              ))}
+              {matches.length === 0 && (
+                <p role="status">
+                  No matching fields. Try a label or API name.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
   return (
     <div className="contact-query-builder">
       <div className="field-browser-heading">
-        <h3>Choose audience filters</h3>
-        <span className="muted">{totalFilters}/20 filters</span>
+        <h3>Audience filters</h3>
+        <span className="query-filter-count">
+          {totalFilters} / 20 conditions
+        </span>
       </div>
-      <p className="muted">
-        Find a Salesforce Contact field, add it to a group, then choose how it
-        should match. Contacts must have an email address.
-      </p>
-      <Notice message={error || generated.error} />
-      <div className="query-field-toolbar">
-        <div className="search-box query-field-search">
-          <Search size={16} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Find a Contact field…"
-            aria-label="Find a Contact field"
-          />
-        </div>
-        <label>
-          Add to
-          <select
-            value={targetGroup}
-            onChange={(event) => setTargetGroup(Number(event.target.value))}
-          >
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.id === 0 ? "Main group" : `Group ${group.id}`}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {!fields && !error ? (
-        <Loading />
-      ) : (
-        <div className="query-field-results">
-          {matches.map((field) => (
-            <button
-              type="button"
-              key={field.name}
-              disabled={totalFilters >= 20}
-              onClick={() => add(field)}
-            >
-              <Plus size={13} />
-              <span>
-                {field.label}
-                <small>{field.name}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <p className="muted">Only contacts with an email address are included.</p>
+      <Notice message={error} />
+      {!fields && !error && <p role="status">Loading Contact fields…</p>}
       <div className="query-groups">{renderGroup(root)}</div>
-      <small className="muted">
-        Each group can match all conditions with AND or any condition with OR.
-        Groups can be nested four levels deep.
-      </small>
+      {generated.error && (
+        <p className="query-hint" role="status">
+          {generated.error}
+        </p>
+      )}
     </div>
   );
 }

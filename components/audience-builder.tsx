@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Code2,
   FileChartColumn,
@@ -47,6 +47,10 @@ export function AudienceBuilder() {
     [search, setSearch] = useState(""),
     [cursor, setCursor] = useState(""),
     [showFields, setShowFields] = useState(false);
+  const updateQuery = useCallback((value: string) => {
+    setQuery(value);
+    setRecords(null);
+  }, []);
   async function work(key: string, fn: () => Promise<void>) {
     setBusy(key);
     setError("");
@@ -103,6 +107,44 @@ export function AudienceBuilder() {
       setNotes(data.notes || []);
     });
   }
+  const queryEditor = (
+    <>
+      <label>
+        {type === "soql" ? "Audience query" : "Generated audience query"}
+        <textarea
+          className="code-editor"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setRecords(null);
+          }}
+          readOnly={type !== "soql"}
+          rows={8}
+          spellCheck={false}
+          placeholder="Choose a source to generate its query…"
+        />
+      </label>
+      <small className="muted">
+        Select Id from Contact. Full pulls follow every result page; preview
+        displays at most 25 contacts.
+      </small>
+      {type !== "soql" && query && (
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setType("soql");
+            setSourceId("");
+            setNotes([
+              "This is now an independent query. Future report or list-view edits will not change it.",
+            ]);
+          }}
+        >
+          Copy to editable SOQL
+          <ArrowRight size={15} />
+        </Button>
+      )}
+    </>
+  );
   return (
     <>
       <Link className="back-link" href="/audiences">
@@ -218,40 +260,16 @@ export function AudienceBuilder() {
               </div>
             </div>
           )}
-          {type === "builder" && <ContactQueryBuilder onChange={setQuery} />}
-          <label>
-            {type === "soql" ? "Audience query" : "Generated audience query"}
-            <textarea
-              className="code-editor"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setRecords(null);
-              }}
-              readOnly={type !== "soql"}
-              rows={8}
-              spellCheck={false}
-              placeholder="Choose a source to generate its query…"
-            />
-          </label>
-          <small className="muted">
-            Select Id from Contact. Full pulls follow every result page; preview
-            displays at most 25 contacts.
-          </small>
-          {type !== "soql" && query && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setType("soql");
-                setSourceId("");
-                setNotes([
-                  "This is now an independent query. Future report or list-view edits will not change it.",
-                ]);
-              }}
-            >
-              Copy to editable SOQL
-              <ArrowRight size={15} />
-            </Button>
+          {type === "builder" && <ContactQueryBuilder onChange={updateQuery} />}
+          {type === "builder" ? (
+            <details className="builder-query-details">
+              <summary>
+                <Code2 size={15} /> View generated SOQL
+              </summary>
+              {queryEditor}
+            </details>
+          ) : (
+            queryEditor
           )}
           <div className="section-title second">
             <span className="step-number">2</span>
