@@ -110,6 +110,34 @@ test("translates supported saved report membership to query", () =>
     translateReport(report(), contact, account).query,
     "SELECT Id FROM Contact WHERE (MailingCountry = 'Australia')",
   ));
+test("translates a Contact-rooted custom report type with optional joins", () => {
+  const r = report();
+  r.reportMetadata.reportType = { type: "Contacts_with_Mito_Connections__c" };
+  Object.assign(r.reportTypeMetadata, {
+    objects: [
+      { apiName: "Contact", joinType: "ROOT" },
+      { apiName: "Mito_Connection__c", joinType: "OUTER" },
+    ],
+  });
+  assert.equal(
+    translateReport(r, contact, account).query,
+    "SELECT Id FROM Contact WHERE (MailingCountry = 'Australia')",
+  );
+});
+test("rejects custom report types with another root or required child joins", () => {
+  for (const objects of [
+    [{ apiName: "Account", joinType: "ROOT" }],
+    [
+      { apiName: "Contact", joinType: "ROOT" },
+      { apiName: "Mito_Connection__c", joinType: "INNER" },
+    ],
+  ]) {
+    const r = report();
+    r.reportMetadata.reportType = { type: "CustomReport" };
+    Object.assign(r.reportTypeMetadata, { objects });
+    assert.equal(translateReport(r, contact, account).query, null);
+  }
+});
 for (const patch of [
   { scope: "user" },
   { crossFilters: [{}] },

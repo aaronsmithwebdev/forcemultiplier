@@ -46,3 +46,8 @@ Lazy code without its check is unfinished: non-trivial logic leaves ONE runnable
 Source: https://github.com/DietrichGebert/ponytail (MIT)
 
 <!-- END:ponytail-rules -->
+
+## Delivery workflow
+
+- After completing requested changes and all relevant checks pass, commit the task-related changes with a clear summary and push the current branch to `origin` so the connected Vercel project can deploy them.
+- If a required check fails, do not push. Fix it or report the failure clearly.

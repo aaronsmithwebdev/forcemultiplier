@@ -15,6 +15,7 @@ import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
   ["/lists", "Constant Contact lists", List],
+  ["/resubscriptions", "Resubscriptions", UsersRound],
   ["/activity", "Pull history", Activity],
   ["/connections", "Connections", PlugZap],
 ] as const;

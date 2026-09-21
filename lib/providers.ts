@@ -323,9 +323,19 @@ export async function providerRequest(
   provider: Provider,
   path: string,
   init: RequestInit = {},
+  guard?: {
+    externalId: string;
+    beforeRequest?: () => Promise<void>;
+    timeoutMs?: number;
+  },
 ) {
   let current = await credentials(provider);
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (guard && current.config.externalId !== guard.externalId)
+      throw new AppError(
+        "The connected account changed. Reconnect the original account.",
+        409,
+      );
     const base =
       provider === "salesforce"
         ? salesforceHost(current.config.instanceUrl!)
@@ -335,6 +345,7 @@ export async function providerRequest(
       path,
       provider === "salesforce" ? "/services/data/" : "/v3/",
     );
+    await guard?.beforeRequest?.();
     const response = await fetch(url, {
       ...init,
       headers: {
@@ -345,7 +356,7 @@ export async function providerRequest(
         ...init.headers,
         Authorization: `Bearer ${current.tokens.accessToken}`,
       },
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(guard?.timeoutMs ?? 25000),
       cache: "no-store",
       redirect: "error",
     });

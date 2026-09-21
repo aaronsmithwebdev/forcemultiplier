@@ -33,6 +33,21 @@ export async function createAudience(input: {
     },
   });
 }
+export async function updateAudienceQuery(id: string, query: string) {
+  validateQuery(query);
+  const audience = await db.audience.findUnique({ where: { id } });
+  if (!audience) throw new AppError("Audience not found.", 404);
+  const config = await connection("salesforce");
+  if (!config.tokens || config.externalId !== audience.orgId)
+    throw new AppError(
+      "Reconnect the Salesforce org that owns this audience.",
+      409,
+    );
+  return db.audience.update({
+    where: { id },
+    data: { query, sourceType: "soql", sourceId: null },
+  });
+}
 export async function startPull(id: string) {
   const audience = await db.audience.findUnique({ where: { id } });
   if (!audience) throw new AppError("Audience not found.", 404);

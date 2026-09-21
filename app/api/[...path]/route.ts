@@ -23,7 +23,12 @@ import {
   validatePaths,
 } from "@/lib/salesforce";
 import { previewQuery, validateQuery, sfId } from "@/lib/soql";
-import { createAudience, pullStep, startPull } from "@/lib/audiences";
+import {
+  createAudience,
+  pullStep,
+  startPull,
+  updateAudienceQuery,
+} from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import {
   runScheduleNow,
@@ -38,6 +43,15 @@ import {
   setUnsubscribeSync,
   unsubscribeState,
 } from "@/lib/unsubscribes";
+import {
+  createResubscribeJob,
+  finishResubscribeUpload,
+  resubscribeJobInput,
+  resubscribeState,
+  runResubscriptions,
+  setResubscribeStatus,
+  uploadResubscribeChunk,
+} from "@/lib/resubscriptions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -72,6 +86,15 @@ async function handle(
   const method = request.method;
   const params = request.nextUrl.searchParams;
   try {
+    if (key === "cron/resubscriptions" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await runResubscriptions());
+    }
     if (key === "cron/sync" && method === "GET") {
       const secret = process.env.CRON_SECRET;
       if (
@@ -106,6 +129,46 @@ async function handle(
       return json({ ok: true });
     }
     const user = await requireSession();
+    if (key === "resubscriptions" && method === "GET")
+      return json(await resubscribeState());
+    if (key === "resubscriptions" && method === "POST")
+      return json(
+        await createResubscribeJob(
+          resubscribeJobInput.parse(await body(request)),
+        ),
+        201,
+      );
+    if (p[0] === "resubscriptions" && p[1]) {
+      const id = z.string().max(100).parse(p[1]);
+      if (p.length === 2 && method === "GET")
+        return json(
+          await resubscribeState(
+            id,
+            params.get("status")?.slice(0, 30) || undefined,
+            Math.max(
+              0,
+              Math.min(100000, Math.floor(Number(params.get("offset")) || 0)),
+            ),
+          ),
+        );
+      if (p[2] === "chunk" && method === "POST") {
+        const data = z
+          .object({
+            index: z.number().int().min(0).max(100000),
+            emails: z.array(z.string().max(254)).min(1).max(500),
+          })
+          .parse(await body(request));
+        return json(await uploadResubscribeChunk(id, data.index, data.emails));
+      }
+      if (p[2] === "finish" && method === "POST")
+        return json(await finishResubscribeUpload(id));
+      if (p[2] === "status" && method === "POST") {
+        const data = z
+          .object({ action: z.enum(["start", "pause", "cancel"]) })
+          .parse(await body(request));
+        return json(await setResubscribeStatus(id, data.action));
+      }
+    }
     if (key === "auth/logout" && method === "POST") {
       await logout();
       return json({ ok: true });
@@ -270,6 +333,8 @@ async function handle(
           type: f.type,
           relationshipName: f.relationshipName,
           referenceTo: f.referenceTo,
+          filterable: f.filterable,
+          picklistValues: f.picklistValues,
         })),
         childRelationships: info.childRelationships,
       });
@@ -315,6 +380,12 @@ async function handle(
       return json(await createAudience(data), 201);
     }
     if (p[0] === "audiences" && p[1]) {
+      if (p.length === 2 && method === "PUT") {
+        const data = z
+          .object({ query: z.string().max(20000) })
+          .parse(await body(request));
+        return json(await updateAudienceQuery(p[1], data.query));
+      }
       if (p[2] === "pull" && method === "POST")
         return json(await startPull(p[1]));
       if (p[2] === "deliveries" && method === "POST") {

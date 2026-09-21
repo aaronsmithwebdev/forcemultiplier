@@ -8,6 +8,7 @@ export type MetadataField = {
   relationshipName?: string | null;
   referenceTo?: string[];
   filterable?: boolean;
+  picklistValues?: { label: string; value: string; active: boolean }[];
 };
 export type ObjectMetadata = {
   name: string;
@@ -119,7 +120,7 @@ export async function sourceQuery(kind: string, id: string) {
   }
   throw new AppError("Unknown Salesforce source.");
 }
-// Narrow, fail-closed translator. More report types require verified fixtures before enabling.
+// Narrow, fail-closed translator. Required child joins need an explicit SOQL semi-join.
 export function translateReport(
   data: Record<string, any>,
   contact: ObjectMetadata,
@@ -127,10 +128,26 @@ export function translateReport(
 ) {
   const m = data.reportMetadata ?? {};
   const gaps: string[] = [];
-  if (m.reportType?.type !== "ContactList")
-    gaps.push(
-      "Only the standard Contacts report type (ContactList) is supported automatically.",
-    );
+  if (m.reportType?.type !== "ContactList") {
+    const objects = data.reportTypeMetadata?.objects;
+    const roots = Array.isArray(objects)
+      ? objects.filter((object: any) => object.joinType === "ROOT")
+      : [];
+    if (roots.length !== 1 || roots[0]?.apiName !== "Contact")
+      gaps.push(
+        "This custom report type must use Contact as its primary object.",
+      );
+    if (
+      !Array.isArray(objects) ||
+      objects.some(
+        (object: any) =>
+          object.joinType !== "ROOT" && object.joinType !== "OUTER",
+      )
+    )
+      gaps.push(
+        "Custom report types with required related records need a reviewed SOQL semi-join.",
+      );
+  }
   if (!["TABULAR", "SUMMARY", "MATRIX"].includes(m.reportFormat))
     gaps.push("Joined or unknown report formats need a reviewed SOQL query.");
   if (m.scope !== "organization")

@@ -11,6 +11,8 @@ import {
   Send,
   CalendarClock,
   Play,
+  Pencil,
+  Save,
 } from "lucide-react";
 import {
   api,
@@ -45,7 +47,10 @@ export function AudienceDetail({ id }: { id: string }) {
     [timeZone, setTimeZone] = useState("Australia/Sydney"),
     [sending, setSending] = useState(false),
     [delivery, setDelivery] = useState<any>(null),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [editingQuery, setEditingQuery] = useState(false),
+    [queryDraft, setQueryDraft] = useState(""),
+    [querySaving, setQuerySaving] = useState(false);
   const stop = useRef(false);
   const loadVersion = useRef(0);
   const load = async () => {
@@ -255,6 +260,25 @@ export function AudienceDetail({ id }: { id: string }) {
       setError((e as Error).message);
     } finally {
       setSending(false);
+    }
+  }
+  async function saveQuery() {
+    setQuerySaving(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`audiences/${id}`, "PUT", { query: queryDraft });
+      setEditingQuery(false);
+      setMessage(
+        data.sourceType === "soql"
+          ? "Audience query updated. The next pull will use it."
+          : "Audience converted to independent SOQL. The next pull will use this query instead of the saved Salesforce source.",
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setQuerySaving(false);
     }
   }
   if (!data)
@@ -535,8 +559,62 @@ export function AudienceDetail({ id }: { id: string }) {
         )}
       </section>
       <details className="card query-details">
-        <summary>Audience criteria and selected fields</summary>
-        <pre>{data.query}</pre>
+        <summary>Audience SOQL and selected fields</summary>
+        {editingQuery ? (
+          <>
+            <label>
+              Audience query
+              <textarea
+                className="code-editor"
+                value={queryDraft}
+                onChange={(e) => setQueryDraft(e.target.value)}
+                rows={8}
+                maxLength={20000}
+                spellCheck={false}
+              />
+            </label>
+            {data.sourceType !== "soql" && (
+              <p className="muted">
+                Saving converts this audience to independent SOQL. Future
+                changes to its Salesforce {data.sourceType} will no longer
+                replace the query.
+              </p>
+            )}
+            <div className="button-row">
+              <Button
+                busy={querySaving}
+                disabled={!queryDraft.trim() || busy || sending}
+                onClick={saveQuery}
+              >
+                <Save size={15} /> Save query
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={querySaving}
+                onClick={() => {
+                  setEditingQuery(false);
+                  setQueryDraft(data.query);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <pre>{data.query}</pre>
+            <Button
+              variant="secondary"
+              disabled={busy || sending}
+              onClick={() => {
+                setQueryDraft(data.query);
+                setEditingQuery(true);
+              }}
+            >
+              <Pencil size={15} /> Edit SOQL
+            </Button>
+          </>
+        )}
         <div className="selected-fields">
           {data.fields.map((f: string) => (
             <Badge key={f}>{f}</Badge>

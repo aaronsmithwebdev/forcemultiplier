@@ -240,3 +240,54 @@ model UnsubscribeEvent {
   @@index([accountId,email])
   @@schema("forcemultiplier")
 }
+model ResubscribeJob {
+  id String @id @default(cuid())
+  name String
+  accountId String
+  clientKey String
+  orgId String?
+  listId String
+  listName String
+  presentField String?
+  amountField String?
+  minimumAmount Float?
+  status String @default("uploading")
+  nextChunk Int @default(0)
+  uploaded Int @default(0)
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  members ResubscribeMember[]
+  @@index([status,createdAt])
+  @@schema("forcemultiplier")
+}
+model ResubscribeMember {
+  jobId String
+  job ResubscribeJob @relation(fields:[jobId], references:[id], onDelete:Cascade)
+  email String
+  status String @default("pending")
+  salesforceId String?
+  data Json?
+  priority Float @default(0)
+  contactId String?
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  error String?
+  processedAt DateTime?
+  @@id([jobId,email])
+  @@index([jobId,status,priority,email])
+  @@schema("forcemultiplier")
+}
+model ResubscribeDay {
+  clientKey String
+  day String
+  contacts Int @default(0)
+  calls Int @default(0)
+  @@id([clientKey,day])
+  @@schema("forcemultiplier")
+}
+model ResubscribeWorker {
+  id String @id @default("default")
+  leaseUntil DateTime?
+  @@schema("forcemultiplier")
+}

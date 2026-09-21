@@ -11,11 +11,19 @@ import {
   Save,
   Search,
   ArrowRight,
+  SlidersHorizontal,
 } from "lucide-react";
 import { api, Badge, Button, Heading, Notice, valueAt } from "./common";
 import { FieldBrowser } from "./field-browser";
+import { ContactQueryBuilder } from "./query-builder";
 const types = [
   ["soql", "SOQL query", "Write exactly who you need.", Code2],
+  [
+    "builder",
+    "Query Builder",
+    "Build filters without writing SOQL.",
+    SlidersHorizontal,
+  ],
   [
     "report",
     "Report criteria",
@@ -58,7 +66,9 @@ export function AudienceBuilder() {
     setRecords(null);
     setCursor("");
     setQuery(
-      value === "soql" ? "SELECT Id FROM Contact\nWHERE Email != null" : "",
+      ["soql", "builder"].includes(value)
+        ? "SELECT Id FROM Contact\nWHERE Email != null"
+        : "",
     );
   }
   async function loadSources(more = false) {
@@ -135,7 +145,7 @@ export function AudienceBuilder() {
               maxLength={120}
             />
           </label>
-          {type !== "soql" && (
+          {!["soql", "builder"].includes(type) && (
             <div className="source-picker">
               <label>
                 Find a Salesforce{" "}
@@ -208,6 +218,7 @@ export function AudienceBuilder() {
               </div>
             </div>
           )}
+          {type === "builder" && <ContactQueryBuilder onChange={setQuery} />}
           <label>
             {type === "soql" ? "Audience query" : "Generated audience query"}
             <textarea
@@ -294,7 +305,7 @@ export function AudienceBuilder() {
                 work("save", async () => {
                   const row = await api("audiences", "POST", {
                     name,
-                    sourceType: type,
+                    sourceType: type === "builder" ? "soql" : type,
                     sourceId: sourceId || undefined,
                     query,
                     fields,

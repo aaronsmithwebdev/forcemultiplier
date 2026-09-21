@@ -13,6 +13,7 @@ A private workspace for connecting Salesforce and Constant Contact, defining Sal
 - Search across pulled contact names, email addresses, and Salesforce IDs.
 - Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, managed-membership reconciliation, provider activity checks, and per-contact issue reporting.
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
+- CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
 - Pull and delivery history with progress and recoverable errors.
 
 **This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience; they do not send unsubscribes back to Salesforce. Keep Cazoomi running until unsubscribe return updates and a comparison/cutover exercise are complete. The next sync phase will make unsubscribe-only return updates configurable.
@@ -79,6 +80,12 @@ New private apps must be authorized by their creator; follow Constant Contact's 
 
 [Constant Contact authorization-code flow](https://developer.constantcontact.com/api_guide/server_flow.html)
 
+## Run a resubscription job
+
+Open **Resubscriptions** and upload a CSV with an `Email` or `Email Address` column. Choose the Constant Contact list that each successfully restored contact should join. Optional Salesforce filters match Contacts by email, require a selected field to have a value, and require an amount field to exceed a threshold; amount-filtered jobs process the largest values first.
+
+After review, start the job. The secured worker performs an exact-email GET, skips contacts that are already subscribed or unsubscribed after the job was created, then PUTs the preserved core contact values with `update_source=Contact`, explicit permission, and all existing list memberships plus the selected list. All jobs sharing the Constant Contact application are capped at 2,500 contact attempts and 5,000 worker API calls per UTC day. A PUT whose outcome cannot be confirmed is flagged for manual review and is never automatically repeated.
+
 ## Build and pull an audience
 
 A typical query is:
@@ -105,7 +112,7 @@ Select **Schedule sync** on an audience to choose the destination list, custom-f
 
 Supported queries have `Contact` as the root, include `Id`, and select scalar or parent fields. Semi-joins can select Contacts through Campaigns or child/custom objects. Mutating clauses, aggregates, child subqueries in the SELECT list, and OFFSET are blocked. If intentionally using LIMIT, also use a deterministic ORDER BY with an Id tie-breaker. Membership is deduplicated by Salesforce Contact ID, and outbound membership is reconciled by normalized email address.
 
-Saved reports and list views are re-resolved before each new pull. The run records the query it actually used. Report translation is deliberately limited to the standard `ContactList` report type, organization-wide scope, All Time date range, and supported Contact/Account scalar filters and boolean logic. Custom report types, cross-filters, summary filters, relative dates, hierarchy scope, ambiguous field mappings, and unsupported operators require an independent reviewed SOQL query. Unsupported criteria do not silently disappear. Report extraction uses paginated SOQL, not the report-results API's 2,000-row response.
+Saved reports and list views are re-resolved before each new pull. The run records the query it actually used. Report translation supports the standard `ContactList` report type and custom report types rooted on Contact whose additional objects are optional joins, with organization-wide scope, All Time date range, and supported Contact/Account scalar filters and boolean logic. Required child joins, cross-filters, summary filters, relative dates, hierarchy scope, ambiguous field mappings, and unsupported operators require an independent reviewed SOQL query. Unsupported criteria do not silently disappear. Report extraction uses paginated SOQL, not the report-results API's 2,000-row response.
 
 Current limits: 30 additional fields, four parent relationship hops, Contact records only, 150,000 records per manual pull. Polymorphic relationships and child-to-one reductions require reviewed SOQL/aggregation design. Fields follow the connected user's visibility. Salesforce records can change while a multi-request pull is running; a completed pull means all query-result pages were received, not a transactionally frozen Salesforce database.
 
