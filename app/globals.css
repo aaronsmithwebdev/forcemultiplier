@@ -1026,6 +1026,19 @@ td strong {
 .query-field-search {
   width: 100%;
 }
+.query-field-toolbar {
+  align-items: end;
+  display: flex;
+  gap: 10px;
+}
+.query-field-toolbar > label {
+  flex: 0 0 180px;
+  font-size: 9px;
+  margin: 0;
+}
+.query-field-toolbar select {
+  margin: 2px 0 0;
+}
 .query-field-results {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1056,11 +1069,54 @@ td strong {
   font-size: 9px;
   margin-top: 2px;
 }
-.query-filters {
-  display: grid;
+.query-groups {
+  margin: 16px 0 10px;
+}
+.query-group {
+  background: #fafbf8;
+  border: 1px solid var(--line);
+  border-left: 3px solid #d8e1cf;
+  border-radius: 6px;
+  padding: 10px;
+}
+.query-group.selected {
+  border-left-color: var(--green);
+}
+.query-group .query-group {
+  margin: 8px 0 8px 28px;
+}
+.query-group-heading {
+  align-items: center;
+  display: flex;
   gap: 8px;
-  margin: 15px 0 10px;
+  margin-bottom: 8px;
+}
+.query-group-heading > strong {
+  color: var(--green);
+  font-size: 10px;
+  margin-right: auto;
+  text-transform: uppercase;
+}
+.query-group-heading > label {
+  align-items: center;
+  display: flex;
+  font-size: 9px;
+  gap: 6px;
+  margin: 0;
+}
+.query-group-heading select {
+  margin: 0;
+  width: auto;
+}
+.query-group-heading .button {
+  padding: 7px 9px;
+}
+.query-group-items {
   overflow-x: auto;
+}
+.query-group-items > p {
+  font-size: 10px;
+  padding: 8px;
 }
 .query-filter {
   align-items: center;

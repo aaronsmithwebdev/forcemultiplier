@@ -1,8 +1,12 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FolderPlus, Plus, Search, X } from "lucide-react";
 import { api, Button, Loading, Notice } from "./common";
-import { buildContactQuery, QueryFilter } from "../lib/query-builder";
+import {
+  buildContactQuery,
+  QueryFilter,
+  QueryGroup,
+} from "../lib/query-builder";
 
 type Field = {
   name: string;
@@ -16,6 +20,10 @@ type Filter = QueryFilter & {
   label: string;
   values?: Field["picklistValues"];
 };
+type Group = Omit<QueryGroup, "items"> & {
+  id: number;
+  items: (Filter | Group)[];
+};
 
 const unsupported = new Set(["address", "base64", "location"]);
 const numeric = new Set(["currency", "double", "int", "long", "percent"]);
@@ -28,6 +36,9 @@ const searchable = new Set([
   "textarea",
   "url",
 ]);
+function isGroup(item: Filter | Group): item is Group {
+  return "items" in item;
+}
 function operators(field: Filter) {
   if (field.type === "boolean") return [["eq", "is"]];
   if (field.type === "multipicklist")
@@ -53,6 +64,39 @@ function operators(field: Filter) {
   result.push(["is_null", "is blank"], ["not_null", "is not blank"]);
   return result;
 }
+function changeGroup(
+  group: Group,
+  id: number,
+  change: (value: Group) => Group,
+): Group {
+  if (group.id === id) return change(group);
+  return {
+    ...group,
+    items: group.items.map((item) =>
+      isGroup(item) ? changeGroup(item, id, change) : item,
+    ),
+  };
+}
+function removeItem(group: Group, id: number): Group {
+  return {
+    ...group,
+    items: group.items
+      .filter((item) => item.id !== id)
+      .map((item) => (isGroup(item) ? removeItem(item, id) : item)),
+  };
+}
+function allGroups(group: Group): Group[] {
+  return [
+    group,
+    ...group.items.flatMap((item) => (isGroup(item) ? allGroups(item) : [])),
+  ];
+}
+function filterCount(group: Group): number {
+  return group.items.reduce(
+    (total, item) => total + (isGroup(item) ? filterCount(item) : 1),
+    0,
+  );
+}
 
 export function ContactQueryBuilder({
   onChange,
@@ -60,10 +104,15 @@ export function ContactQueryBuilder({
   onChange: (query: string) => void;
 }) {
   const [fields, setFields] = useState<Field[] | null>(null),
-    [filters, setFilters] = useState<Filter[]>([]),
+    [root, setRoot] = useState<Group>({
+      id: 0,
+      conjunction: "AND",
+      items: [],
+    }),
+    [targetGroup, setTargetGroup] = useState(0),
     [search, setSearch] = useState(""),
-    [error, setError] = useState(""),
-    [nextId, setNextId] = useState(1);
+    [error, setError] = useState("");
+  const nextId = useRef(1);
   useEffect(() => {
     let live = true;
     api("salesforce/metadata?object=Contact")
@@ -75,12 +124,17 @@ export function ContactQueryBuilder({
   }, []);
   const generated = useMemo(() => {
     try {
-      return { query: buildContactQuery(filters), error: "" };
+      return { query: buildContactQuery(root), error: "" };
     } catch (e) {
       return { query: "", error: (e as Error).message };
     }
-  }, [filters]);
+  }, [root]);
   useEffect(() => onChange(generated.query), [generated.query, onChange]);
+  const groups = useMemo(() => allGroups(root), [root]);
+  useEffect(() => {
+    if (!groups.some((group) => group.id === targetGroup)) setTargetGroup(0);
+  }, [groups, targetGroup]);
+  const totalFilters = filterCount(root);
   const matches = (fields ?? [])
     .filter(
       (field) =>
@@ -91,50 +145,217 @@ export function ContactQueryBuilder({
           .includes(search.toLowerCase()),
     )
     .slice(0, 12);
-  function update(id: number, patch: Partial<Filter>) {
-    setFilters((current) =>
-      current.map((filter) =>
-        filter.id === id ? { ...filter, ...patch } : filter,
-      ),
-    );
+  function updateFilter(id: number, patch: Partial<Filter>) {
+    setRoot((current) => ({
+      ...current,
+      items: current.items.map(function update(item): Filter | Group {
+        if (isGroup(item)) return { ...item, items: item.items.map(update) };
+        return item.id === id ? { ...item, ...patch } : item;
+      }),
+    }));
   }
   function add(field: Field) {
-    if (filters.length >= 20) return;
-    setFilters((current) => [
-      ...current,
-      {
-        id: nextId,
-        field: field.name,
-        label: field.label,
-        type: field.type,
-        values: field.picklistValues,
-        operator: field.type === "multipicklist" ? "includes" : "eq",
-        value: field.type === "boolean" ? "true" : "",
-        conjunction: "AND",
-      },
-    ]);
-    setNextId((value) => value + 1);
+    if (totalFilters >= 20) return;
+    const filter: Filter = {
+      id: nextId.current++,
+      field: field.name,
+      label: field.label,
+      type: field.type,
+      values: field.picklistValues,
+      operator: field.type === "multipicklist" ? "includes" : "eq",
+      value: field.type === "boolean" ? "true" : "",
+      conjunction: "AND",
+    };
+    setRoot((current) =>
+      changeGroup(current, targetGroup, (group) => ({
+        ...group,
+        items: [...group.items, filter],
+      })),
+    );
     setSearch("");
+  }
+  function addGroup(parentId: number) {
+    if (groups.length >= 10) return;
+    const id = nextId.current++;
+    setRoot((current) =>
+      changeGroup(current, parentId, (group) => ({
+        ...group,
+        items: [...group.items, { id, conjunction: "AND", items: [] }],
+      })),
+    );
+    setTargetGroup(id);
+  }
+  function renderFilter(filter: Filter, index: number, conjunction: string) {
+    const noValue = ["is_null", "not_null"].includes(filter.operator);
+    return (
+      <div className="query-filter" key={filter.id}>
+        <strong>{index === 0 ? "Where" : conjunction}</strong>
+        <span className="query-filter-field">
+          {filter.label}
+          <small>{filter.field}</small>
+        </span>
+        <select
+          aria-label={`${filter.label} operator`}
+          value={filter.operator}
+          onChange={(event) =>
+            updateFilter(filter.id, { operator: event.target.value })
+          }
+        >
+          {operators(filter).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {!noValue &&
+          (filter.type === "boolean" ? (
+            <select
+              aria-label={`${filter.label} value`}
+              value={filter.value}
+              onChange={(event) =>
+                updateFilter(filter.id, { value: event.target.value })
+              }
+            >
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          ) : filter.values?.length ? (
+            <select
+              aria-label={`${filter.label} value`}
+              value={filter.value}
+              onChange={(event) =>
+                updateFilter(filter.id, { value: event.target.value })
+              }
+            >
+              <option value="">Choose…</option>
+              {filter.values
+                .filter((value) => value.active)
+                .map((value) => (
+                  <option key={value.value} value={value.value}>
+                    {value.label}
+                  </option>
+                ))}
+            </select>
+          ) : (
+            <input
+              aria-label={`${filter.label} value`}
+              type={
+                numeric.has(filter.type)
+                  ? "number"
+                  : filter.type === "date"
+                    ? "date"
+                    : filter.type === "datetime"
+                      ? "datetime-local"
+                      : "text"
+              }
+              value={filter.value}
+              onChange={(event) =>
+                updateFilter(filter.id, { value: event.target.value })
+              }
+              placeholder="Value"
+            />
+          ))}
+        <Button
+          variant="ghost"
+          aria-label={`Remove ${filter.label} filter`}
+          onClick={() => setRoot((current) => removeItem(current, filter.id))}
+        >
+          <X size={15} />
+        </Button>
+      </div>
+    );
+  }
+  function renderGroup(group: Group, depth = 0) {
+    return (
+      <div
+        className={`query-group ${group.id === targetGroup ? "selected" : ""}`}
+        key={group.id}
+      >
+        <div className="query-group-heading">
+          <strong>{group.id === 0 ? "Main group" : `Group ${group.id}`}</strong>
+          <label>
+            Match
+            <select
+              value={group.conjunction}
+              onChange={(event) =>
+                setRoot((current) =>
+                  changeGroup(current, group.id, (item) => ({
+                    ...item,
+                    conjunction: event.target.value as "AND" | "OR",
+                  })),
+                )
+              }
+            >
+              <option value="AND">all conditions (AND)</option>
+              <option value="OR">any condition (OR)</option>
+            </select>
+          </label>
+          <Button
+            variant="ghost"
+            disabled={depth >= 3 || groups.length >= 10}
+            onClick={() => addGroup(group.id)}
+          >
+            <FolderPlus size={14} /> Add group
+          </Button>
+          {group.id !== 0 && (
+            <Button
+              variant="ghost"
+              aria-label={`Remove group ${group.id}`}
+              onClick={() =>
+                setRoot((current) => removeItem(current, group.id))
+              }
+            >
+              <X size={15} />
+            </Button>
+          )}
+        </div>
+        <div className="query-group-items">
+          {group.items.length === 0 && (
+            <p className="muted">Add a field to this group.</p>
+          )}
+          {group.items.map((item, index) =>
+            isGroup(item)
+              ? renderGroup(item, depth + 1)
+              : renderFilter(item, index, group.conjunction),
+          )}
+        </div>
+      </div>
+    );
   }
   return (
     <div className="contact-query-builder">
       <div className="field-browser-heading">
         <h3>Choose audience filters</h3>
-        <span className="muted">{filters.length}/20 filters</span>
+        <span className="muted">{totalFilters}/20 filters</span>
       </div>
       <p className="muted">
-        Find a Salesforce Contact field, add it, then choose how it should
-        match. Contacts must have an email address.
+        Find a Salesforce Contact field, add it to a group, then choose how it
+        should match. Contacts must have an email address.
       </p>
       <Notice message={error || generated.error} />
-      <div className="search-box query-field-search">
-        <Search size={16} />
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Find a Contact field…"
-          aria-label="Find a Contact field"
-        />
+      <div className="query-field-toolbar">
+        <div className="search-box query-field-search">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Find a Contact field…"
+            aria-label="Find a Contact field"
+          />
+        </div>
+        <label>
+          Add to
+          <select
+            value={targetGroup}
+            onChange={(event) => setTargetGroup(Number(event.target.value))}
+          >
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.id === 0 ? "Main group" : `Group ${group.id}`}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       {!fields && !error ? (
         <Loading />
@@ -144,7 +365,7 @@ export function ContactQueryBuilder({
             <button
               type="button"
               key={field.name}
-              disabled={filters.length >= 20}
+              disabled={totalFilters >= 20}
               onClick={() => add(field)}
             >
               <Plus size={13} />
@@ -156,112 +377,10 @@ export function ContactQueryBuilder({
           ))}
         </div>
       )}
-      {filters.length > 0 && (
-        <div className="query-filters">
-          {filters.map((filter, index) => {
-            const noValue = ["is_null", "not_null"].includes(filter.operator);
-            return (
-              <div className="query-filter" key={filter.id}>
-                {index === 0 ? (
-                  <strong>Where</strong>
-                ) : (
-                  <select
-                    aria-label={`Join ${filter.label} filter`}
-                    value={filter.conjunction}
-                    onChange={(event) =>
-                      update(filter.id, {
-                        conjunction: event.target.value as "AND" | "OR",
-                      })
-                    }
-                  >
-                    <option value="AND">AND</option>
-                    <option value="OR">OR</option>
-                  </select>
-                )}
-                <span className="query-filter-field">
-                  {filter.label}
-                  <small>{filter.field}</small>
-                </span>
-                <select
-                  aria-label={`${filter.label} operator`}
-                  value={filter.operator}
-                  onChange={(event) =>
-                    update(filter.id, { operator: event.target.value })
-                  }
-                >
-                  {operators(filter).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                {!noValue &&
-                  (filter.type === "boolean" ? (
-                    <select
-                      aria-label={`${filter.label} value`}
-                      value={filter.value}
-                      onChange={(event) =>
-                        update(filter.id, { value: event.target.value })
-                      }
-                    >
-                      <option value="true">Yes</option>
-                      <option value="false">No</option>
-                    </select>
-                  ) : filter.values?.length ? (
-                    <select
-                      aria-label={`${filter.label} value`}
-                      value={filter.value}
-                      onChange={(event) =>
-                        update(filter.id, { value: event.target.value })
-                      }
-                    >
-                      <option value="">Choose…</option>
-                      {filter.values
-                        .filter((value) => value.active)
-                        .map((value) => (
-                          <option key={value.value} value={value.value}>
-                            {value.label}
-                          </option>
-                        ))}
-                    </select>
-                  ) : (
-                    <input
-                      aria-label={`${filter.label} value`}
-                      type={
-                        numeric.has(filter.type)
-                          ? "number"
-                          : filter.type === "date"
-                            ? "date"
-                            : filter.type === "datetime"
-                              ? "datetime-local"
-                              : "text"
-                      }
-                      value={filter.value}
-                      onChange={(event) =>
-                        update(filter.id, { value: event.target.value })
-                      }
-                      placeholder="Value"
-                    />
-                  ))}
-                <Button
-                  variant="ghost"
-                  aria-label={`Remove ${filter.label} filter`}
-                  onClick={() =>
-                    setFilters((current) =>
-                      current.filter((item) => item.id !== filter.id),
-                    )
-                  }
-                >
-                  <X size={15} />
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="query-groups">{renderGroup(root)}</div>
       <small className="muted">
-        Mixed AND/OR rules are grouped from top to bottom, so the result follows
-        the order shown.
+        Each group can match all conditions with AND or any condition with OR.
+        Groups can be nested four levels deep.
       </small>
     </div>
   );

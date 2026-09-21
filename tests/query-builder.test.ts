@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildContactQuery } from "../lib/query-builder";
+import { buildContactQuery, QueryFilter } from "../lib/query-builder";
 import { validateQuery } from "../lib/soql";
 
 test("query builder creates grouped AND and OR filters safely", () => {
@@ -63,4 +63,36 @@ test("query builder supports multi-select picklists", () => {
     ]),
     "SELECT Id FROM Contact\nWHERE Email != null\nAND (Interests__c INCLUDES ('Research'))",
   );
+});
+
+test("query builder preserves nested AND and OR groups", () => {
+  const filter = (
+    field: string,
+    value: string,
+    operator = "eq",
+  ): QueryFilter => ({
+    field,
+    type: field === "All_Mito_Connections__c" ? "double" : "string",
+    operator,
+    value,
+    conjunction: "AND",
+  });
+  const query = buildContactQuery({
+    conjunction: "AND",
+    items: [
+      filter("MailingState", "NSW"),
+      {
+        conjunction: "OR",
+        items: [
+          filter("All_Mito_Connections__c", "0", "gt"),
+          filter("LastName", "Smith"),
+        ],
+      },
+    ],
+  });
+  assert.equal(
+    query,
+    "SELECT Id FROM Contact\nWHERE Email != null\nAND (MailingState = 'NSW' AND (All_Mito_Connections__c > 0 OR LastName = 'Smith'))",
+  );
+  assert.doesNotThrow(() => validateQuery(query));
 });
