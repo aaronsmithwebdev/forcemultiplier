@@ -44,6 +44,10 @@ export function completedSends(history: unknown) {
   return history.filter((run) => run?.send_status === "COMPLETED");
 }
 
+export function retryableArchiveError(error: unknown) {
+  return error instanceof AppError && error.status === 429;
+}
+
 async function account() {
   const cc = await connection("constant-contact");
   if (!cc.tokens || !cc.externalId)
@@ -314,17 +318,21 @@ export async function archiveStep() {
     }
     return db.archiveImport.findUnique({ where: { id: current.id } });
   } catch (error) {
+    const retry = retryableArchiveError(error);
     await db.archiveImport.updateMany({
       where: { id: current.id, leaseUntil: lease },
       data: {
-        status: "paused",
-        error:
-          error instanceof Error
+        status: retry ? "pending" : "paused",
+        error: retry
+          ? null
+          : error instanceof Error
             ? error.message.slice(0, 500)
             : "Archive import failed.",
         leaseUntil: null,
       },
     });
+    if (retry)
+      return db.archiveImport.findUnique({ where: { id: current.id } });
     throw error;
   }
 }

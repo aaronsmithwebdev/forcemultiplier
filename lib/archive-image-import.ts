@@ -34,6 +34,19 @@ export function retryableStorageError(error: {
   return status === 408 || status === 429 || status >= 500;
 }
 
+export function ownedArchiveImage(url: URL, folder: string) {
+  return (
+    url.protocol === "https:" &&
+    !url.port &&
+    !url.username &&
+    !url.password &&
+    ["files.constantcontact.com", "mlsvc01-prod.s3.amazonaws.com"].includes(
+      url.hostname,
+    ) &&
+    url.pathname.startsWith(`/${folder}/`)
+  );
+}
+
 function imageType(bytes: Buffer) {
   if (bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
     return "image/png";
@@ -53,14 +66,7 @@ export async function fetchArchiveImage(url: string, folder: string) {
   let current = url;
   for (let redirects = 0; redirects < 4; redirects++) {
     const parsed = new URL(current);
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.hostname !== "files.constantcontact.com" ||
-      parsed.port ||
-      parsed.username ||
-      parsed.password ||
-      !parsed.pathname.startsWith(`/${folder}/`)
-    )
+    if (!ownedArchiveImage(parsed, folder))
       throw new Error("Image URL left the approved Constant Contact folder.");
     const response = await fetch(current, {
       redirect: "manual",
@@ -223,9 +229,7 @@ export async function imageBackupStep() {
       if (references.size) {
         const values = [...references].map(([url, ids]) => {
           const parsed = new URL(url);
-          const approved =
-            parsed.hostname === "files.constantcontact.com" &&
-            parsed.pathname.startsWith(`/${job.mediaFolder}/`);
+          const approved = ownedArchiveImage(parsed, job.mediaFolder);
           return Prisma.sql`(${job.accountId}, ${url}, ${approved ? "pending" : "excluded"}, ${approved ? null : "Shared or external image; ownership needs review."}, ARRAY[${Prisma.join([...ids])}]::text[], CURRENT_TIMESTAMP)`;
         });
         await db.$executeRaw(Prisma.sql`
@@ -234,6 +238,16 @@ export async function imageBackupStep() {
           VALUES ${Prisma.join(values)}
           ON CONFLICT ("accountId", "url") DO UPDATE SET
             "emailIds" = ARRAY(SELECT DISTINCT unnest("ArchivedImage"."emailIds" || EXCLUDED."emailIds")),
+            "status" = CASE
+              WHEN "ArchivedImage"."status" = 'excluded' AND EXCLUDED."status" = 'pending'
+                THEN 'pending'
+              ELSE "ArchivedImage"."status"
+            END,
+            "error" = CASE
+              WHEN "ArchivedImage"."status" = 'excluded' AND EXCLUDED."status" = 'pending'
+                THEN NULL
+              ELSE "ArchivedImage"."error"
+            END,
             "updatedAt" = CURRENT_TIMESTAMP
         `);
       }

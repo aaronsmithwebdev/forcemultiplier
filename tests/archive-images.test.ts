@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { rewriteArchiveImages } from "../lib/archive-images";
 import {
   fetchArchiveImage,
+  ownedArchiveImage,
   retryableStorageError,
   storageObjectExists,
 } from "../lib/archive-image-import";
@@ -50,6 +51,30 @@ test("image downloads stay inside the approved account folder", async () => {
   await assert.rejects(
     fetchArchiveImage("https://127.0.0.1/private.png", "account"),
     /approved Constant Contact folder/,
+  );
+});
+
+test("current and legacy account folders are approved image sources", () => {
+  assert.equal(
+    ownedArchiveImage(
+      new URL("https://files.constantcontact.com/account/photo.png"),
+      "account",
+    ),
+    true,
+  );
+  assert.equal(
+    ownedArchiveImage(
+      new URL("https://mlsvc01-prod.s3.amazonaws.com/account/legacy-photo.png"),
+      "account",
+    ),
+    true,
+  );
+  assert.equal(
+    ownedArchiveImage(
+      new URL("https://imgssl.constantcontact.com/account/provider-icon.png"),
+      "account",
+    ),
+    false,
   );
 });
 

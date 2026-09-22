@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { archiveNextPath, completedSends } from "../lib/archive";
+import {
+  archiveNextPath,
+  completedSends,
+  retryableArchiveError,
+} from "../lib/archive";
+import { AppError } from "../lib/errors";
 
 test("archive pagination keeps the provider cursor and a bounded page size", () => {
   assert.equal(
@@ -24,4 +29,10 @@ test("only completed sends qualify for the archive", () => {
     [{ send_status: "COMPLETED", run_date: "2026-09-22T00:00:00Z" }],
   );
   assert.throws(() => completedSends({}), /incomplete send history/);
+});
+
+test("a provider rate limit leaves the archive ready for its next scheduled step", () => {
+  assert.equal(retryableArchiveError(new AppError("Rate limited", 429)), true);
+  assert.equal(retryableArchiveError(new AppError("Forbidden", 403)), false);
+  assert.equal(retryableArchiveError(new Error("Network failure")), false);
 });
