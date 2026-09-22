@@ -26,6 +26,14 @@ export function storageObjectExists(error: {
   );
 }
 
+export function retryableStorageError(error: {
+  status?: number;
+  statusCode?: string;
+}) {
+  const status = error.status || Number(error.statusCode);
+  return status === 408 || status === 429 || status >= 500;
+}
+
 function imageType(bytes: Buffer) {
   if (bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
     return "image/png";
@@ -263,11 +271,24 @@ export async function imageBackupStep() {
             const { bytes, contentType } = downloaded;
             const sha256 = createHash("sha256").update(bytes).digest("hex");
             const storagePath = `${createHash("sha256").update(image.url).digest("hex")}.${types[contentType]}`;
-            const { error } = await storage.upload(storagePath, bytes, {
-              contentType,
-              cacheControl: "31536000",
-              upsert: false,
-            });
+            let error;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              ({ error } = await storage.upload(storagePath, bytes, {
+                contentType,
+                cacheControl: "31536000",
+                upsert: false,
+              }));
+              if (
+                !error ||
+                storageObjectExists(error) ||
+                !retryableStorageError(error) ||
+                attempt === 2
+              )
+                break;
+              await new Promise((resolve) =>
+                setTimeout(resolve, 500 * (attempt + 1)),
+              );
+            }
             if (error) {
               if (!storageObjectExists(error))
                 throw new Error(

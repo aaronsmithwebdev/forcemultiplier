@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { rewriteArchiveImages } from "../lib/archive-images";
 import {
   fetchArchiveImage,
+  retryableStorageError,
   storageObjectExists,
 } from "../lib/archive-image-import";
 
@@ -55,4 +56,10 @@ test("image downloads stay inside the approved account folder", async () => {
 test("a duplicate upload is verified even when Storage omits its message", () => {
   assert.equal(storageObjectExists({ status: 409, message: "<none>" }), true);
   assert.equal(storageObjectExists({ status: 429, message: "<none>" }), false);
+});
+
+test("temporary Storage failures are retried without retrying conflicts", () => {
+  assert.equal(retryableStorageError({ status: 520 }), true);
+  assert.equal(retryableStorageError({ statusCode: "429" }), true);
+  assert.equal(retryableStorageError({ status: 409 }), false);
 });
