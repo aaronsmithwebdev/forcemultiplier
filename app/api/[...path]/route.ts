@@ -37,6 +37,12 @@ import {
   archiveStep,
   startArchiveImport,
 } from "@/lib/archive";
+import { archivePreviewPolicy } from "@/lib/archive-preview";
+import {
+  imageBackupState,
+  imageBackupStep,
+  startImageBackup,
+} from "@/lib/archive-image-import";
 import {
   runScheduleNow,
   runScheduler,
@@ -159,14 +165,20 @@ async function handle(
       return json(await startArchiveImport());
     if (key === "archive/step" && method === "POST")
       return json(await archiveStep());
+    if (key === "archive/images" && method === "GET")
+      return json(await imageBackupState());
+    if (key === "archive/images/start" && method === "POST")
+      return json(await startImageBackup());
+    if (key === "archive/images/step" && method === "POST")
+      return json(await imageBackupStep());
     if (p[0] === "archive" && p[1] && p[2] === "preview" && method === "GET") {
-      const html = await archivePreview(z.string().max(100).parse(p[1]));
-      return new NextResponse(html, {
+      const preview = await archivePreview(z.string().max(100).parse(p[1]));
+      return new NextResponse(preview.html, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "private, no-store",
-          "Content-Security-Policy":
-            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; navigate-to 'none'",
+          "Content-Security-Policy": `sandbox; ${archivePreviewPolicy()}`,
+          "X-Archive-Images-Unresolved": String(preview.unresolved),
           "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",
         },

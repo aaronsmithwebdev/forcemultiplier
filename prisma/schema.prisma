@@ -332,3 +332,32 @@ model ArchivedEmail {
   @@index([accountId,campaignId])
   @@schema("forcemultiplier")
 }
+
+model ArchiveImageImport {
+  id String @id @default("constant-contact")
+  accountId String
+  cutoff DateTime
+  mediaFolder String
+  status String @default("inventory")
+  cursor String?
+  scanned Int @default(0)
+  leaseUntil DateTime?
+  error String?
+  startedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@schema("forcemultiplier")
+}
+
+model ArchivedImage {
+  accountId String
+  url String @db.Text
+  status String @default("pending")
+  storagePath String?
+  sha256 String?
+  contentType String?
+  error String?
+  emailIds String[]
+  updatedAt DateTime @updatedAt
+  @@id([accountId,url])
+  @@schema("forcemultiplier")
+}

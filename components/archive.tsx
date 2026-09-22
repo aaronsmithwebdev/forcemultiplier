@@ -23,15 +23,27 @@ type Job = {
   error: string | null;
 };
 type State = { importJob: Job | null; total: number; items: Item[] };
+type ImageJob = {
+  status: string;
+  scanned: number;
+  error: string | null;
+  cutoff: string;
+};
+type ImageState = {
+  job: ImageJob | null;
+  counts: Record<string, number>;
+};
 
 export function Archive() {
   const [state, setState] = useState<State | null>(null);
+  const [imageState, setImageState] = useState<ImageState | null>(null);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Item | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewError, setPreviewError] = useState("");
+  const [unresolvedImages, setUnresolvedImages] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -40,10 +52,14 @@ export function Archive() {
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const next: State = await api(
-          `archive?q=${encodeURIComponent(search)}&offset=${offset}`,
-        );
-        if (alive) setState(next);
+        const [next, images]: [State, ImageState] = await Promise.all([
+          api(`archive?q=${encodeURIComponent(search)}&offset=${offset}`),
+          api("archive/images"),
+        ]);
+        if (alive) {
+          setState(next);
+          setImageState(images);
+        }
       } catch (e) {
         if (alive) setError((e as Error).message);
       } finally {
@@ -67,11 +83,18 @@ export function Archive() {
       .then(async (response) => {
         if (response.status === 401) window.location.assign("/login");
         if (!response.ok) throw new Error("Could not load this email preview.");
-        return response.text();
+        return Promise.all([
+          response.text(),
+          Promise.resolve(
+            Number(response.headers.get("X-Archive-Images-Unresolved") || 0),
+          ),
+        ]);
       })
-      .then((html) => {
-        if (!controller.signal.aborted)
+      .then(([html, unresolved]) => {
+        if (!controller.signal.aborted) {
           setPreviewHtml(archivePreviewDocument(html));
+          setUnresolvedImages(unresolved);
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted)
@@ -107,12 +130,52 @@ export function Archive() {
     };
   }, [state?.importJob?.status]);
 
+  useEffect(() => {
+    if (
+      !imageState?.job ||
+      !["inventory", "copying"].includes(imageState.job.status)
+    )
+      return;
+    let alive = true;
+    async function work() {
+      while (alive) {
+        try {
+          const next: ImageState = await api("archive/images/step", "POST");
+          if (!alive) return;
+          setImageState(next);
+          if (!next.job || !["inventory", "copying"].includes(next.job.status))
+            return;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (e) {
+          if (alive) setError((e as Error).message);
+          return;
+        }
+      }
+    }
+    void work();
+    return () => {
+      alive = false;
+    };
+  }, [imageState?.job?.status]);
+
   async function start() {
     setBusy(true);
     setError("");
     try {
       const job: Job = await api("archive/start", "POST");
       setState((previous) => previous && { ...previous, importJob: job });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startImages() {
+    setBusy(true);
+    setError("");
+    try {
+      setImageState(await api("archive/images/start", "POST"));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -163,6 +226,40 @@ export function Archive() {
                   : job?.status === "completed"
                     ? "Check for new emails"
                     : "Start import"}
+              </Button>
+            )}
+          </section>
+          <section className="card archive-controls">
+            <div>
+              <h2>Image backup</h2>
+              <p>
+                {imageState?.job
+                  ? `${imageState.job.status} · ${imageState.job.scanned.toLocaleString()} emails scanned · ${(imageState.counts.copied || 0).toLocaleString()} images copied`
+                  : "Copy account-hosted images from sent emails into Supabase Storage."}
+              </p>
+              {imageState?.job ? (
+                <small>
+                  Sent since{" "}
+                  {new Date(imageState.job.cutoff).toLocaleDateString()} ·{" "}
+                  {(imageState.counts.failed || 0).toLocaleString()} failed ·{" "}
+                  {(imageState.counts.excluded || 0).toLocaleString()} shared or
+                  external images need review.
+                </small>
+              ) : null}
+              <Notice message={imageState?.job?.error || ""} />
+              {imageState?.job &&
+              ["inventory", "copying"].includes(imageState.job.status) ? (
+                <small>Keep this page open while images are copied.</small>
+              ) : null}
+            </div>
+            {(!imageState?.job ||
+              ["paused", "completed"].includes(imageState.job.status)) && (
+              <Button busy={busy} onClick={() => void startImages()}>
+                {imageState?.job?.status === "paused"
+                  ? "Resume image backup"
+                  : imageState?.job?.status === "completed"
+                    ? "Check for new images"
+                    : "Start image backup"}
               </Button>
             )}
           </section>
@@ -223,6 +320,7 @@ export function Archive() {
                             onClick={() => {
                               setPreviewHtml("");
                               setPreviewError("");
+                              setUnresolvedImages(0);
                               setSelected({ ...item });
                               setTimeout(
                                 () =>
@@ -278,9 +376,14 @@ export function Archive() {
               </div>
               <Notice message={selected.warning || ""} />
               <p>
-                Images and links are blocked in this safe preview. The original
-                HTML is stored separately.
+                Copied images are shown from Supabase. Links and other remote
+                requests remain blocked. The original HTML is stored separately.
               </p>
+              {unresolvedImages ? (
+                <Notice
+                  message={`${unresolvedImages} images are unavailable in this preview or need ownership review.`}
+                />
+              ) : null}
               <Notice message={previewError} />
               {!previewHtml && !previewError ? <Loading /> : null}
               {previewHtml ? (

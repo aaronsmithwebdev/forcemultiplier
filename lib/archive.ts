@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { AppError } from "./errors";
 import { connection, providerRequest } from "./providers";
+import { archiveImageUrl } from "./archive-image-import";
+import { rewriteArchiveImages } from "./archive-images";
 
 const pageSize = 4;
 const selected = {
@@ -53,7 +55,10 @@ async function account() {
 }
 
 export async function archiveState(search = "", offset = 0) {
-  const accountId = await account();
+  const importJob = await db.archiveImport.findUnique({
+    where: { id: "constant-contact" },
+  });
+  const accountId = importJob?.accountId || "";
   const query = search.trim().slice(0, 100);
   // ponytail: ILIKE scans this ~3k-item archive; add a full-text index if search slows down.
   const where: Prisma.ArchivedEmailWhereInput = {
@@ -66,8 +71,7 @@ export async function archiveState(search = "", offset = 0) {
         }
       : {}),
   };
-  const [importJob, total, items] = await Promise.all([
-    db.archiveImport.findUnique({ where: { id: "constant-contact" } }),
+  const [total, items] = await Promise.all([
     db.archivedEmail.count({ where }),
     db.archivedEmail.findMany({
       where,
@@ -78,7 +82,7 @@ export async function archiveState(search = "", offset = 0) {
     }),
   ]);
   return {
-    importJob: importJob?.accountId === accountId ? importJob : null,
+    importJob,
     total,
     items,
   };
@@ -310,15 +314,33 @@ export async function archiveStep() {
 }
 
 export async function archivePreview(id: string) {
-  const accountId = await account();
   const item = await db.archivedEmail.findFirst({
-    where: { id, accountId },
-    select: { previewHtml: true, sourceHtml: true },
+    where: { id },
+    select: { accountId: true, previewHtml: true, sourceHtml: true },
   });
   if (!item) throw new AppError("Archived email not found.", 404);
-  return (
+  const html =
     item.previewHtml ||
     item.sourceHtml ||
-    "<p>No HTML was available for this email.</p>"
+    "<p>No HTML was available for this email.</p>";
+  const found = rewriteArchiveImages(html).urls;
+  const images = found.size
+    ? await db.archivedImage.findMany({
+        where: {
+          accountId: item.accountId,
+          url: { in: [...found] },
+          status: "copied",
+        },
+        select: { url: true, storagePath: true },
+      })
+    : [];
+  const mapped = new Map(
+    images
+      .filter((image) => image.storagePath)
+      .map((image) => [image.url, archiveImageUrl(image.storagePath!)]),
   );
+  return {
+    html: rewriteArchiveImages(html, mapped).html,
+    unresolved: found.size - mapped.size,
+  };
 }
