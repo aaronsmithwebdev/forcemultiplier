@@ -16,7 +16,7 @@ Read-only baseline checked 22 September 2026 and updated after the user confirme
 | Resend API key and domain | Local key configured; one domain verified for sending | Domain check passed; account plan limits still need dashboard review |
 | Funraisin API | Key and base URL work with read-only Bearer requests | Add entrant audiences after archive and first sending workflow |
 | Funraisin scale | 166,914 participant-event entries, 136,999 participants, 160 events | Use complete paginated extraction; entry count is not unique email count |
-| Resubscription database tables | Latest committed resubscription migration is not yet applied to the connected database | Deploy and verify that existing migration before using the resubscription feature; do not infer migration success from the general database connection check |
+| Resubscription database tables | Migration applied and database schema verified on 22 September 2026 | Feature can use its tables; validate a real job separately before relying on it |
 
 The original token was used only for list/custom-field catalog reads and one denied campaign-list probe. After reauthorization with `campaign_data`, the connected account passed campaign reads and the sample activity checks recorded in the [archive strategy](template-archive-strategy.md). The account owner still needs to identify any automations, signup forms, landing pages, surveys, SMS, or preference-center workflows that must be replaced. The 101 lists will not be copied into Resend.
 

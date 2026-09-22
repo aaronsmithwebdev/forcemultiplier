@@ -16,6 +16,7 @@ A private workspace for building Salesforce-derived audiences and, today, syncin
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
 - Pull and delivery history with progress and recoverable errors.
 - A read-only Resend domain check on Connections when a server-side API key is configured; no Resend contacts or broadcasts are created yet.
+- An initial Constant Contact sent-email archive: resumable read-only import, campaign/subject/text search, and a restricted HTML preview. Original and preview HTML are stored in the private database. Remote images are blocked in the preview and are not yet backed up.
 
 **This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields to Constant Contact.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience. Configurable unsubscribe-only writeback from Constant Contact to Salesforce is implemented separately. Keep the existing sending workflows active until the Resend migration and comparison/cutover exercise are complete.
 
@@ -74,7 +75,7 @@ The new app does not deploy Salesforce objects or Apex. A package is unnecessary
 1. Create an application in the [developer portal](https://app.constantcontact.com/pages/dma/portal/).
 2. Register the exact callback from Connections:
    `http://localhost:3000/api/oauth/constant-contact/callback` for local use.
-3. Save its API key/client ID and client secret in Connections, then select **Connect account**. The app requests `contact_data`, `account_read`, and `offline_access`.
+3. Save its API key/client ID and client secret in Connections, then select **Connect account**. The app requests `contact_data`, `campaign_data`, `account_read`, and `offline_access`.
 4. Open **Constant Contact lists** to browse lists and members, inspect custom fields, or create an empty destination list. List creation immediately creates a real list in the connected account.
 
 New private apps must be authorized by their creator; follow Constant Contact's public-app process if other account users need to authorize your app. Refresh tokens rotate and are stored after each refresh.
@@ -85,7 +86,13 @@ New private apps must be authorized by their creator; follow Constant Contact's 
 
 Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability only. It does not create contacts, segments, or broadcasts. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
 
-The [migration inventory](docs/constant-contact-migration-inventory.md) records read-only Constant Contact, Resend, Funraisin, and database checks. The target does **not** copy Constant Contact lists: audiences come from Salesforce and later Funraisin entrants. The [historical email strategy](docs/template-archive-strategy.md) preserves past sent campaigns as an archive and converts selected examples into editable Templatical templates. Keep the existing sender active until the planned workflow-by-workflow cutover.
+The [migration inventory](docs/constant-contact-migration-inventory.md) records read-only Constant Contact, Resend, Funraisin, and database checks. The target does **not** copy Constant Contact lists: audiences come from Salesforce and later Funraisin entrants. The [historical email strategy](docs/template-archive-strategy.md) preserves past sent campaigns as an archive and converts an item into a Templatical campaign draft only when a user selects it. Keep the existing sender active until the planned workflow-by-workflow cutover.
+
+## Email archive
+
+Open **Email archive** and select **Start import**. The page advances the import while open; a secured Vercel Cron job also processes one small page each minute. A failed page pauses with its cursor intact so it can be resumed. The importer stores only activities with completed send history, including A/B variants, and never copies Constant Contact list memberships. Search uses saved campaign names, subjects, and text versions.
+
+The preview is isolated and blocks scripts, links, and external requests. Images are intentionally absent until they can be copied to managed storage and checked; the stored HTML still references its original image URLs. Complete the image-backup and visual-comparison work in the [archive strategy](docs/template-archive-strategy.md) before cancelling Constant Contact. Templatical editing and **Use in new campaign** are not implemented yet.
 
 ## Run a resubscription job
 

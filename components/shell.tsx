@@ -5,6 +5,7 @@ import {
   Layers3,
   UsersRound,
   List,
+  Mail,
   PlugZap,
   Activity,
   LogOut,
@@ -14,6 +15,7 @@ import {
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
+  ["/archive", "Email archive", Mail],
   ["/lists", "Constant Contact lists", List],
   ["/resubscriptions", "Resubscriptions", UsersRound],
   ["/activity", "Pull history", Activity],

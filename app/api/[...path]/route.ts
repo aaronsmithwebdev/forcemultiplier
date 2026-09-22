@@ -32,6 +32,12 @@ import {
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import { resendStatus } from "@/lib/resend";
 import {
+  archivePreview,
+  archiveState,
+  archiveStep,
+  startArchiveImport,
+} from "@/lib/archive";
+import {
   runScheduleNow,
   runScheduler,
   purgeExpiredDeliveryIssues,
@@ -87,6 +93,15 @@ async function handle(
   const method = request.method;
   const params = request.nextUrl.searchParams;
   try {
+    if (key === "cron/archive" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await archiveStep());
+    }
     if (key === "cron/resubscriptions" && method === "GET") {
       const secret = process.env.CRON_SECRET;
       if (
@@ -130,6 +145,33 @@ async function handle(
       return json({ ok: true });
     }
     const user = await requireSession();
+    if (key === "archive" && method === "GET")
+      return json(
+        await archiveState(
+          params.get("q") || "",
+          Math.max(
+            0,
+            Math.min(100000, Math.floor(Number(params.get("offset")) || 0)),
+          ),
+        ),
+      );
+    if (key === "archive/start" && method === "POST")
+      return json(await startArchiveImport());
+    if (key === "archive/step" && method === "POST")
+      return json(await archiveStep());
+    if (p[0] === "archive" && p[1] && p[2] === "preview" && method === "GET") {
+      const html = await archivePreview(z.string().max(100).parse(p[1]));
+      return new NextResponse(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "private, no-store",
+          "Content-Security-Policy":
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; navigate-to 'none'",
+          "Referrer-Policy": "no-referrer",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
     if (key === "resend/status" && method === "GET")
       return json(await resendStatus());
     if (key === "resubscriptions" && method === "GET")

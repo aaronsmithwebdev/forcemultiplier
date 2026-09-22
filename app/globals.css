@@ -396,6 +396,38 @@ summary {
   flex-wrap: wrap;
   margin-top: 20px;
 }
+.archive-controls,
+.archive-results,
+.archive-preview {
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.archive-controls,
+.archive-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.archive-search {
+  margin: 24px 0;
+}
+.archive-search input {
+  min-width: min(100%, 340px);
+}
+.archive-preview iframe {
+  width: 100%;
+  height: 3000px;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  background: white;
+  pointer-events: none;
+}
+.archive-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .card {
   background: var(--paper);
   border: 1px solid var(--line);

@@ -291,3 +291,44 @@ model ResubscribeWorker {
   leaseUntil DateTime?
   @@schema("forcemultiplier")
 }
+model ArchiveImport {
+  id String @id @default("constant-contact")
+  accountId String
+  status String @default("pending")
+  cursor String? @db.Text
+  scanned Int @default(0)
+  stored Int @default(0)
+  missing Int @default(0)
+  leaseUntil DateTime?
+  error String?
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@schema("forcemultiplier")
+}
+model ArchivedEmail {
+  id String @id @default(cuid())
+  accountId String
+  campaignId String
+  activityId String
+  role String
+  campaignType String
+  campaignName String
+  subject String
+  preheader String?
+  fromName String?
+  fromEmail String?
+  sentAt DateTime
+  sendCount Int @default(0)
+  sourceHtml String? @db.Text
+  previewHtml String? @db.Text
+  previewText String? @db.Text
+  permalink String?
+  sourceHash String?
+  warning String?
+  createdAt DateTime @default(now())
+  @@unique([accountId,activityId])
+  @@index([accountId,sentAt])
+  @@index([accountId,campaignId])
+  @@schema("forcemultiplier")
+}
