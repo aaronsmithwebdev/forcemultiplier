@@ -28,6 +28,7 @@ type ImageJob = {
   scanned: number;
   error: string | null;
   cutoff: string;
+  leaseUntil: string | null;
 };
 type ImageState = {
   job: ImageJob | null;
@@ -118,8 +119,8 @@ export function Archive() {
           setState((previous) => previous && { ...previous, importJob: job });
           if (!["pending", "running"].includes(job.status)) return;
           await new Promise((resolve) => setTimeout(resolve, 500));
-        } catch (e) {
-          if (alive) setError((e as Error).message);
+        } catch {
+          // The scheduled worker continues if this browser request times out.
           return;
         }
       }
@@ -138,17 +139,34 @@ export function Archive() {
       return;
     let alive = true;
     async function work() {
+      let failures = 0;
       while (alive) {
         try {
           const next: ImageState = await api("archive/images/step", "POST");
           if (!alive) return;
+          failures = 0;
           setImageState(next);
           if (!next.job || !["inventory", "copying"].includes(next.job.status))
             return;
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          const lease = next.job.leaseUntil
+            ? new Date(next.job.leaseUntil).getTime() - Date.now()
+            : 0;
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              lease > 0 ? Math.min(lease + 1000, 10000) : 500,
+            ),
+          );
         } catch (e) {
-          if (alive) setError((e as Error).message);
-          return;
+          if (!alive) return;
+          failures++;
+          if (failures === 3) {
+            setError(
+              `Image backup stopped after repeated server errors: ${(e as Error).message}`,
+            );
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10000));
         }
       }
     }

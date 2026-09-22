@@ -269,19 +269,16 @@ export async function archiveStep() {
         else await db.archivedEmail.create({ data });
       }
     };
-    for (let index = 0; index < page.campaigns.length; index += 2)
-      await Promise.all(
-        page.campaigns.slice(index, index + 2).map(importCampaign),
-      );
-    const [stored, missing] = await Promise.all([
-      db.archivedEmail.count({ where: { accountId: current.accountId } }),
-      db.archivedEmail.count({
-        where: {
-          accountId: current.accountId,
-          OR: [{ sourceHtml: null }, { previewHtml: null }],
-        },
-      }),
-    ]);
+    for (const campaign of page.campaigns) await importCampaign(campaign);
+    const stored = await db.archivedEmail.count({
+      where: { accountId: current.accountId },
+    });
+    const missing = await db.archivedEmail.count({
+      where: {
+        accountId: current.accountId,
+        OR: [{ sourceHtml: null }, { previewHtml: null }],
+      },
+    });
     const updated = await db.archiveImport.updateMany({
       where: { id: current.id, leaseUntil: lease },
       data: {
