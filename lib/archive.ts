@@ -340,7 +340,7 @@ export async function archivePreview(id: string) {
       .map((image) => [image.url, archiveImageUrl(image.storagePath!)]),
   );
   return {
-    html: rewriteArchiveImages(html, mapped).html,
+    html: rewriteArchiveImages(html, mapped, true).html,
     unresolved: found.size - mapped.size,
   };
 }

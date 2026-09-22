@@ -26,6 +26,7 @@ export function normalizeImageUrl(value: string) {
 export function rewriteArchiveImages(
   html: string,
   urls: ReadonlyMap<string, string> = new Map(),
+  disableLinks = false,
 ) {
   const found = new Set<string>();
   const replace = (value: string) => {
@@ -42,6 +43,14 @@ export function rewriteArchiveImages(
     );
   const visit = (node: Node, inStyle = false) => {
     for (const attr of node.attrs || []) {
+      if (
+        disableLinks &&
+        ["a", "area"].includes(node.tagName || "") &&
+        attr.name === "href"
+      ) {
+        attr.value = "#";
+        continue;
+      }
       if (
         attr.name === "background" ||
         (node.tagName === "img" && ["src", "srcset"].includes(attr.name)) ||

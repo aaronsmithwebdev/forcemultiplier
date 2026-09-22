@@ -32,6 +32,7 @@ test("inventory and replacement cover image tags, srcset and CSS without changin
     result.html,
     /href="https:\/\/files\.constantcontact\.com\/account\/photo\.png/,
   );
+  assert.match(rewriteArchiveImages(html, new Map(), true).html, /href="#"/);
 });
 
 test("image downloads stay inside the approved account folder", async () => {
