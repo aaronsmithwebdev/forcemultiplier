@@ -230,7 +230,7 @@ export async function imageBackupStep() {
       const images = await db.archivedImage.findMany({
         where: { accountId: job.accountId, status: "pending" },
         orderBy: { url: "asc" },
-        take: 2,
+        take: 4,
       });
       if (!images.length) {
         await db.archiveImageImport.update({
@@ -274,21 +274,36 @@ export async function imageBackupStep() {
           }),
         );
         let uploadError: unknown;
+        const updates = [];
         for (const [index, result] of results.entries()) {
           if (result.status === "rejected") {
             uploadError ||= result.reason;
             continue;
           }
-          await db.archivedImage.update({
-            where: {
-              accountId_url: {
-                accountId: job.accountId,
-                url: images[index].url,
-              },
-            },
-            data: result.value,
+          updates.push({
+            url: images[index].url,
+            status: result.value.status,
+            storage_path:
+              "storagePath" in result.value ? result.value.storagePath : null,
+            sha256: "sha256" in result.value ? result.value.sha256 : null,
+            content_type:
+              "contentType" in result.value ? result.value.contentType : null,
+            error: "error" in result.value ? result.value.error : null,
           });
         }
+        if (updates.length)
+          await db.$executeRaw`
+            UPDATE "forcemultiplier"."ArchivedImage" AS image SET
+              "status" = result.status,
+              "storagePath" = result.storage_path,
+              "sha256" = result.sha256,
+              "contentType" = result.content_type,
+              "error" = result.error,
+              "updatedAt" = CURRENT_TIMESTAMP
+            FROM jsonb_to_recordset(${JSON.stringify(updates)}::jsonb)
+              AS result(url text, status text, storage_path text, sha256 text, content_type text, error text)
+            WHERE image."accountId" = ${job.accountId} AND image."url" = result.url
+          `;
         if (uploadError) throw uploadError;
         await db.archiveImageImport.update({
           where: { id: job.id },
