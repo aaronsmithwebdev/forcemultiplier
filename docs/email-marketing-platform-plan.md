@@ -17,7 +17,7 @@ The first sending release is for one trusted internal workspace and one producti
 | Audience definitions and complete membership snapshots | ForceMultiplier/Postgres, using existing Salesforce extraction and a later Funraisin entrant adapter |
 | Marketing consent and suppression evidence | ForceMultiplier ledger plus Resend contact state; Salesforce opt-out is always an exclusion |
 | Contact delivery copy, segments, topics, and broadcast execution | Resend |
-| Editable templates, versions, assets, campaign drafts, and review history | ForceMultiplier/Postgres and private object storage for images |
+| Editable templates, versions, assets, campaign drafts, and review history | ForceMultiplier/Postgres and Supabase Storage for approved email images |
 | Immutable historical sent-email archive | ForceMultiplier metadata and stored original HTML/assets; source IDs retained |
 | Email authoring | Embedded Templatical; save its editable JSON and render final HTML on the server |
 | Delivery and engagement events | Resend webhooks, persisted and summarized in ForceMultiplier |
