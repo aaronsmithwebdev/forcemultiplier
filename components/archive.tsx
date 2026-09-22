@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { archivePreviewDocument } from "@/lib/archive-preview";
 import { api, Badge, Button, Empty, Heading, Loading, Notice } from "./common";
 
 type Item = {
@@ -29,6 +30,8 @@ export function Archive() {
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Item | null>(null);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,6 +56,29 @@ export function Archive() {
       clearTimeout(timer);
     };
   }, [search, offset]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const controller = new AbortController();
+    fetch(`/api/archive/${encodeURIComponent(selected.id)}/preview`, {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (response.status === 401) window.location.assign("/login");
+        if (!response.ok) throw new Error("Could not load this email preview.");
+        return response.text();
+      })
+      .then((html) => {
+        if (!controller.signal.aborted)
+          setPreviewHtml(archivePreviewDocument(html));
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setPreviewError((error as Error).message);
+      });
+    return () => controller.abort();
+  }, [selected]);
 
   useEffect(() => {
     if (
@@ -195,7 +221,9 @@ export function Archive() {
                           <Button
                             variant="secondary"
                             onClick={() => {
-                              setSelected(item);
+                              setPreviewHtml("");
+                              setPreviewError("");
+                              setSelected({ ...item });
                               setTimeout(
                                 () =>
                                   document
@@ -253,13 +281,17 @@ export function Archive() {
                 Images and links are blocked in this safe preview. The original
                 HTML is stored separately.
               </p>
-              <iframe
-                key={selected.id}
-                title={`Archived preview: ${selected.campaignName}`}
-                src={`/api/archive/${selected.id}/preview`}
-                sandbox=""
-                tabIndex={-1}
-              />
+              <Notice message={previewError} />
+              {!previewHtml && !previewError ? <Loading /> : null}
+              {previewHtml ? (
+                <iframe
+                  key={selected.id}
+                  title={`Archived preview: ${selected.campaignName}`}
+                  srcDoc={previewHtml}
+                  sandbox=""
+                  tabIndex={-1}
+                />
+              ) : null}
               {selected.previewText && (
                 <details>
                   <summary>Text version</summary>
