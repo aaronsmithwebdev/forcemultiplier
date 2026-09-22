@@ -230,7 +230,8 @@ export async function imageBackupStep() {
       const images = await db.archivedImage.findMany({
         where: { accountId: job.accountId, status: "pending" },
         orderBy: { url: "asc" },
-        take: 4,
+        // ponytail: Eight parallel images fit this route's 60s budget; tune after measuring production uploads.
+        take: 8,
       });
       if (!images.length) {
         await db.archiveImageImport.update({
