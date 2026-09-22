@@ -293,6 +293,25 @@ export async function archiveStep() {
     });
     if (!updated.count)
       throw new AppError("Archive import lease expired; retry the page.", 409);
+    // Rescan images as the archive grows, including its final partial page.
+    if (
+      !next ||
+      Math.floor((current.scanned + page.campaigns.length) / 50) >
+        Math.floor(current.scanned / 50)
+    ) {
+      try {
+        await db.archiveImageImport.updateMany({
+          where: {
+            id: "constant-contact",
+            accountId: current.accountId,
+            status: { in: ["copying", "completed"] },
+          },
+          data: { status: "inventory" },
+        });
+      } catch {
+        // The archive is committed; image inventory can be resumed separately.
+      }
+    }
     return db.archiveImport.findUnique({ where: { id: current.id } });
   } catch (error) {
     await db.archiveImport.updateMany({
