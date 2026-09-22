@@ -43,6 +43,7 @@ export function rewriteArchiveImages(
   const visit = (node: Node, inStyle = false) => {
     for (const attr of node.attrs || []) {
       if (
+        attr.name === "background" ||
         (node.tagName === "img" && ["src", "srcset"].includes(attr.name)) ||
         (node.tagName === "source" && attr.name === "srcset")
       ) {

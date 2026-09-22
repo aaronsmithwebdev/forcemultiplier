@@ -6,7 +6,7 @@ import { fetchArchiveImage } from "../lib/archive-image-import";
 test("inventory and replacement cover image tags, srcset and CSS without changing links", () => {
   const original =
     "https://files.constantcontact.com/account/photo.png?a=1&b=2";
-  const html = `<a href="${original}">link</a><img src="https://files.constantcontact.com/account/photo.png?a=1&amp;b=2" srcset="${original} 1x, https://other.example/large.png 2x"><style>.hero{background:url('${original}')}</style><div style="background-image:url(${original})"></div>`;
+  const html = `<a href="${original}">link</a><img src="https://files.constantcontact.com/account/photo.png?a=1&amp;b=2" srcset="${original} 1x, https://other.example/large.png 2x"><style>.hero{background:url('${original}')}</style><div style="background-image:url(${original})" background="${original}"></div>`;
   const result = rewriteArchiveImages(
     html,
     new Map([[original, "https://storage.example/photo.png"]]),
@@ -23,6 +23,10 @@ test("inventory and replacement cover image tags, srcset and CSS without changin
   assert.match(
     result.html,
     /background:url\('https:\/\/storage\.example\/photo\.png'\)/,
+  );
+  assert.match(
+    result.html,
+    /background="https:\/\/storage\.example\/photo\.png"/,
   );
   assert.match(
     result.html,
