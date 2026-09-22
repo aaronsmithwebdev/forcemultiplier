@@ -227,71 +227,69 @@ export async function imageBackupStep() {
         },
       });
     } else {
-      const image = await db.archivedImage.findFirst({
+      const images = await db.archivedImage.findMany({
         where: { accountId: job.accountId, status: "pending" },
         orderBy: { url: "asc" },
+        take: 2,
       });
-      if (!image) {
+      if (!images.length) {
         await db.archiveImageImport.update({
           where: { id: job.id },
           data: { status: "completed", leaseUntil: null },
         });
       } else {
-        let bytes: Buffer;
-        let contentType: string;
-        try {
-          ({ bytes, contentType } = await fetchArchiveImage(
-            image.url,
-            job.mediaFolder,
-          ));
-        } catch (error) {
+        const storage = (await supabase()).storage.from(imageBucket);
+        const results = await Promise.allSettled(
+          images.map(async (image) => {
+            let downloaded: Awaited<ReturnType<typeof fetchArchiveImage>>;
+            try {
+              downloaded = await fetchArchiveImage(image.url, job.mediaFolder);
+            } catch (error) {
+              return { status: "failed", error: String(error).slice(0, 500) };
+            }
+            const { bytes, contentType } = downloaded;
+            const sha256 = createHash("sha256").update(bytes).digest("hex");
+            const storagePath = `${createHash("sha256").update(image.url).digest("hex")}.${types[contentType]}`;
+            const { error } = await storage.upload(storagePath, bytes, {
+              contentType,
+              cacheControl: "31536000",
+              upsert: false,
+            });
+            if (error) {
+              if (!/already exists|duplicate/i.test(error.message)) throw error;
+              const response = await fetch(archiveImageUrl(storagePath), {
+                signal: AbortSignal.timeout(30000),
+              });
+              if (
+                !response.ok ||
+                createHash("sha256")
+                  .update(Buffer.from(await response.arrayBuffer()))
+                  .digest("hex") !== sha256
+              )
+                throw new Error(
+                  "Existing storage object does not match the source image.",
+                );
+            }
+            return { status: "copied", storagePath, sha256, contentType };
+          }),
+        );
+        let uploadError: unknown;
+        for (const [index, result] of results.entries()) {
+          if (result.status === "rejected") {
+            uploadError ||= result.reason;
+            continue;
+          }
           await db.archivedImage.update({
             where: {
-              accountId_url: { accountId: job.accountId, url: image.url },
+              accountId_url: {
+                accountId: job.accountId,
+                url: images[index].url,
+              },
             },
-            data: { status: "failed", error: String(error).slice(0, 500) },
+            data: result.value,
           });
-          await db.archiveImageImport.update({
-            where: { id: job.id },
-            data: { leaseUntil: null },
-          });
-          return imageBackupState();
         }
-        const sha256 = createHash("sha256").update(bytes).digest("hex");
-        const path = `${createHash("sha256").update(image.url).digest("hex")}.${types[contentType]}`;
-        const storage = (await supabase()).storage.from(imageBucket);
-        const { error } = await storage.upload(path, bytes, {
-          contentType,
-          cacheControl: "31536000",
-          upsert: false,
-        });
-        if (error) {
-          if (!/already exists|duplicate/i.test(error.message)) throw error;
-          const response = await fetch(archiveImageUrl(path), {
-            signal: AbortSignal.timeout(30000),
-          });
-          if (
-            !response.ok ||
-            createHash("sha256")
-              .update(Buffer.from(await response.arrayBuffer()))
-              .digest("hex") !== sha256
-          )
-            throw new Error(
-              "Existing storage object does not match the source image.",
-            );
-        }
-        await db.archivedImage.update({
-          where: {
-            accountId_url: { accountId: job.accountId, url: image.url },
-          },
-          data: {
-            status: "copied",
-            storagePath: path,
-            sha256,
-            contentType,
-            error: null,
-          },
-        });
+        if (uploadError) throw uploadError;
         await db.archiveImageImport.update({
           where: { id: job.id },
           data: { leaseUntil: null },
