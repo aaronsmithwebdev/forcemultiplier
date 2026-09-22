@@ -386,3 +386,20 @@ model EmailTemplateRevision {
   @@index([templateId,createdAt])
   @@schema("forcemultiplier")
 }
+
+model Campaign {
+  id String @id @default(cuid())
+  name String
+  content Json
+  status String @default("draft")
+  subject String @default("")
+  preheader String @default("")
+  fromName String @default("")
+  fromEmail String @default("")
+  replyToEmail String @default("")
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([updatedAt])
+  @@schema("forcemultiplier")
+}

@@ -15,15 +15,16 @@ A private workspace for building Salesforce-derived audiences and, today, syncin
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
 - Pull and delivery history with progress and recoverable errors.
-- A read-only Resend domain check on Connections when a server-side API key is configured; no Resend contacts or broadcasts are created yet.
+- A Resend domain check on Connections plus signed-in-user-only campaign test emails when a server-side API key is configured; no Resend contacts or production broadcasts are created yet.
 - A Constant Contact sent-email archive: resumable read-only import, campaign/subject/text search, a restricted HTML preview, and a resumable image backup to Supabase Storage. Original and preview HTML remain in the private database; successfully copied image URLs are substituted only in the displayed copy.
 - A Templatical email-template library with drag-and-drop authoring, responsive content blocks, Supabase-backed image uploads, accessibility and link checks, database-backed saves, version restore, and inline Liquid-style merge tags from saved Salesforce audience fields.
+- A draft campaign flow covering campaign name, optional saved-template starting point, Templatical design and quality checks, sender/subject/preheader settings, native desktop/mobile preview, and Resend test sends.
 
 **This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields to Constant Contact.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience. Configurable unsubscribe-only writeback from Constant Contact to Salesforce is implemented separately. Keep the existing sending workflows active until the Resend migration and comparison/cutover exercise are complete.
 
 ## Start locally
 
-Use Node.js 22.12+ or a supported newer LTS release.
+Use Node.js 22.22.2+ or a supported newer LTS release.
 
 For this existing workspace, dependencies, local secrets, and the private Supabase schema have already been prepared. Start with:
 
@@ -85,7 +86,7 @@ New private apps must be authorized by their creator; follow Constant Contact's 
 
 ## Check Resend readiness
 
-Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability only. It does not create contacts, segments, or broadcasts. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
+Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability. Campaign test sends use the same server-only key, while contacts, segments, and production broadcasts remain disabled. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
 
 The [migration inventory](docs/constant-contact-migration-inventory.md) records read-only Constant Contact, Resend, Funraisin, and database checks. The target does **not** copy Constant Contact lists: audiences come from Salesforce and later Funraisin entrants. The [historical email strategy](docs/template-archive-strategy.md) preserves past sent campaigns as an archive and converts an item into a Templatical campaign draft only when a user selects it. Keep the existing sender active until the planned workflow-by-workflow cutover.
 
@@ -98,6 +99,10 @@ After importing sent emails, select **Start image backup** on the archive page a
 ## Build an email template
 
 Open **Email templates**, create a template, and use the Templatical block library to compose the email. Images can be uploaded or selected from the workspace's `email-template-assets` Supabase Storage bucket. Choose **Merge tag** in supported fields or type `{{` directly to search Salesforce fields saved on any audience. Tags are stored as Liquid-style tokens such as `{{contact.FirstName}}` and remain intact for the future campaign renderer; the delivery-only `{{unsubscribe_url}}` token is also available. Save creates a database-backed revision that can be previewed and restored from the editor's history control.
+
+## Create and test a campaign
+
+Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then add the subject, preheader, sender name, verified-domain sender email, and reply-to email. In the final step, use Templatical's **Preview** control to switch between desktop and mobile, and **Test** to send through Resend. Test recipients are restricted on the server to the signed-in user's email address. Production audience selection and broadcasts remain intentionally disabled until consent, approval, and duplicate-send safeguards are implemented.
 
 ## Run a resubscription job
 

@@ -145,7 +145,8 @@ function ResendCard() {
       </div>
       <h2>Resend</h2>
       <p className="card-description">
-        The future sending service. This check only reads domain status.
+        Domain readiness is checked here; campaign test emails send through the
+        configured key.
       </p>
       <Notice message={error} />
       {!status && !error ? <Loading /> : null}

@@ -21,7 +21,7 @@ const assetTypes: Record<string, string> = {
   "image/webp": "webp",
 };
 
-function mediaProvider(): MediaProvider {
+export function templateMediaProvider(): MediaProvider {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) throw new Error("Supabase Storage is not configured.");
@@ -114,7 +114,9 @@ export function TemplateEditor({ id }: { id: string }) {
         const instance = await init({
           container: container.current,
           mergeTags: { syntax: "liquid", tags },
-          media: mediaProvider(),
+          media: templateMediaProvider(),
+          lint: {},
+          htmlBlockPreview: true,
           templates,
           versionHistory: {
             list: (templateId) => api(`templates/${templateId}/versions`),

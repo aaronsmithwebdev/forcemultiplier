@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Layers3,
+  Send,
   UsersRound,
   List,
   Mail,
@@ -16,6 +17,7 @@ import {
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
+  ["/campaigns", "Campaigns", Send],
   ["/templates", "Email templates", FilePenLine],
   ["/archive", "Email archive", Mail],
   ["/lists", "Constant Contact lists", List],

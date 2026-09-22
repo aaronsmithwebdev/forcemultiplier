@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { TemplateContent } from "@templatical/types";
 import { db } from "@/lib/db";
 import { AppError, publicError } from "@/lib/errors";
 import { login, logout, requireSession } from "@/lib/auth";
@@ -76,6 +77,14 @@ import {
   saveTemplate,
   templateMergeTags,
 } from "@/lib/email-templates";
+import {
+  createCampaign,
+  deleteCampaign,
+  getCampaign,
+  listCampaigns,
+  saveCampaign,
+} from "@/lib/campaigns";
+import { sendResendTest } from "@/lib/campaign-email";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -170,6 +179,110 @@ async function handle(
       .passthrough();
     const templateName = z.string().trim().min(1).max(120);
     const templateId = z.string().min(1).max(100);
+    const campaignContent = templateContent;
+    const campaignName = z.string().trim().min(1).max(120);
+    const singleLine = (max: number) =>
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(max)
+        .regex(/^[^\r\n]+$/);
+    const senderName = singleLine(100).regex(/^[^<>]+$/);
+    const email = z
+      .email()
+      .max(254)
+      .transform((value) => value.toLowerCase());
+    if (key === "campaigns" && method === "GET")
+      return json(await listCampaigns(params.get("q") || ""));
+    if (key === "campaigns" && method === "POST") {
+      const data = z
+        .object({
+          name: campaignName,
+          templateId: templateId.optional(),
+        })
+        .parse(await body(request));
+      return json(
+        await createCampaign(data.name, user.id, data.templateId),
+        201,
+      );
+    }
+    if (p[0] === "campaigns" && p[1]) {
+      const id = templateId.parse(p[1]);
+      if (p[2] === "test" && p.length === 3 && method === "POST") {
+        const data = z
+          .object({ recipient: email, content: campaignContent })
+          .parse(await body(request, 2_000_000));
+        if (!user.email || data.recipient !== user.email.toLowerCase())
+          throw new AppError(
+            "Test emails can only be sent to your signed-in address.",
+            403,
+          );
+        const campaign = await getCampaign(id);
+        if (
+          !campaign.subject ||
+          !campaign.fromName ||
+          !campaign.fromEmail ||
+          !campaign.replyToEmail
+        )
+          throw new AppError(
+            "Complete and save Email settings before sending a test.",
+          );
+        const fromDomain = campaign.fromEmail.split("@")[1]?.toLowerCase();
+        const resend = await resendStatus();
+        if (
+          !resend.domains.some(
+            (domain: { name: string; status: string; sending: boolean }) =>
+              domain.sending &&
+              domain.status === "verified" &&
+              domain.name.toLowerCase() === fromDomain,
+          )
+        )
+          throw new AppError(
+            "The From email must use a verified Resend sending domain.",
+            409,
+          );
+        return json(
+          await sendResendTest(
+            campaign,
+            data.recipient,
+            data.content as unknown as TemplateContent,
+          ),
+          201,
+        );
+      }
+      if (p.length === 2 && method === "GET")
+        return json(await getCampaign(id));
+      if (p.length === 2 && method === "PATCH") {
+        const data = z
+          .object({
+            name: campaignName.optional(),
+            content: campaignContent.optional(),
+            subject: singleLine(500).optional(),
+            preheader: z
+              .string()
+              .trim()
+              .max(200)
+              .regex(/^[^\r\n]*$/)
+              .optional(),
+            fromName: senderName.optional(),
+            fromEmail: email.optional(),
+            replyToEmail: email.optional(),
+          })
+          .refine((value) => Object.keys(value).length > 0, {
+            message: "Include a campaign field to save.",
+          })
+          .parse(await body(request, 2_000_000));
+        return json(
+          await saveCampaign(id, {
+            ...data,
+            content: data.content as unknown as TemplateContent | undefined,
+          }),
+        );
+      }
+      if (p.length === 2 && method === "DELETE")
+        return json(await deleteCampaign(id));
+    }
     if (key === "templates/merge-tags" && method === "GET")
       return json(await templateMergeTags());
     if (key === "templates" && method === "GET")
