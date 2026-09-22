@@ -6,7 +6,7 @@ import { connection, providerRequest } from "./providers";
 import { archiveImageUrl } from "./archive-image-import";
 import { rewriteArchiveImages } from "./archive-images";
 
-const pageSize = 4;
+const pageSize = 1;
 const selected = {
   id: true,
   campaignName: true,

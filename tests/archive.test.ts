@@ -7,7 +7,7 @@ test("archive pagination keeps the provider cursor and a bounded page size", () 
     archiveNextPath(
       "https://api.cc.email/v3/emails?limit=50&next=opaque%2Bcursor",
     ),
-    "/v3/emails?limit=4&next=opaque%2Bcursor",
+    "/v3/emails?limit=1&next=opaque%2Bcursor",
   );
   assert.throws(
     () => archiveNextPath("https://other.example/v3/emails?next=x"),
