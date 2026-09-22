@@ -14,6 +14,18 @@ const types: Record<string, string> = {
   "image/webp": "webp",
 };
 
+export function storageObjectExists(error: {
+  status?: number;
+  code?: string;
+  message: string;
+}) {
+  return (
+    error.status === 409 ||
+    error.code === "ResourceAlreadyExists" ||
+    /already exists|duplicate/i.test(error.message)
+  );
+}
+
 function imageType(bytes: Buffer) {
   if (bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
     return "image/png";
@@ -230,8 +242,8 @@ export async function imageBackupStep() {
       const images = await db.archivedImage.findMany({
         where: { accountId: job.accountId, status: "pending" },
         orderBy: { url: "asc" },
-        // ponytail: Eight parallel images fit this route's 60s budget; tune after measuring production uploads.
-        take: 8,
+        // ponytail: Four parallel images fit this route's 60s budget; tune after measuring production uploads.
+        take: 4,
       });
       if (!images.length) {
         await db.archiveImageImport.update({
@@ -257,7 +269,10 @@ export async function imageBackupStep() {
               upsert: false,
             });
             if (error) {
-              if (!/already exists|duplicate/i.test(error.message)) throw error;
+              if (!storageObjectExists(error))
+                throw new Error(
+                  `Storage upload failed (${error.status || "unknown"}/${error.statusCode || "unknown"}): ${error.message}`,
+                );
               const response = await fetch(archiveImageUrl(storagePath), {
                 signal: AbortSignal.timeout(30000),
               });

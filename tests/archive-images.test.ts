@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rewriteArchiveImages } from "../lib/archive-images";
-import { fetchArchiveImage } from "../lib/archive-image-import";
+import {
+  fetchArchiveImage,
+  storageObjectExists,
+} from "../lib/archive-image-import";
 
 test("inventory and replacement cover image tags, srcset and CSS without changing links", () => {
   const original =
@@ -47,4 +50,9 @@ test("image downloads stay inside the approved account folder", async () => {
     fetchArchiveImage("https://127.0.0.1/private.png", "account"),
     /approved Constant Contact folder/,
   );
+});
+
+test("a duplicate upload is verified even when Storage omits its message", () => {
+  assert.equal(storageObjectExists({ status: 409, message: "<none>" }), true);
+  assert.equal(storageObjectExists({ status: 429, message: "<none>" }), false);
 });
