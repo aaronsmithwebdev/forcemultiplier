@@ -72,6 +72,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       ["/connections", "Make the connection."],
       ["/audiences", "Your audiences."],
       ["/audiences/new", "Start with the right people."],
+      ["/templates", "Email templates"],
       ["/lists", "Lists, all in one place."],
       ["/activity", "Every pull, accounted for."],
     ]) {

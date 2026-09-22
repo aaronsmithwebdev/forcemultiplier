@@ -65,6 +65,17 @@ import {
   setResubscribeStatus,
   uploadResubscribeChunk,
 } from "@/lib/resubscriptions";
+import {
+  createTemplate,
+  deleteTemplate,
+  getTemplate,
+  getTemplateVersion,
+  listTemplates,
+  listTemplateVersions,
+  restoreTemplateVersion,
+  saveTemplate,
+  templateMergeTags,
+} from "@/lib/email-templates";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -79,9 +90,9 @@ const queryBody = z.object({
   query: z.string().max(20000),
   fields: z.array(z.string().max(200)).max(30).default([]),
 });
-async function body(request: Request) {
+async function body(request: Request, maxLength = 50000) {
   const text = await request.text();
-  if (text.length > 50000) throw new AppError("Request is too large.", 413);
+  if (text.length > maxLength) throw new AppError("Request is too large.", 413);
   try {
     return JSON.parse(text);
   } catch {
@@ -151,6 +162,56 @@ async function handle(
       return json({ ok: true });
     }
     const user = await requireSession();
+    const templateContent = z
+      .object({
+        blocks: z.array(z.unknown()).max(1000),
+        settings: z.record(z.string(), z.unknown()),
+      })
+      .passthrough();
+    const templateName = z.string().trim().min(1).max(120);
+    const templateId = z.string().min(1).max(100);
+    if (key === "templates/merge-tags" && method === "GET")
+      return json(await templateMergeTags());
+    if (key === "templates" && method === "GET")
+      return json(await listTemplates(params.get("q") || ""));
+    if (key === "templates" && method === "POST") {
+      const data = z
+        .object({ name: templateName, content: templateContent.optional() })
+        .parse(await body(request, 2_000_000));
+      return json(await createTemplate(data, user.id), 201);
+    }
+    if (p[0] === "templates" && p[1]) {
+      const id = templateId.parse(p[1]);
+      if (p[2] === "versions" && p.length === 3 && method === "GET")
+        return json(await listTemplateVersions(id));
+      if (p[2] === "versions" && p[3] && p.length === 4 && method === "GET")
+        return json(await getTemplateVersion(id, templateId.parse(p[3])));
+      if (
+        p[2] === "versions" &&
+        p[3] &&
+        p[4] === "restore" &&
+        method === "POST"
+      )
+        return json(
+          await restoreTemplateVersion(id, templateId.parse(p[3]), user.id),
+        );
+      if (p.length === 2 && method === "GET")
+        return json(await getTemplate(id));
+      if (p.length === 2 && method === "PATCH") {
+        const data = z
+          .object({
+            name: templateName.optional(),
+            content: templateContent.optional(),
+          })
+          .refine((value) => value.name || value.content, {
+            message: "Include a template name or content.",
+          })
+          .parse(await body(request, 2_000_000));
+        return json(await saveTemplate(id, data, user.id));
+      }
+      if (p.length === 2 && method === "DELETE")
+        return json(await deleteTemplate(id));
+    }
     if (key === "archive" && method === "GET")
       return json(
         await archiveState(
@@ -651,4 +712,5 @@ async function handle(
 export const GET = handle;
 export const POST = handle;
 export const PUT = handle;
+export const PATCH = handle;
 export const DELETE = handle;

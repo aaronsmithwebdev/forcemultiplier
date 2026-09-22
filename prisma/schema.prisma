@@ -361,3 +361,28 @@ model ArchivedImage {
   @@id([accountId,url])
   @@schema("forcemultiplier")
 }
+
+model EmailTemplate {
+  id String @id @default(cuid())
+  name String
+  content Json
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  revisions EmailTemplateRevision[]
+  @@index([updatedAt])
+  @@schema("forcemultiplier")
+}
+
+model EmailTemplateRevision {
+  id String @id @default(cuid())
+  templateId String
+  template EmailTemplate @relation(fields:[templateId], references:[id], onDelete:Cascade)
+  content Json
+  label String?
+  createdBy String
+  automatic Boolean @default(true)
+  createdAt DateTime @default(now())
+  @@index([templateId,createdAt])
+  @@schema("forcemultiplier")
+}

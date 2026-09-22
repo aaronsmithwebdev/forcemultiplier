@@ -6,6 +6,7 @@ import {
   UsersRound,
   List,
   Mail,
+  FilePenLine,
   PlugZap,
   Activity,
   LogOut,
@@ -15,6 +16,7 @@ import {
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
+  ["/templates", "Email templates", FilePenLine],
   ["/archive", "Email archive", Mail],
   ["/lists", "Constant Contact lists", List],
   ["/resubscriptions", "Resubscriptions", UsersRound],

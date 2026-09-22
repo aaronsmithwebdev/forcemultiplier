@@ -428,6 +428,59 @@ summary {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.template-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+.template-row-actions .button {
+  padding: 7px 11px;
+}
+.icon-button {
+  padding: 7px !important;
+}
+.main-content:has(.template-editor-page) {
+  max-width: none;
+  padding: 18px 22px 28px;
+}
+.template-editor-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 38px;
+}
+.template-editor-toolbar .back-link {
+  margin: 0;
+}
+.template-editor-toolbar > span {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+}
+.template-editor-toolbar code {
+  background: #eaf0e6;
+  border-radius: 4px;
+  color: var(--green);
+  padding: 1px 5px;
+}
+.template-editor-frame {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 680px;
+  position: relative;
+}
+.template-editor-frame > .loading {
+  inset: 0;
+  position: absolute;
+}
+.templatical-container {
+  height: calc(100vh - 165px);
+  min-height: 680px;
+}
 .card {
   background: var(--paper);
   border: 1px solid var(--line);
