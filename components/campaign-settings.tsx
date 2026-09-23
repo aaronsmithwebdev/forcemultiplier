@@ -14,6 +14,22 @@ type Settings = {
   replyToEmail: string;
 };
 type ResendDomain = { name: string; status: string; sending: boolean };
+const senders = [
+  {
+    id: "bloody-long-walk",
+    label: "The Bloody Long Walk",
+    fromName: "The Bloody Long Walk",
+    fromEmail: "communications@bloodylongwalk.com.au",
+    replyToEmail: "bloodylongwalk@mito.org.au",
+  },
+  {
+    id: "mito-foundation",
+    label: "Mito Foundation",
+    fromName: "Mito Foundation",
+    fromEmail: "communications@mito.org.au",
+    replyToEmail: "communications@mito.org.au",
+  },
+] as const;
 const empty: Settings = {
   name: "",
   subject: "",
@@ -53,6 +69,18 @@ export function CampaignSettings({ id }: { id: string }) {
     setMessage("");
   }
 
+  function chooseSender(id: string) {
+    const sender = senders.find((item) => item.id === id);
+    if (!sender) return;
+    setValues((current) => ({
+      ...current,
+      fromName: sender.fromName,
+      fromEmail: sender.fromEmail,
+      replyToEmail: sender.replyToEmail,
+    }));
+    setMessage("");
+  }
+
   async function save(goNext = false) {
     setBusy(true);
     setError("");
@@ -73,6 +101,8 @@ export function CampaignSettings({ id }: { id: string }) {
   const verifiedFrom = domains.some(
     (domain) => domain.name.toLowerCase() === fromDomain,
   );
+  const selectedSender =
+    senders.find((sender) => sender.fromEmail === values.fromEmail)?.id || "";
   return (
     <div className="campaign-settings-page">
       <Link href="/campaigns" className="back-link">
@@ -95,6 +125,26 @@ export function CampaignSettings({ id }: { id: string }) {
           </span>
         </div>
         <div className="settings-fields">
+          <label className="wide-field">
+            Sender identity
+            <select
+              value={selectedSender}
+              onChange={(event) => chooseSender(event.target.value)}
+            >
+              <option value="" disabled>
+                Choose a sender identity
+              </option>
+              {senders.map((sender) => (
+                <option key={sender.id} value={sender.id}>
+                  {sender.label} · {sender.fromEmail}
+                </option>
+              ))}
+            </select>
+            <small>
+              Choosing a brand fills the sender and reply-to fields below; they
+              remain editable.
+            </small>
+          </label>
           <label>
             Campaign name
             <input

@@ -102,7 +102,7 @@ Open **Email templates**, create a template, and use the Templatical block libra
 
 ## Create and test a campaign
 
-Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then add the subject, preheader, sender name, verified-domain sender email, and reply-to email. In the final step, use Templatical's **Preview** control to switch between desktop and mobile, and **Test** to send through Resend. Test recipients are restricted on the server to the signed-in user's email address. Production audience selection and broadcasts remain intentionally disabled until consent, approval, and duplicate-send safeguards are implemented.
+Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then choose the Bloody Long Walk or Mito Foundation sender identity and add the subject and preheader. Sender and reply-to fields remain editable, but the From address must use a verified Resend domain. In the final step, use Templatical's **Preview** control to switch between desktop and mobile, and **Test** to send through Resend. Test recipients are restricted on the server to the signed-in user's email address. Production audience selection and broadcasts remain intentionally disabled until consent, approval, and duplicate-send safeguards are implemented.
 
 ## Run a resubscription job
 
