@@ -10,6 +10,7 @@ type Node = {
 
 const cssUrl = /url\(\s*(["']?)(.*?)\1\s*\)/gi;
 const srcsetUrl = /(?:https?:)?\/\/[^\s,]+/gi;
+const fontFile = /\.(?:eot|otf|ttf|woff2?)(?:$|[?#])/i;
 
 export function normalizeImageUrl(value: string) {
   try {
@@ -36,11 +37,10 @@ export function rewriteArchiveImages(
     return urls.get(url) || value;
   };
   const rewriteCss = (css: string) =>
-    css.replace(
-      cssUrl,
-      (_match, quote: string, value: string) =>
-        `url(${quote}${replace(value.trim())}${quote})`,
-    );
+    css.replace(cssUrl, (_match, quote: string, value: string) => {
+      const url = value.trim();
+      return `url(${quote}${fontFile.test(url) ? url : replace(url)}${quote})`;
+    });
   const visit = (node: Node, inStyle = false) => {
     for (const attr of node.attrs || []) {
       if (

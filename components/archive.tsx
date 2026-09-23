@@ -399,7 +399,7 @@ export function Archive() {
               </p>
               {unresolvedImages ? (
                 <Notice
-                  message={`${unresolvedImages} images are unavailable in this preview or need ownership review.`}
+                  message={`${unresolvedImages} image references are intentionally blocked or unavailable. These are commonly Constant Contact social icons or tracking pixels.`}
                 />
               ) : null}
               <Notice message={previewError} />

@@ -422,7 +422,6 @@ summary {
   margin-top: 20px;
   border: 1px solid var(--line);
   background: white;
-  pointer-events: none;
 }
 .archive-preview pre {
   white-space: pre-wrap;

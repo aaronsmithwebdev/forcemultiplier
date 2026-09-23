@@ -40,6 +40,16 @@ test("inventory and replacement cover image tags, srcset and CSS without changin
   assert.match(rewriteArchiveImages(html, new Map(), true).html, /href="#"/);
 });
 
+test("webfonts are not inventoried as images", () => {
+  const font = "https://fonts.example/open-sans.woff2";
+  const image = "https://files.constantcontact.com/account/background.png";
+  const result = rewriteArchiveImages(
+    `<style>@font-face{src:url('${font}')} .hero{background:url('${image}')}</style>`,
+  );
+  assert.deepEqual([...result.urls], [image]);
+  assert.match(result.html, new RegExp(font.replaceAll(".", "\\.")));
+});
+
 test("image downloads stay inside the approved account folder", async () => {
   await assert.rejects(
     fetchArchiveImage(
