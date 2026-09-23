@@ -19,7 +19,7 @@ const senders = [
     id: "bloody-long-walk",
     label: "The Bloody Long Walk",
     fromName: "The Bloody Long Walk",
-    fromEmail: "communications@bloodylongwalk.com.au",
+    fromEmail: "bloodylongwalk@mito.org.au",
     replyToEmail: "bloodylongwalk@mito.org.au",
   },
   {
