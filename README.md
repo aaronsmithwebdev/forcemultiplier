@@ -14,14 +14,14 @@ A private workspace growing into a complete Constant Contact replacement: Salesf
 - Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, managed-membership reconciliation, provider activity checks, and per-contact issue reporting.
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
-- A provider-neutral global suppression ledger with additive CSV mass import. Imported addresses are excluded from both Resend campaigns and legacy Constant Contact deliveries without contacting either provider.
+- A provider-neutral global suppression ledger with additive CSV mass import and monotonic Salesforce two-way opt-out synchronization. Imported and Salesforce opt-outs are excluded from both Resend campaigns and legacy Constant Contact deliveries; uniquely matched local suppressions can set `Contact.HasOptedOutOfEmail` to `true`.
 - Pull and delivery history with progress and recoverable errors.
 - A Resend domain check on Connections, signed-in-user-only campaign test emails, and resumable production Broadcast preparation through campaign-specific segments.
 - A Constant Contact sent-email archive: resumable read-only import, campaign/subject/text search, a restricted HTML preview, and a resumable image backup to Supabase Storage. Original and preview HTML remain in the private database; successfully copied image URLs are substituted only in the displayed copy.
 - A Templatical email-template library with drag-and-drop authoring, responsive content blocks, Supabase-backed image uploads, accessibility and link checks, database-backed saves, version restore, and inline Liquid-style merge tags from saved Salesforce audience fields.
 - A campaign flow covering campaign name, optional saved-template starting point, Templatical design and quality checks, sender/subject/preheader settings, native desktop/mobile preview, Resend test sends, audience exclusions, and production Broadcast submission.
 
-**The target is now a complete Constant Contact replacement, not a bidirectional Constant Contact integration.** Existing Constant Contact delivery, resubscription, and unsubscribe-writeback code remains available for legacy operations, but unsubscribe polling is off and is not part of the forward plan. The priority consent integration is monotonic two-way Salesforce opt-out synchronization: Salesforce opt-outs suppress ForceMultiplier/Resend sends, and confirmed global opt-outs set the Salesforce field to `true`; automated sync never clears it.
+**The target is now a complete Constant Contact replacement, not a bidirectional Constant Contact integration.** Existing Constant Contact delivery and resubscription code remains available for legacy operations, but unsubscribe polling is off and is not part of the forward plan. The implemented consent integration is monotonic two-way Salesforce opt-out synchronization: Salesforce opt-outs suppress ForceMultiplier/Resend sends, and confirmed global opt-outs set the Salesforce field to `true`; automated sync never clears it.
 
 ## Start locally
 
@@ -109,7 +109,13 @@ Open **Campaigns**, name the draft, and optionally start from a saved email temp
 
 Open **Suppressions** and upload a CSV with exactly one `Email` or `Email Address` column. Files may contain up to 100,000 rows and be up to 20 MB. Valid addresses are normalized and deduplicated in the browser, then added to the private global suppression ledger in resumable chunks. Existing rows are preserved, and retrying the same file is safe.
 
-Imports are additive and take effect locally immediately: matching addresses are excluded from Resend campaigns and any remaining legacy Constant Contact deliveries. The import does not call Constant Contact, Salesforce, or Resend. Automated Salesforce two-way opt-out synchronization and Resend unsubscribe webhook ingestion are the next consent milestones; neither will automatically clear an opt-out.
+Imports are additive and take effect locally immediately: matching addresses are excluded from Resend campaigns and any remaining legacy Constant Contact deliveries. The import itself does not call Constant Contact, Salesforce, or Resend. If Salesforce opt-out sync is active, uniquely matched Contacts are updated during a later worker run.
+
+## Synchronize Salesforce opt-outs
+
+Open **Suppressions** and enable **Salesforce two-way opt-out sync** after connecting the intended Salesforce org. Enabling validates that the connected user can update `Contact.HasOptedOutOfEmail`; select **Run now** to begin the resumable baseline. The secured scheduled worker then imports new `true` values and writes local global suppressions back to uniquely matched Contacts every five minutes. Duplicate-email and unmatched Contacts remain suppressed locally and are shown for review. The worker only writes `true` and never clears an opt-out.
+
+The unsubscribe activity log retains the normalized email, direction, source, recorded time, Salesforce Contact ID, processing result, retries, and errors. For Salesforce-originated records, the displayed observed time is the Contact's `SystemModstamp`; Salesforce does not expose the exact opt-out action time or originating campaign/message through this field. Campaign, subject, and provider-message fields are ready for sources such as the planned Resend unsubscribe webhook, which is the next consent milestone.
 
 ## Run a resubscription job
 

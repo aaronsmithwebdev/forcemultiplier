@@ -4,6 +4,7 @@ import { normalizedEmail } from "./email";
 import { AppError, publicError } from "./errors";
 import { connection, providerRequest, SF_VERSION, sfQuery } from "./providers";
 import { sfId } from "./soql";
+import { validateSalesforceOptOutField } from "./suppressions";
 
 const SYNC_ID = "default";
 
@@ -37,21 +38,6 @@ async function accounts() {
   return { salesforce, constantContact };
 }
 
-async function validateSalesforceField() {
-  const description = await providerRequest(
-    "salesforce",
-    `/services/data/${SF_VERSION}/sobjects/Contact/describe`,
-  );
-  const field = Array.isArray(description?.fields)
-    ? description.fields.find((item: any) => item.name === "HasOptedOutOfEmail")
-    : null;
-  if (!field || field.type !== "boolean" || field.updateable !== true)
-    throw new AppError(
-      "The connected Salesforce user cannot update Contact.HasOptedOutOfEmail. Grant field edit access, then try again.",
-      403,
-    );
-}
-
 export async function setUnsubscribeSync(
   enabled: boolean,
   includeExisting = false,
@@ -65,7 +51,7 @@ export async function setUnsubscribeSync(
     return unsubscribeState();
   }
   const { salesforce, constantContact } = await accounts();
-  await validateSalesforceField();
+  await validateSalesforceOptOutField();
   const current = await db.unsubscribeSync.findUnique({
     where: { id: SYNC_ID },
   });

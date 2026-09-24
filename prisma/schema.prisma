@@ -281,6 +281,50 @@ model Suppression {
   @@schema("forcemultiplier")
 }
 
+model SalesforceSuppressionSync {
+  id              String    @id @default("salesforce")
+  enabled         Boolean   @default(false)
+  orgId           String?
+  cursor          DateTime?
+  scanCursor      String?
+  scanUntil       DateTime?
+  leaseUntil      DateTime?
+  error           String?
+  lastRunAt       DateTime?
+  lastCompletedAt DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@schema("forcemultiplier")
+}
+
+model SuppressionEvent {
+  id                String    @id @default(cuid())
+  dedupeKey         String    @unique
+  orgId             String?
+  email             String?
+  kind              String    @default("global_unsubscribe")
+  direction         String
+  source            String
+  sourceRef         String?
+  occurredAt        DateTime?
+  recordedAt        DateTime  @default(now())
+  salesforceId      String?
+  campaignId        String?
+  campaignName      String?
+  subject           String?
+  providerMessageId String?
+  status            String    @default("recorded")
+  attempts          Int       @default(0)
+  availableAt       DateTime  @default(now())
+  error             String?
+  processedAt       DateTime?
+
+  @@index([direction, status, availableAt])
+  @@index([email, recordedAt])
+  @@index([orgId, recordedAt])
+  @@schema("forcemultiplier")
+}
+
 model ResubscribeJob {
   id            String              @id @default(cuid())
   name          String

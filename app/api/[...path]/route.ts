@@ -57,7 +57,13 @@ import {
   setUnsubscribeSync,
   unsubscribeState,
 } from "@/lib/unsubscribes";
-import { importSuppressions, suppressionState } from "@/lib/suppressions";
+import {
+  importSuppressions,
+  retrySalesforceSuppressionEvents,
+  runSalesforceSuppressionSync,
+  setSalesforceSuppressionSync,
+  suppressionState,
+} from "@/lib/suppressions";
 import {
   createResubscribeJob,
   finishResubscribeUpload,
@@ -169,7 +175,7 @@ async function handle(
         request.headers.get("authorization") !== `Bearer ${secret}`
       )
         throw new AppError("Cron authorization failed.", 401);
-      return json(await runUnsubscribeSync());
+      return json(await runSalesforceSuppressionSync());
     }
     if (key === "cron/campaign-sends" && method === "GET") {
       const secret = process.env.CRON_SECRET;
@@ -437,7 +443,7 @@ async function handle(
     if (key === "resend/status" && method === "GET")
       return json(await resendStatus());
     if (key === "suppressions" && method === "GET")
-      return json(await suppressionState());
+      return json(await suppressionState(params.get("q") || ""));
     if (key === "suppressions/import" && method === "POST") {
       const data = z
         .object({
@@ -449,6 +455,16 @@ async function handle(
         await importSuppressions(data.emails, data.sourceRef, user.id),
       );
     }
+    if (key === "suppressions/salesforce-sync" && method === "PUT") {
+      const data = z
+        .object({ enabled: z.boolean() })
+        .parse(await body(request));
+      return json(await setSalesforceSuppressionSync(data.enabled));
+    }
+    if (key === "suppressions/salesforce-sync/run" && method === "POST")
+      return json(await runSalesforceSuppressionSync());
+    if (key === "suppressions/salesforce-sync/retry" && method === "POST")
+      return json(await retrySalesforceSuppressionEvents());
     if (key === "resubscriptions" && method === "GET")
       return json(await resubscribeState());
     if (key === "resubscriptions" && method === "POST")
@@ -620,6 +636,8 @@ async function handle(
           },
         });
         await setUnsubscribeSync(false);
+        if (provider === "salesforce")
+          await setSalesforceSuppressionSync(false);
         return json({ ok: true });
       }
       if (p[2] === "test" && method === "POST")
