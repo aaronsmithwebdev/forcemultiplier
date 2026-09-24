@@ -5,7 +5,7 @@ export const RESUBSCRIBE_CALL_LIMIT = 5000;
 export const RESUBSCRIBE_MAX_ROWS = 100000;
 
 // ponytail: bounded in-memory CSV parsing (20 MB); use a streaming parser for larger imports.
-export function parseResubscribeCsv(text: string) {
+export function parseEmailCsv(text: string) {
   if (text.length > 20 * 1024 * 1024)
     throw new Error("CSV must be 20 MB or smaller.");
   text = text.replace(/^\uFEFF/, "");
@@ -80,6 +80,8 @@ export function parseResubscribeCsv(text: string) {
     );
   return { emails: [...emails], rows, invalid, duplicates };
 }
+
+export const parseResubscribeCsv = parseEmailCsv;
 
 export type ResubscribeFilters = {
   presentField: string | null;

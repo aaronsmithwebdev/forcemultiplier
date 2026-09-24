@@ -130,6 +130,9 @@ async function recipientRows(
         WHERE x."normalizedEmail" = i.email ${excludedRuns}
       ) AS "audienceExcluded",
       (${manualMatch} OR EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Suppression" s
+        WHERE s.email = i.email
+      ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
         WHERE LOWER(u.email) = i.email
       )) AS suppressed
@@ -405,6 +408,22 @@ function csvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+export async function newlySuppressedCount(sendId: string) {
+  const [row] = await db.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+    SELECT COUNT(*) AS count
+    FROM "forcemultiplier"."CampaignRecipient" r
+    WHERE r."sendId" = ${sendId}
+      AND (EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Suppression" s
+        WHERE s.email = r.email
+      ) OR EXISTS (
+        SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
+        WHERE LOWER(u.email) = r.email
+      ))
+  `);
+  return Number(row?.count ?? 0);
+}
+
 export async function campaignSendStep(id?: string) {
   const send = id
     ? await db.campaignSend.findUnique({ where: { id } })
@@ -513,6 +532,12 @@ export async function campaignSendStep(id?: string) {
           `Resend could not import every recipient${contactImport.counts?.failed ? ` (${contactImport.counts.failed} failed)` : ""}. Nothing was sent.`,
           409,
         );
+      const newlySuppressed = await newlySuppressedCount(send.id);
+      if (newlySuppressed)
+        throw new AppError(
+          `${newlySuppressed} recipient${newlySuppressed === 1 ? " was" : "s were"} suppressed while this campaign was preparing. Nothing was sent; create a new campaign to rebuild its recipient set.`,
+          409,
+        );
       const campaign = await db.campaign.findUniqueOrThrow({
         where: { id: send.campaignId },
         select: { name: true },
@@ -534,6 +559,19 @@ export async function campaignSendStep(id?: string) {
     }
     if (!send.broadcastId)
       throw new AppError("The Resend broadcast is missing.", 409);
+    const newlySuppressed = await newlySuppressedCount(send.id);
+    if (newlySuppressed) {
+      await db.campaignSend.updateMany({
+        where: { id: send.id, leaseUntil: lease },
+        data: {
+          status: "failed",
+          error: `${newlySuppressed} recipient${newlySuppressed === 1 ? " was" : "s were"} suppressed after preparation. Nothing was sent; create a new campaign to rebuild its recipient set.`,
+          leaseUntil: null,
+          finishedAt: new Date(),
+        },
+      });
+      return db.campaignSend.findUnique({ where: { id: send.id } });
+    }
     await sendResendBroadcast(send.broadcastId);
     await db.$transaction([
       db.campaignRecipient.updateMany({

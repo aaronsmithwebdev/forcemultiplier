@@ -1,6 +1,6 @@
 # ForceMultiplier
 
-A private workspace for building Salesforce-derived audiences and, today, syncing them to Constant Contact. The [target product plan](docs/email-marketing-platform-plan.md) expands ForceMultiplier into the email marketing platform that will replace our use of Constant Contact: Salesforce and later Funraisin provide audiences, Resend sends, and Templatical builds emails. The features below describe the current implementation, not the completed target.
+A private workspace growing into a complete Constant Contact replacement: Salesforce and later Funraisin provide audiences, ForceMultiplier owns consent and campaigns, Resend sends, and Templatical builds emails. Constant Contact remains connected only for legacy workflows and the historical sent-email archive during cutover. The features below describe the current implementation, not the completed target.
 
 ## Available now
 
@@ -14,13 +14,14 @@ A private workspace for building Salesforce-derived audiences and, today, syncin
 - Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, managed-membership reconciliation, provider activity checks, and per-contact issue reporting.
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.
+- A provider-neutral global suppression ledger with additive CSV mass import. Imported addresses are excluded from both Resend campaigns and legacy Constant Contact deliveries without contacting either provider.
 - Pull and delivery history with progress and recoverable errors.
-- A Resend domain check on Connections plus signed-in-user-only campaign test emails when a server-side API key is configured; no Resend contacts or production broadcasts are created yet.
+- A Resend domain check on Connections, signed-in-user-only campaign test emails, and resumable production Broadcast preparation through campaign-specific segments.
 - A Constant Contact sent-email archive: resumable read-only import, campaign/subject/text search, a restricted HTML preview, and a resumable image backup to Supabase Storage. Original and preview HTML remain in the private database; successfully copied image URLs are substituted only in the displayed copy.
 - A Templatical email-template library with drag-and-drop authoring, responsive content blocks, Supabase-backed image uploads, accessibility and link checks, database-backed saves, version restore, and inline Liquid-style merge tags from saved Salesforce audience fields.
-- A draft campaign flow covering campaign name, optional saved-template starting point, Templatical design and quality checks, sender/subject/preheader settings, native desktop/mobile preview, and Resend test sends.
+- A campaign flow covering campaign name, optional saved-template starting point, Templatical design and quality checks, sender/subject/preheader settings, native desktop/mobile preview, Resend test sends, audience exclusions, and production Broadcast submission.
 
-**This milestone supports manual and scheduled delivery of names, email addresses, and selected custom fields to Constant Contact.** Each schedule saves its destination and field mappings, including fields reached through parent relationships. Successful deliveries remove previously managed list members who are no longer eligible for the audience. Configurable unsubscribe-only writeback from Constant Contact to Salesforce is implemented separately. Keep the existing sending workflows active until the Resend migration and comparison/cutover exercise are complete.
+**The target is now a complete Constant Contact replacement, not a bidirectional Constant Contact integration.** Existing Constant Contact delivery, resubscription, and unsubscribe-writeback code remains available for legacy operations, but unsubscribe polling is off and is not part of the forward plan. The priority consent integration is monotonic two-way Salesforce opt-out synchronization: Salesforce opt-outs suppress ForceMultiplier/Resend sends, and confirmed global opt-outs set the Salesforce field to `true`; automated sync never clears it.
 
 ## Start locally
 
@@ -86,7 +87,7 @@ New private apps must be authorized by their creator; follow Constant Contact's 
 
 ## Check Resend readiness
 
-Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability. Campaign test sends use the same server-only key, while contacts, segments, and production broadcasts remain disabled. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
+Add a Resend **Full access** API key as `RESEND_API_KEY` in local `.env` and the Vercel environment, then open **Connections**. Resend's Sending access keys cannot list domains; the card reads domain verification and sending capability. Campaign test sends and production segment/Broadcast creation use the same server-only key. Keep the key server-side. Resend account limits still need review in its dashboard because its [Usage API](https://resend.com/docs/api-reference/usage/retrieve-usage) is a private beta. See [Resend key permissions](https://resend.com/changelog/new-api-key-permissions).
 
 The [migration inventory](docs/constant-contact-migration-inventory.md) records read-only Constant Contact, Resend, Funraisin, and database checks. The target does **not** copy Constant Contact lists: audiences come from Salesforce and later Funraisin entrants. The [historical email strategy](docs/template-archive-strategy.md) preserves past sent campaigns as an archive and converts an item into a Templatical campaign draft only when a user selects it. Keep the existing sender active until the planned workflow-by-workflow cutover.
 
@@ -102,7 +103,13 @@ Open **Email templates**, create a template, and use the Templatical block libra
 
 ## Create and test a campaign
 
-Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then choose the Bloody Long Walk or Mito Foundation sender identity and add the subject and preheader. Sender and reply-to fields remain editable, but the From address must use a verified Resend domain. In the final step, use Templatical's **Preview** control to switch between desktop and mobile, and **Test** to send through Resend. Test recipients are restricted on the server to the signed-in user's email address. Production audience selection and broadcasts remain intentionally disabled until consent, approval, and duplicate-send safeguards are implemented.
+Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then choose the Bloody Long Walk or Mito Foundation sender identity and add the subject and preheader. Sender and reply-to fields remain editable, but the From address must use a verified Resend domain. In the final steps, preview or test the message, select included and excluded audiences, review suppression counts, and submit a campaign-specific Resend Broadcast. Test recipients are restricted on the server to the signed-in user's email address.
+
+## Import unsubscribes
+
+Open **Suppressions** and upload a CSV with exactly one `Email` or `Email Address` column. Files may contain up to 100,000 rows and be up to 20 MB. Valid addresses are normalized and deduplicated in the browser, then added to the private global suppression ledger in resumable chunks. Existing rows are preserved, and retrying the same file is safe.
+
+Imports are additive and take effect locally immediately: matching addresses are excluded from Resend campaigns and any remaining legacy Constant Contact deliveries. The import does not call Constant Contact, Salesforce, or Resend. Automated Salesforce two-way opt-out synchronization and Resend unsubscribe webhook ingestion are the next consent milestones; neither will automatically clear an opt-out.
 
 ## Run a resubscription job
 

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   campaignExclusionSql,
+  newlySuppressedCount,
   prepareBroadcastHtml,
   uniqueEmails,
 } from "../lib/campaign-sends";
+import { db } from "../lib/db";
 
 test("broadcast HTML translates Templatical delivery tags", () => {
   const html = prepareBroadcastHtml(
@@ -32,6 +34,15 @@ test("manual exclusions are normalized and deduplicated", () => {
   assert.deepEqual(uniqueEmails([" A@Example.org ", "a@example.org", ""]), [
     "a@example.org",
   ]);
+});
+
+test("campaigns recheck durable suppressions before broadcast", async (t) => {
+  const original = db.$queryRaw;
+  db.$queryRaw = (async () => [{ count: 2n }]) as typeof original;
+  t.after(() => {
+    db.$queryRaw = original;
+  });
+  assert.equal(await newlySuppressedCount("send-1"), 2);
 });
 
 test("campaign field exclusions preserve nested AND and OR logic", () => {

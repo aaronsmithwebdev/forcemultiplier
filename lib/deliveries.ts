@@ -469,20 +469,24 @@ export async function deliveryStep(id: string) {
     const mappings = Array.isArray(run.mappings)
       ? (run.mappings as unknown as FieldMapping[])
       : [];
+    const emailCandidates = members.flatMap((member) =>
+      member.normalizedEmail ? [member.normalizedEmail] : [],
+    );
+    const [legacyUnsubscribes, suppressions] = await Promise.all([
+      db.unsubscribeEvent.findMany({
+        where: {
+          accountId: run.accountId,
+          email: { in: emailCandidates },
+        },
+        select: { email: true },
+      }),
+      db.suppression.findMany({
+        where: { email: { in: emailCandidates } },
+        select: { email: true },
+      }),
+    ]);
     const knownUnsubscribes = new Set(
-      (
-        await db.unsubscribeEvent.findMany({
-          where: {
-            accountId: run.accountId,
-            email: {
-              in: members.flatMap((member) =>
-                member.normalizedEmail ? [member.normalizedEmail] : [],
-              ),
-            },
-          },
-          select: { email: true },
-        })
-      ).map((event) => event.email),
+      [...legacyUnsubscribes, ...suppressions].map((row) => row.email),
     );
     const prepared = members.map((member) =>
       prepareContact(

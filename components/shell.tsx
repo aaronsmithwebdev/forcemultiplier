@@ -13,12 +13,14 @@ import {
   LogOut,
   ChevronRight,
   ArrowUpRight,
+  ShieldCheck,
 } from "lucide-react";
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
   ["/campaigns", "Campaigns", Send],
   ["/templates", "Email templates", FilePenLine],
+  ["/suppressions", "Suppressions", ShieldCheck],
   ["/archive", "Email archive", Mail],
   ["/lists", "Constant Contact lists", List],
   ["/resubscriptions", "Resubscriptions", UsersRound],
@@ -47,7 +49,7 @@ export function Shell({
         <div className="workspace-label">
           <span className="workspace-avatar">F</span>
           <div>
-            Your workspace<small>Salesforce + Constant Contact</small>
+            Your workspace<small>Salesforce + Resend</small>
           </div>
         </div>
         <div className="nav-label">WORKSPACE</div>

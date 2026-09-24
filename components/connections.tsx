@@ -198,7 +198,6 @@ function ConnectionCard({
     [secret, setSecret] = useState(""),
     [loginUrl, setLoginUrl] = useState(row.loginUrl),
     [busy, setBusy] = useState(""),
-    [includeExisting, setIncludeExisting] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   useEffect(() => {
@@ -419,36 +418,11 @@ function ConnectionCard({
                   )}
                 </>
               ) : (
-                <>
-                  <label className="inline-check">
-                    <input
-                      type="checkbox"
-                      checked={includeExisting}
-                      onChange={(event) =>
-                        setIncludeExisting(event.target.checked)
-                      }
-                    />
-                    Include existing Constant Contact unsubscribes
-                  </label>
-                  <Button
-                    variant="secondary"
-                    busy={busy === "writeback-enable"}
-                    disabled={!!busy}
-                    onClick={() =>
-                      action("writeback-enable", async () => {
-                        await api("unsubscribe-sync", "PUT", {
-                          enabled: true,
-                          includeExisting,
-                        });
-                        setMessage(
-                          "Unsubscribe writeback enabled. It will check every five minutes.",
-                        );
-                      })
-                    }
-                  >
-                    Enable writeback
-                  </Button>
-                </>
+                <p>
+                  Constant Contact polling is intentionally off during the
+                  replacement. Use Suppressions for CSV imports; Salesforce
+                  two-way opt-out sync is the next consent milestone.
+                </p>
               )}
             </div>
           )}

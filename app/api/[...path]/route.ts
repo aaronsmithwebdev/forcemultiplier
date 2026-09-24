@@ -57,6 +57,7 @@ import {
   setUnsubscribeSync,
   unsubscribeState,
 } from "@/lib/unsubscribes";
+import { importSuppressions, suppressionState } from "@/lib/suppressions";
 import {
   createResubscribeJob,
   finishResubscribeUpload,
@@ -435,6 +436,19 @@ async function handle(
     }
     if (key === "resend/status" && method === "GET")
       return json(await resendStatus());
+    if (key === "suppressions" && method === "GET")
+      return json(await suppressionState());
+    if (key === "suppressions/import" && method === "POST") {
+      const data = z
+        .object({
+          sourceRef: z.string().trim().min(1).max(120),
+          emails: z.array(email).min(1).max(500),
+        })
+        .parse(await body(request, 150000));
+      return json(
+        await importSuppressions(data.emails, data.sourceRef, user.id),
+      );
+    }
     if (key === "resubscriptions" && method === "GET")
       return json(await resubscribeState());
     if (key === "resubscriptions" && method === "POST")

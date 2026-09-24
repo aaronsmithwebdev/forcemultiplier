@@ -208,6 +208,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     },
   ]);
   mockMethod(t, db.unsubscribeEvent, "findMany", async () => []);
+  mockMethod(t, db.suppression, "findMany", async () => []);
   mockMethod(t, db.connection, "findUnique", async () => ({
     provider: "constant-contact",
     version: 1,

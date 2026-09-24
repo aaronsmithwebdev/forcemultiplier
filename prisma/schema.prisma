@@ -268,6 +268,19 @@ model UnsubscribeEvent {
   @@schema("forcemultiplier")
 }
 
+model Suppression {
+  email      String    @id
+  kind       String    @default("global_unsubscribe")
+  source     String
+  sourceRef  String?
+  occurredAt DateTime?
+  createdBy  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+  @@schema("forcemultiplier")
+}
+
 model ResubscribeJob {
   id            String              @id @default(cuid())
   name          String

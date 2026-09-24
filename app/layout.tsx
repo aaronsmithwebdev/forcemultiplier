@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "ForceMultiplier", template: "%s · ForceMultiplier" },
-  description: "Your Salesforce audiences, connected to Constant Contact.",
+  description: "Salesforce audiences, consent, and email campaigns.",
 };
 export default function RootLayout({
   children,
