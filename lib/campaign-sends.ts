@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { TemplateContent } from "@templatical/types";
+import type { QueryFilter, QueryGroup } from "./query-builder";
+import { buildContactQuery } from "./query-builder";
 import { db } from "./db";
 import { AppError, publicError } from "./errors";
 import { renderCampaignHtml } from "./campaign-email";
@@ -16,6 +18,7 @@ export type AudienceSelection = {
   audienceIds: string[];
   exclusionAudienceIds: string[];
   manualExclusions: string[];
+  exclusionRules: QueryGroup;
 };
 
 type RecipientRow = {
@@ -25,6 +28,7 @@ type RecipientRow = {
   sourceRows: bigint;
   optedOut: boolean;
   audienceExcluded: boolean;
+  fieldExcluded: boolean;
   suppressed: boolean;
 };
 
@@ -97,6 +101,7 @@ async function recipientRows(
   includeRunIds: string[],
   excludeRunIds: string[],
   manual: string[],
+  rules: QueryGroup,
 ) {
   if (!includeRunIds.length) return [];
   const excludedRuns = excludeRunIds.length
@@ -105,13 +110,15 @@ async function recipientRows(
   const manualMatch = manual.length
     ? Prisma.sql`i.email IN (${Prisma.join(manual)})`
     : Prisma.sql`FALSE`;
+  const fieldMatch = campaignExclusionSql(rules);
   return db.$queryRaw<RecipientRow[]>(Prisma.sql`
     WITH included AS (
       SELECT m."normalizedEmail" AS email,
         MIN(m.name) AS name,
         MIN(m."salesforceId") AS "salesforceId",
         COUNT(*) AS "sourceRows",
-        BOOL_OR(m."optedOut") AS "optedOut"
+        BOOL_OR(m."optedOut") AS "optedOut",
+        BOOL_OR(${fieldMatch}) AS "fieldExcluded"
       FROM "forcemultiplier"."AudienceMember" m
       WHERE m."runId" IN (${Prisma.join(includeRunIds)})
         AND m."normalizedEmail" IS NOT NULL
@@ -137,6 +144,7 @@ function summary(rows: RecipientRow[]) {
     duplicates: 0,
     optedOut: 0,
     excluded: 0,
+    fieldExcluded: 0,
     suppressed: 0,
     recipients: 0,
   };
@@ -146,10 +154,103 @@ function summary(rows: RecipientRow[]) {
     counts.duplicates += Math.max(0, sourceRows - 1);
     if (row.optedOut) counts.optedOut++;
     else if (row.audienceExcluded) counts.excluded++;
+    else if (row.fieldExcluded) counts.fieldExcluded++;
     else if (row.suppressed) counts.suppressed++;
     else counts.recipients++;
   }
   return counts;
+}
+
+function fieldText(field: string) {
+  return Prisma.sql`m.data #>> ARRAY[${Prisma.join(field.split("."))}]::text[]`;
+}
+
+function exclusionFilterSql(filter: QueryFilter) {
+  const field = fieldText(filter.field);
+  const value = filter.value.trim();
+  if (filter.operator === "is_null") return Prisma.sql`${field} IS NULL`;
+  if (filter.operator === "not_null") return Prisma.sql`${field} IS NOT NULL`;
+  if (["contains", "starts"].includes(filter.operator)) {
+    const escaped = value.replace(/[\\%_]/g, "\\$&");
+    return Prisma.sql`${field} ILIKE ${filter.operator === "contains" ? `%${escaped}%` : `${escaped}%`} ESCAPE '\\'`;
+  }
+  if (["includes", "excludes"].includes(filter.operator)) {
+    const includes = Prisma.sql`LOWER(${value}) = ANY(string_to_array(LOWER(COALESCE(${field}, '')), ';'))`;
+    return filter.operator === "includes"
+      ? includes
+      : Prisma.sql`NOT (${includes})`;
+  }
+  const operator = filter.operator;
+  if (["currency", "double", "int", "long", "percent"].includes(filter.type)) {
+    const numeric = Prisma.sql`CASE WHEN ${field} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${field})::numeric END`;
+    const expected = Number(value);
+    if (operator === "eq") return Prisma.sql`${numeric} = ${expected}`;
+    if (operator === "neq") return Prisma.sql`${numeric} != ${expected}`;
+    if (operator === "gt") return Prisma.sql`${numeric} > ${expected}`;
+    if (operator === "gte") return Prisma.sql`${numeric} >= ${expected}`;
+    if (operator === "lt") return Prisma.sql`${numeric} < ${expected}`;
+    return Prisma.sql`${numeric} <= ${expected}`;
+  }
+  const actual =
+    filter.type === "boolean" ? Prisma.sql`LOWER(${field})` : field;
+  const expected = filter.type === "boolean" ? value.toLowerCase() : value;
+  if (operator === "eq") return Prisma.sql`${actual} = ${expected}`;
+  if (operator === "neq") return Prisma.sql`${actual} != ${expected}`;
+  if (operator === "gt") return Prisma.sql`${actual} > ${expected}`;
+  if (operator === "gte") return Prisma.sql`${actual} >= ${expected}`;
+  if (operator === "lt") return Prisma.sql`${actual} < ${expected}`;
+  return Prisma.sql`${actual} <= ${expected}`;
+}
+
+export function campaignExclusionSql(group: QueryGroup): Prisma.Sql {
+  if (!group.items.length) return Prisma.sql`FALSE`;
+  const parts = group.items.map((item) =>
+    "items" in item ? campaignExclusionSql(item) : exclusionFilterSql(item),
+  );
+  return Prisma.sql`(${Prisma.join(parts, ` ${group.conjunction} `)})`;
+}
+
+async function validateExclusionRules(rules: QueryGroup, runIds: string[]) {
+  try {
+    buildContactQuery(rules);
+  } catch (error) {
+    throw new AppError((error as Error).message);
+  }
+  const runs = await db.pullRun.findMany({
+    where: { id: { in: runIds } },
+    select: { fields: true },
+  });
+  const captured = runs.map(
+    (run) =>
+      new Set(
+        Array.isArray(run.fields)
+          ? run.fields.filter(
+              (field): field is string => typeof field === "string",
+            )
+          : [],
+      ),
+  );
+  const common = new Set(captured[0] || []);
+  for (const field of common)
+    if (captured.some((fields) => !fields.has(field))) common.delete(field);
+  const allowed = new Set([
+    "Email",
+    "FirstName",
+    "LastName",
+    "HasOptedOutOfEmail",
+    ...common,
+  ]);
+  function check(group: QueryGroup) {
+    for (const item of group.items) {
+      if ("items" in item) check(item);
+      else if (!allowed.has(item.field))
+        throw new AppError(
+          `Field ${item.field} is not stored in the selected audience snapshots. Add it to those audiences and pull them again.`,
+          409,
+        );
+    }
+  }
+  check(rules);
 }
 
 export async function campaignAudienceOptions(campaignId: string) {
@@ -160,6 +261,7 @@ export async function campaignAudienceOptions(campaignId: string) {
         audienceIds: true,
         exclusionAudienceIds: true,
         manualExclusions: true,
+        exclusionRules: true,
         send: {
           select: {
             id: true,
@@ -176,6 +278,7 @@ export async function campaignAudienceOptions(campaignId: string) {
       select: {
         id: true,
         name: true,
+        fields: true,
         runs: {
           where: { status: "completed" },
           orderBy: { createdAt: "desc" },
@@ -191,6 +294,11 @@ export async function campaignAudienceOptions(campaignId: string) {
     audiences: audiences.map((audience) => ({
       id: audience.id,
       name: audience.name,
+      fields: Array.isArray(audience.fields)
+        ? audience.fields.filter(
+            (field): field is string => typeof field === "string",
+          )
+        : [],
       snapshot: audience.runs[0] || null,
     })),
   };
@@ -209,14 +317,21 @@ export async function saveAndPreviewCampaignAudience(
     resolveRuns(audienceIds, "included"),
     resolveRuns(exclusionAudienceIds, "excluded"),
   ]);
+  await validateExclusionRules(selection.exclusionRules, includeRunIds);
   const rows = await recipientRows(
     includeRunIds,
     excludeRunIds,
     manualExclusions,
+    selection.exclusionRules,
   );
   await db.campaign.update({
     where: { id: campaignId },
-    data: { audienceIds, exclusionAudienceIds, manualExclusions },
+    data: {
+      audienceIds,
+      exclusionAudienceIds,
+      manualExclusions,
+      exclusionRules: selection.exclusionRules as Prisma.InputJsonValue,
+    },
   });
   return summary(rows);
 }
@@ -268,6 +383,7 @@ export async function startCampaignSend(campaignId: string, userId: string) {
         includeRunIds,
         excludeRunIds,
         manualExclusions: campaign.manualExclusions,
+        exclusionRules: campaign.exclusionRules as Prisma.InputJsonValue,
         createdBy: userId,
       },
     });
@@ -314,12 +430,17 @@ export async function campaignSendStep(id?: string) {
         send.includeRunIds,
         send.excludeRunIds,
         send.manualExclusions,
+        send.exclusionRules as unknown as QueryGroup,
       );
       const counts = summary(rows);
       if (!counts.recipients)
         throw new AppError("No recipients remain after exclusions.", 409);
       const eligible = rows.filter(
-        (row) => !row.optedOut && !row.audienceExcluded && !row.suppressed,
+        (row) =>
+          !row.optedOut &&
+          !row.audienceExcluded &&
+          !row.fieldExcluded &&
+          !row.suppressed,
       );
       for (let offset = 0; offset < eligible.length; offset += 5000)
         await db.campaignRecipient.createMany({

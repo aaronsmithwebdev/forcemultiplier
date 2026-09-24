@@ -443,6 +443,7 @@ model Campaign {
   audienceIds          String[]      @default([])
   exclusionAudienceIds String[]      @default([])
   manualExclusions     String[]      @default([])
+  exclusionRules       Json          @default("{\"conjunction\":\"AND\",\"items\":[]}")
   createdBy            String
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
@@ -466,6 +467,7 @@ model CampaignSend {
   includeRunIds      String[]
   excludeRunIds      String[]
   manualExclusions   String[]
+  exclusionRules     Json
   counts             Json                @default("{}")
   segmentId          String?
   importId           String?

@@ -208,10 +208,43 @@ async function handle(
       .email()
       .max(254)
       .transform((value) => value.toLowerCase());
+    const ruleFilter = z.object({
+      field: z
+        .string()
+        .regex(/^[A-Za-z][A-Za-z0-9_]*$/)
+        .max(100),
+      type: z
+        .string()
+        .regex(/^[a-z]+$/)
+        .max(30),
+      operator: z.enum([
+        "eq",
+        "neq",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "contains",
+        "starts",
+        "includes",
+        "excludes",
+        "is_null",
+        "not_null",
+      ]),
+      value: z.string().max(1000),
+      conjunction: z.enum(["AND", "OR"]),
+    });
+    const exclusionGroup: z.ZodType<any> = z.lazy(() =>
+      z.object({
+        conjunction: z.enum(["AND", "OR"]),
+        items: z.array(z.union([ruleFilter, exclusionGroup])).max(20),
+      }),
+    );
     const audienceSelection = z.object({
       audienceIds: z.array(templateId).min(1).max(100),
       exclusionAudienceIds: z.array(templateId).max(100).default([]),
       manualExclusions: z.array(email).max(5000).default([]),
+      exclusionRules: exclusionGroup,
     });
     if (key === "campaigns" && method === "GET")
       return json(await listCampaigns(params.get("q") || ""));

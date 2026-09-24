@@ -100,19 +100,44 @@ function filterCount(group: Group): number {
 
 export function ContactQueryBuilder({
   onChange,
+  onRulesChange,
+  onValidityChange,
+  initialRules,
+  allowedFields,
+  title = "Audience filters",
+  description = "Only contacts with an email address are included.",
 }: {
-  onChange: (query: string) => void;
+  onChange?: (query: string) => void;
+  onRulesChange?: (rules: QueryGroup) => void;
+  onValidityChange?: (valid: boolean) => void;
+  initialRules?: QueryGroup;
+  allowedFields?: string[];
+  title?: string;
+  description?: string;
 }) {
+  const nextId = useRef(1);
   const [fields, setFields] = useState<Field[] | null>(null),
-    [root, setRoot] = useState<Group>({
-      id: 0,
-      conjunction: "AND",
-      items: [],
+    [root, setRoot] = useState<Group>(() => {
+      function hydrate(group: QueryGroup, root = false): Group {
+        return {
+          id: root ? 0 : nextId.current++,
+          conjunction: group.conjunction,
+          items: group.items.map((item) =>
+            "items" in item
+              ? hydrate(item)
+              : {
+                  ...item,
+                  id: nextId.current++,
+                  label: item.field,
+                },
+          ),
+        };
+      }
+      return hydrate(initialRules || { conjunction: "AND", items: [] }, true);
     }),
     [targetGroup, setTargetGroup] = useState<number | null>(null),
     [search, setSearch] = useState(""),
     [error, setError] = useState("");
-  const nextId = useRef(1);
   const focusTarget = useRef("");
   useEffect(() => {
     if (focusTarget.current) {
@@ -123,7 +148,28 @@ export function ContactQueryBuilder({
   useEffect(() => {
     let live = true;
     api("salesforce/metadata?object=Contact")
-      .then((data) => live && setFields(data.fields))
+      .then((data) => {
+        if (!live) return;
+        setFields(data.fields);
+        const byName = new Map<string, Field>(
+          data.fields.map((field: Field) => [field.name, field]),
+        );
+        setRoot((current) => ({
+          ...current,
+          items: current.items.map(function enrich(item): Filter | Group {
+            if (isGroup(item))
+              return { ...item, items: item.items.map(enrich) };
+            const field = byName.get(item.field);
+            return field
+              ? {
+                  ...item,
+                  label: field.label,
+                  values: field.picklistValues,
+                }
+              : item;
+          }),
+        }));
+      })
       .catch((e) => live && setError(e.message));
     return () => {
       live = false;
@@ -136,7 +182,30 @@ export function ContactQueryBuilder({
       return { query: "", error: (e as Error).message };
     }
   }, [root]);
-  useEffect(() => onChange(generated.query), [generated.query, onChange]);
+  useEffect(() => onChange?.(generated.query), [generated.query, onChange]);
+  useEffect(() => {
+    function clean(group: Group): QueryGroup {
+      return {
+        conjunction: group.conjunction,
+        items: group.items.map((item) =>
+          isGroup(item)
+            ? clean(item)
+            : {
+                field: item.field,
+                type: item.type,
+                operator: item.operator,
+                value: item.value,
+                conjunction: item.conjunction,
+              },
+        ),
+      };
+    }
+    if (!generated.error) onRulesChange?.(clean(root));
+  }, [generated.error, onRulesChange, root]);
+  useEffect(
+    () => onValidityChange?.(!generated.error),
+    [generated.error, onValidityChange],
+  );
   const groups = useMemo(() => allGroups(root), [root]);
   useEffect(() => {
     if (!groups.some((group) => group.id === targetGroup)) setTargetGroup(null);
@@ -147,6 +216,7 @@ export function ContactQueryBuilder({
       (field) =>
         field.filterable !== false &&
         !unsupported.has(field.type) &&
+        (!allowedFields || allowedFields.includes(field.name)) &&
         `${field.label} ${field.name}`
           .toLowerCase()
           .includes(search.trim().toLowerCase()),
@@ -435,12 +505,12 @@ export function ContactQueryBuilder({
   return (
     <div className="contact-query-builder">
       <div className="field-browser-heading">
-        <h3>Audience filters</h3>
+        <h3>{title}</h3>
         <span className="query-filter-count">
           {totalFilters} / 20 conditions
         </span>
       </div>
-      <p className="muted">Only contacts with an email address are included.</p>
+      <p className="muted">{description}</p>
       <Notice message={error} />
       {!fields && !error && <p role="status">Loading Contact fields…</p>}
       <div className="query-groups">{renderGroup(root)}</div>

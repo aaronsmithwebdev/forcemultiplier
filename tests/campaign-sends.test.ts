@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareBroadcastHtml, uniqueEmails } from "../lib/campaign-sends";
+import {
+  campaignExclusionSql,
+  prepareBroadcastHtml,
+  uniqueEmails,
+} from "../lib/campaign-sends";
 
 test("broadcast HTML translates Templatical delivery tags", () => {
   const html = prepareBroadcastHtml(
@@ -27,5 +31,50 @@ test("broadcast HTML adds an unsubscribe footer and rejects unsupported fields",
 test("manual exclusions are normalized and deduplicated", () => {
   assert.deepEqual(uniqueEmails([" A@Example.org ", "a@example.org", ""]), [
     "a@example.org",
+  ]);
+});
+
+test("campaign field exclusions preserve nested AND and OR logic", () => {
+  const query = campaignExclusionSql({
+    conjunction: "AND",
+    items: [
+      {
+        field: "Status__c",
+        type: "string",
+        operator: "eq",
+        value: "Inactive",
+        conjunction: "AND",
+      },
+      {
+        conjunction: "OR",
+        items: [
+          {
+            field: "Lifetime_Value__c",
+            type: "currency",
+            operator: "lt",
+            value: "50",
+            conjunction: "AND",
+          },
+          {
+            field: "Email",
+            type: "email",
+            operator: "contains",
+            value: "@example.org",
+            conjunction: "AND",
+          },
+        ],
+      },
+    ],
+  });
+  assert.match(query.sql, / AND /);
+  assert.match(query.sql, / OR /);
+  assert.deepEqual(query.values, [
+    "Status__c",
+    "Inactive",
+    "Lifetime_Value__c",
+    "Lifetime_Value__c",
+    50,
+    "Email",
+    "%@example.org%",
   ]);
 });
