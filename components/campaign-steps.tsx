@@ -5,7 +5,7 @@ const steps = [
   ["name", "Campaign name"],
   ["design", "Design email"],
   ["settings", "Email settings"],
-  ["preview", "Preview & test"],
+  ["preview", "Review & send"],
 ] as const;
 
 export function CampaignSteps({

@@ -85,6 +85,12 @@ import {
   saveCampaign,
 } from "@/lib/campaigns";
 import { sendResendTest } from "@/lib/campaign-email";
+import {
+  campaignAudienceOptions,
+  campaignSendStep,
+  saveAndPreviewCampaignAudience,
+  startCampaignSend,
+} from "@/lib/campaign-sends";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -164,6 +170,15 @@ async function handle(
         throw new AppError("Cron authorization failed.", 401);
       return json(await runUnsubscribeSync());
     }
+    if (key === "cron/campaign-sends" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json((await campaignSendStep()) || { idle: true });
+    }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {
       const data = credentials.parse(await body(request));
@@ -193,6 +208,11 @@ async function handle(
       .email()
       .max(254)
       .transform((value) => value.toLowerCase());
+    const audienceSelection = z.object({
+      audienceIds: z.array(templateId).min(1).max(100),
+      exclusionAudienceIds: z.array(templateId).max(100).default([]),
+      manualExclusions: z.array(email).max(5000).default([]),
+    });
     if (key === "campaigns" && method === "GET")
       return json(await listCampaigns(params.get("q") || ""));
     if (key === "campaigns" && method === "POST") {
@@ -209,6 +229,28 @@ async function handle(
     }
     if (p[0] === "campaigns" && p[1]) {
       const id = templateId.parse(p[1]);
+      if (p[2] === "review" && p.length === 3 && method === "GET")
+        return json(await campaignAudienceOptions(id));
+      if (p[2] === "recipients" && p.length === 3 && method === "POST") {
+        const data = audienceSelection.parse(await body(request, 1_500_000));
+        return json(await saveAndPreviewCampaignAudience(id, data));
+      }
+      if (p[2] === "send" && p.length === 3 && method === "POST") {
+        const data = audienceSelection.parse(await body(request, 1_500_000));
+        await saveAndPreviewCampaignAudience(id, data);
+        return json(await startCampaignSend(id, user.id), 201);
+      }
+      if (
+        p[2] === "send" &&
+        p[3] === "step" &&
+        p.length === 4 &&
+        method === "POST"
+      ) {
+        const review = await campaignAudienceOptions(id);
+        if (!review.send)
+          throw new AppError("This campaign has not been sent.", 404);
+        return json(await campaignSendStep(review.send.id));
+      }
       if (p[2] === "test" && p.length === 3 && method === "POST") {
         const data = z
           .object({ recipient: email, content: campaignContent })

@@ -105,6 +105,12 @@ export async function saveCampaign(id: string, patch: CampaignPatch) {
 }
 
 export async function deleteCampaign(id: string) {
+  const sent = await db.campaignSend.findUnique({
+    where: { campaignId: id },
+    select: { id: true },
+  });
+  if (sent)
+    throw new AppError("A campaign with a send record cannot be deleted.", 409);
   const deleted = await db.campaign.deleteMany({ where: { id } });
   if (!deleted.count) throw new AppError("Campaign not found.", 404);
   return { ok: true };

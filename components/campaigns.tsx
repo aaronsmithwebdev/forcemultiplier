@@ -70,7 +70,7 @@ export function Campaigns() {
       <Heading
         eyebrow="BUILD, CHECK, THEN SEND"
         title="Campaigns"
-        description="Create campaign drafts, design responsive emails, and send yourself a Resend test."
+        description="Create, preview, test, and send campaigns to saved Salesforce audiences."
         action={
           <Button onClick={() => setCreating(true)}>
             <Plus size={17} /> New campaign
@@ -129,10 +129,7 @@ export function Campaigns() {
         <div className="section-toolbar">
           <div>
             <h2>Campaign drafts</h2>
-            <p>
-              Production audience selection and broadcast sending come after
-              review controls.
-            </p>
+            <p>Build the email, review recipients, and send through Resend.</p>
           </div>
           <div className="search-box">
             <Search size={17} />

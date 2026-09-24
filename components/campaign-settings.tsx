@@ -225,7 +225,7 @@ export function CampaignSettings({ id }: { id: string }) {
               Save settings
             </Button>
             <Button busy={busy} onClick={() => void save(true)}>
-              Save and preview <ArrowRight size={16} />
+              Save and review <ArrowRight size={16} />
             </Button>
           </div>
         </div>
@@ -233,9 +233,9 @@ export function CampaignSettings({ id }: { id: string }) {
       <div className="settings-note">
         <Mail size={18} />
         <p>
-          <strong>Test before audience selection.</strong> The next step can
-          send only to your signed-in email address. Production audience sends
-          are not enabled in this draft milestone.
+          <strong>Review before sending.</strong> The next step lets you preview
+          desktop and mobile, send yourself a test, then choose included and
+          excluded audiences for the production send.
         </p>
       </div>
     </div>

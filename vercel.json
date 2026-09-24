@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/unsubscribes",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/campaign-sends",
+      "schedule": "* * * * *"
     }
   ]
 }

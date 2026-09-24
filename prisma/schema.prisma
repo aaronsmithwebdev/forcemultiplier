@@ -1,405 +1,500 @@
 datasource db {
-  provider = "postgresql"
-  url = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  schemas = ["forcemultiplier"]
+  schemas   = ["forcemultiplier"]
 }
+
 generator client {
   provider = "prisma-client-js"
 }
+
 model Connection {
-  provider String @id
-  clientId String
-  secret String
-  loginUrl String
-  version Int @default(1)
-  tokens String?
-  externalId String?
-  label String?
-  instanceUrl String?
-  expiresAt DateTime?
-  checkedAt DateTime?
+  provider          String    @id
+  clientId          String
+  secret            String
+  loginUrl          String
+  version           Int       @default(1)
+  tokens            String?
+  externalId        String?
+  label             String?
+  instanceUrl       String?
+  expiresAt         DateTime?
+  checkedAt         DateTime?
   refreshLeaseUntil DateTime?
-  error String?
-  updatedAt DateTime @updatedAt
+  error             String?
+  updatedAt         DateTime  @updatedAt
+
   @@schema("forcemultiplier")
 }
+
 model OAuthAttempt {
-  id String @id
-  userId String
-  provider String
-  verifier String
+  id                String   @id
+  userId            String
+  provider          String
+  verifier          String
   connectionVersion Int
-  expiresAt DateTime
+  expiresAt         DateTime
+
   @@schema("forcemultiplier")
 }
+
 model Audience {
-  id String @id @default(cuid())
-  name String
-  sourceType String
-  sourceId String?
-  query String
-  fields Json @default("[]")
-  orgId String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  runs PullRun[]
-  deliveries DeliveryRun[]
+  id           String        @id @default(cuid())
+  name         String
+  sourceType   String
+  sourceId     String?
+  query        String
+  fields       Json          @default("[]")
+  orgId        String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  runs         PullRun[]
+  deliveries   DeliveryRun[]
   managedLists ManagedList[]
-  schedule SyncSchedule?
+  schedule     SyncSchedule?
+
   @@schema("forcemultiplier")
 }
+
 model SyncSchedule {
-  id String @id @default(cuid())
-  audienceId String @unique
-  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
-  accountId String
-  listId String
-  listName String
-  mappings Json @default("[]")
-  cadence String
-  intervalHours Int?
-  localTime String?
-  weekday Int?
-  timeZone String
-  enabled Boolean @default(true)
-  version Int @default(1)
-  nextRunAt DateTime
-  lastRunAt DateTime?
+  id              String    @id @default(cuid())
+  audienceId      String    @unique
+  audience        Audience  @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  accountId       String
+  listId          String
+  listName        String
+  mappings        Json      @default("[]")
+  cadence         String
+  intervalHours   Int?
+  localTime       String?
+  weekday         Int?
+  timeZone        String
+  enabled         Boolean   @default(true)
+  version         Int       @default(1)
+  nextRunAt       DateTime
+  lastRunAt       DateTime?
   lastCompletedAt DateTime?
-  error String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  runs SyncRun[]
-  @@index([enabled,nextRunAt])
+  error           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  runs            SyncRun[]
+
+  @@index([enabled, nextRunAt])
   @@schema("forcemultiplier")
 }
+
 model SyncRun {
-  id String @id @default(cuid())
-  scheduleId String
-  schedule SyncSchedule @relation(fields:[scheduleId], references:[id], onDelete:Cascade)
+  id              String       @id @default(cuid())
+  scheduleId      String
+  schedule        SyncSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   scheduleVersion Int
-  status String @default("pending")
-  manual Boolean @default(false)
-  scheduledFor DateTime
-  accountId String
-  listId String
-  listName String
-  mappings Json @default("[]")
-  pullRunId String?
-  deliveryRunId String?
-  attempts Int @default(0)
-  availableAt DateTime @default(now())
-  leaseUntil DateTime?
-  error String?
-  createdAt DateTime @default(now())
-  finishedAt DateTime?
-  @@index([status,availableAt])
-  @@index([scheduleId,createdAt])
+  status          String       @default("pending")
+  manual          Boolean      @default(false)
+  scheduledFor    DateTime
+  accountId       String
+  listId          String
+  listName        String
+  mappings        Json         @default("[]")
+  pullRunId       String?
+  deliveryRunId   String?
+  attempts        Int          @default(0)
+  availableAt     DateTime     @default(now())
+  leaseUntil      DateTime?
+  error           String?
+  createdAt       DateTime     @default(now())
+  finishedAt      DateTime?
+
+  @@index([status, availableAt])
+  @@index([scheduleId, createdAt])
   @@schema("forcemultiplier")
 }
+
 model DeliveryRun {
-  id String @id @default(cuid())
-  audienceId String
-  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
-  issues DeliveryIssue[]
-  sourceRunId String
-  accountId String
-  listId String
-  listName String
-  managedListId String?
-  managedList ManagedList? @relation(fields:[managedListId], references:[id], onDelete:SetNull)
-  status String @default("pending")
-  cursor String?
-  activityId String?
-  activityKind String?
-  activityProgress Int @default(0)
-  batch Json?
-  mappings Json @default("[]")
-  total Int
-  processed Int @default(0)
-  submitted Int @default(0)
-  skipped Int @default(0)
-  failed Int @default(0)
-  removed Int @default(0)
-  reconcileCursor String?
+  id                 String          @id @default(cuid())
+  audienceId         String
+  audience           Audience        @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  issues             DeliveryIssue[]
+  sourceRunId        String
+  accountId          String
+  listId             String
+  listName           String
+  managedListId      String?
+  managedList        ManagedList?    @relation(fields: [managedListId], references: [id], onDelete: SetNull)
+  status             String          @default("pending")
+  cursor             String?
+  activityId         String?
+  activityKind       String?
+  activityProgress   Int             @default(0)
+  batch              Json?
+  mappings           Json            @default("[]")
+  total              Int
+  processed          Int             @default(0)
+  submitted          Int             @default(0)
+  skipped            Int             @default(0)
+  failed             Int             @default(0)
+  removed            Int             @default(0)
+  reconcileCursor    String?
   reconcileScannedAt DateTime?
-  error String?
-  leaseUntil DateTime?
-  createdAt DateTime @default(now())
-  finishedAt DateTime?
-  @@index([audienceId,createdAt])
+  error              String?
+  leaseUntil         DateTime?
+  createdAt          DateTime        @default(now())
+  finishedAt         DateTime?
+
+  @@index([audienceId, createdAt])
   @@schema("forcemultiplier")
 }
+
 model DeliveryIssue {
-  deliveryId String
-  delivery DeliveryRun @relation(fields:[deliveryId], references:[id], onDelete:Cascade)
-  key String
-  category String
-  reason String
+  deliveryId   String
+  delivery     DeliveryRun @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  key          String
+  category     String
+  reason       String
   salesforceId String?
-  name String?
-  email String?
-  detail String?
-  createdAt DateTime @default(now())
-  @@id([deliveryId,key])
-  @@index([deliveryId,category])
+  name         String?
+  email        String?
+  detail       String?
+  createdAt    DateTime    @default(now())
+
+  @@id([deliveryId, key])
+  @@index([deliveryId, category])
   @@index([createdAt])
   @@schema("forcemultiplier")
 }
+
 model ManagedList {
-  id String @id @default(cuid())
-  accountId String
-  listId String
-  listName String
-  audienceId String
-  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
+  id            String              @id @default(cuid())
+  accountId     String
+  listId        String
+  listName      String
+  audienceId    String
+  audience      Audience            @relation(fields: [audienceId], references: [id], onDelete: Cascade)
   initializedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  members ManagedListMember[]
-  deliveries DeliveryRun[]
-  @@unique([accountId,listId])
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  members       ManagedListMember[]
+  deliveries    DeliveryRun[]
+
+  @@unique([accountId, listId])
   @@schema("forcemultiplier")
 }
+
 model ManagedListMember {
-  managedListId String
-  managedList ManagedList @relation(fields:[managedListId], references:[id], onDelete:Cascade)
-  email String
-  contactId String
-  seenDeliveryId String
+  managedListId     String
+  managedList       ManagedList @relation(fields: [managedListId], references: [id], onDelete: Cascade)
+  email             String
+  contactId         String
+  seenDeliveryId    String
   desiredDeliveryId String?
-  @@id([managedListId,email])
-  @@index([managedListId,seenDeliveryId])
-  @@index([managedListId,desiredDeliveryId])
+
+  @@id([managedListId, email])
+  @@index([managedListId, seenDeliveryId])
+  @@index([managedListId, desiredDeliveryId])
   @@schema("forcemultiplier")
 }
+
 model PullRun {
-  id String @id @default(cuid())
+  id         String           @id @default(cuid())
   audienceId String
-  audience Audience @relation(fields:[audienceId], references:[id], onDelete:Cascade)
-  status String @default("pending")
-  query String
-  fields Json
-  orgId String
-  cursor String?
-  total Int @default(0)
-  processed Int @default(0)
-  error String?
+  audience   Audience         @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  status     String           @default("pending")
+  query      String
+  fields     Json
+  orgId      String
+  cursor     String?
+  total      Int              @default(0)
+  processed  Int              @default(0)
+  error      String?
   leaseUntil DateTime?
-  createdAt DateTime @default(now())
+  createdAt  DateTime         @default(now())
   finishedAt DateTime?
-  members AudienceMember[]
-  @@index([audienceId,createdAt])
+  members    AudienceMember[]
+
+  @@index([audienceId, createdAt])
   @@schema("forcemultiplier")
 }
+
 model AudienceMember {
-  runId String
-  run PullRun @relation(fields:[runId], references:[id], onDelete:Cascade)
-  salesforceId String
-  email String?
+  runId           String
+  run             PullRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  salesforceId    String
+  email           String?
   normalizedEmail String?
-  name String?
-  optedOut Boolean @default(false)
-  data Json
-  @@id([runId,salesforceId])
-  @@index([runId,normalizedEmail])
+  name            String?
+  optedOut        Boolean @default(false)
+  data            Json
+
+  @@id([runId, salesforceId])
+  @@index([runId, normalizedEmail])
   @@schema("forcemultiplier")
 }
+
 model UnsubscribeSync {
-  id String @id @default("default")
-  enabled Boolean @default(false)
-  accountId String?
-  orgId String?
-  cursor DateTime?
-  scanCursor String?
-  scanUntil DateTime?
-  leaseUntil DateTime?
-  error String?
-  lastRunAt DateTime?
+  id              String    @id @default("default")
+  enabled         Boolean   @default(false)
+  accountId       String?
+  orgId           String?
+  cursor          DateTime?
+  scanCursor      String?
+  scanUntil       DateTime?
+  leaseUntil      DateTime?
+  error           String?
+  lastRunAt       DateTime?
   lastCompletedAt DateTime?
-  updatedAt DateTime @updatedAt
+  updatedAt       DateTime  @updatedAt
+
   @@schema("forcemultiplier")
 }
+
 model UnsubscribeEvent {
-  accountId String
-  orgId String
-  contactId String
-  email String
-  optOutAt DateTime
+  accountId    String
+  orgId        String
+  contactId    String
+  email        String
+  optOutAt     DateTime
   optOutSource String?
-  status String @default("pending")
+  status       String    @default("pending")
   salesforceId String?
-  attempts Int @default(0)
-  availableAt DateTime @default(now())
-  error String?
-  discoveredAt DateTime @default(now())
-  processedAt DateTime?
-  @@id([accountId,orgId,contactId])
-  @@index([accountId,orgId,status,availableAt])
-  @@index([accountId,email])
+  attempts     Int       @default(0)
+  availableAt  DateTime  @default(now())
+  error        String?
+  discoveredAt DateTime  @default(now())
+  processedAt  DateTime?
+
+  @@id([accountId, orgId, contactId])
+  @@index([accountId, orgId, status, availableAt])
+  @@index([accountId, email])
   @@schema("forcemultiplier")
 }
+
 model ResubscribeJob {
-  id String @id @default(cuid())
-  name String
-  accountId String
-  clientKey String
-  orgId String?
-  listId String
-  listName String
-  presentField String?
-  amountField String?
+  id            String              @id @default(cuid())
+  name          String
+  accountId     String
+  clientKey     String
+  orgId         String?
+  listId        String
+  listName      String
+  presentField  String?
+  amountField   String?
   minimumAmount Float?
-  status String @default("uploading")
-  nextChunk Int @default(0)
-  uploaded Int @default(0)
-  error String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  members ResubscribeMember[]
-  @@index([status,createdAt])
+  status        String              @default("uploading")
+  nextChunk     Int                 @default(0)
+  uploaded      Int                 @default(0)
+  error         String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  members       ResubscribeMember[]
+
+  @@index([status, createdAt])
   @@schema("forcemultiplier")
 }
+
 model ResubscribeMember {
-  jobId String
-  job ResubscribeJob @relation(fields:[jobId], references:[id], onDelete:Cascade)
-  email String
-  status String @default("pending")
+  jobId        String
+  job          ResubscribeJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  email        String
+  status       String         @default("pending")
   salesforceId String?
-  data Json?
-  priority Float @default(0)
-  contactId String?
-  attempts Int @default(0)
-  availableAt DateTime @default(now())
-  error String?
-  processedAt DateTime?
-  @@id([jobId,email])
-  @@index([jobId,status,priority,email])
+  data         Json?
+  priority     Float          @default(0)
+  contactId    String?
+  attempts     Int            @default(0)
+  availableAt  DateTime       @default(now())
+  error        String?
+  processedAt  DateTime?
+
+  @@id([jobId, email])
+  @@index([jobId, status, priority, email])
   @@schema("forcemultiplier")
 }
+
 model ResubscribeDay {
   clientKey String
-  day String
-  contacts Int @default(0)
-  calls Int @default(0)
-  @@id([clientKey,day])
+  day       String
+  contacts  Int    @default(0)
+  calls     Int    @default(0)
+
+  @@id([clientKey, day])
   @@schema("forcemultiplier")
 }
+
 model ResubscribeWorker {
-  id String @id @default("default")
+  id         String    @id @default("default")
   leaseUntil DateTime?
+
   @@schema("forcemultiplier")
 }
+
 model ArchiveImport {
-  id String @id @default("constant-contact")
-  accountId String
-  status String @default("pending")
-  cursor String? @db.Text
-  scanned Int @default(0)
-  stored Int @default(0)
-  missing Int @default(0)
+  id         String    @id @default("constant-contact")
+  accountId  String
+  status     String    @default("pending")
+  cursor     String?   @db.Text
+  scanned    Int       @default(0)
+  stored     Int       @default(0)
+  missing    Int       @default(0)
   leaseUntil DateTime?
-  error String?
-  startedAt DateTime @default(now())
+  error      String?
+  startedAt  DateTime  @default(now())
   finishedAt DateTime?
-  updatedAt DateTime @updatedAt
+  updatedAt  DateTime  @updatedAt
+
   @@schema("forcemultiplier")
 }
+
 model ArchivedEmail {
-  id String @id @default(cuid())
-  accountId String
-  campaignId String
-  activityId String
-  role String
+  id           String   @id @default(cuid())
+  accountId    String
+  campaignId   String
+  activityId   String
+  role         String
   campaignType String
   campaignName String
-  subject String
-  preheader String?
-  fromName String?
-  fromEmail String?
-  sentAt DateTime
-  sendCount Int @default(0)
-  sourceHtml String? @db.Text
-  previewHtml String? @db.Text
-  previewText String? @db.Text
-  permalink String?
-  sourceHash String?
-  warning String?
-  createdAt DateTime @default(now())
-  @@unique([accountId,activityId])
-  @@index([accountId,sentAt])
-  @@index([accountId,campaignId])
+  subject      String
+  preheader    String?
+  fromName     String?
+  fromEmail    String?
+  sentAt       DateTime
+  sendCount    Int      @default(0)
+  sourceHtml   String?  @db.Text
+  previewHtml  String?  @db.Text
+  previewText  String?  @db.Text
+  permalink    String?
+  sourceHash   String?
+  warning      String?
+  createdAt    DateTime @default(now())
+
+  @@unique([accountId, activityId])
+  @@index([accountId, sentAt])
+  @@index([accountId, campaignId])
   @@schema("forcemultiplier")
 }
 
 model ArchiveImageImport {
-  id String @id @default("constant-contact")
-  accountId String
-  cutoff DateTime
+  id          String    @id @default("constant-contact")
+  accountId   String
+  cutoff      DateTime
   mediaFolder String
-  status String @default("inventory")
-  cursor String?
-  scanned Int @default(0)
-  leaseUntil DateTime?
-  error String?
-  startedAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status      String    @default("inventory")
+  cursor      String?
+  scanned     Int       @default(0)
+  leaseUntil  DateTime?
+  error       String?
+  startedAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
   @@schema("forcemultiplier")
 }
 
 model ArchivedImage {
-  accountId String
-  url String @db.Text
-  status String @default("pending")
+  accountId   String
+  url         String   @db.Text
+  status      String   @default("pending")
   storagePath String?
-  sha256 String?
+  sha256      String?
   contentType String?
-  error String?
-  emailIds String[]
-  updatedAt DateTime @updatedAt
-  @@id([accountId,url])
+  error       String?
+  emailIds    String[]
+  updatedAt   DateTime @updatedAt
+
+  @@id([accountId, url])
   @@schema("forcemultiplier")
 }
 
 model EmailTemplate {
-  id String @id @default(cuid())
-  name String
-  content Json
+  id        String                  @id @default(cuid())
+  name      String
+  content   Json
   createdBy String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
   revisions EmailTemplateRevision[]
+
   @@index([updatedAt])
   @@schema("forcemultiplier")
 }
 
 model EmailTemplateRevision {
-  id String @id @default(cuid())
+  id         String        @id @default(cuid())
   templateId String
-  template EmailTemplate @relation(fields:[templateId], references:[id], onDelete:Cascade)
-  content Json
-  label String?
-  createdBy String
-  automatic Boolean @default(true)
-  createdAt DateTime @default(now())
-  @@index([templateId,createdAt])
+  template   EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  content    Json
+  label      String?
+  createdBy  String
+  automatic  Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+
+  @@index([templateId, createdAt])
   @@schema("forcemultiplier")
 }
 
 model Campaign {
-  id String @id @default(cuid())
-  name String
-  content Json
-  status String @default("draft")
-  subject String @default("")
-  preheader String @default("")
-  fromName String @default("")
-  fromEmail String @default("")
-  replyToEmail String @default("")
-  createdBy String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String        @id @default(cuid())
+  name                 String
+  content              Json
+  status               String        @default("draft")
+  subject              String        @default("")
+  preheader            String        @default("")
+  fromName             String        @default("")
+  fromEmail            String        @default("")
+  replyToEmail         String        @default("")
+  audienceIds          String[]      @default([])
+  exclusionAudienceIds String[]      @default([])
+  manualExclusions     String[]      @default([])
+  createdBy            String
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  send                 CampaignSend?
+
   @@index([updatedAt])
+  @@schema("forcemultiplier")
+}
+
+model CampaignSend {
+  id                 String              @id @default(cuid())
+  campaignId         String              @unique
+  campaign           Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  status             String              @default("pending")
+  content            Json
+  subject            String
+  fromName           String
+  fromEmail          String
+  includeAudienceIds String[]
+  excludeAudienceIds String[]
+  includeRunIds      String[]
+  excludeRunIds      String[]
+  manualExclusions   String[]
+  counts             Json                @default("{}")
+  segmentId          String?
+  importId           String?
+  broadcastId        String?             @unique
+  leaseUntil         DateTime?
+  error              String?
+  createdBy          String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  finishedAt         DateTime?
+  recipients         CampaignRecipient[]
+
+  @@index([status, createdAt])
+  @@schema("forcemultiplier")
+}
+
+model CampaignRecipient {
+  sendId          String
+  send            CampaignSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+  email           String
+  name            String?
+  salesforceId    String?
+  status          String       @default("selected")
+  providerEmailId String?
+  messageId       String?
+  lastEventAt     DateTime?
+  updatedAt       DateTime     @updatedAt
+
+  @@id([sendId, email])
+  @@index([sendId, status])
   @@schema("forcemultiplier")
 }

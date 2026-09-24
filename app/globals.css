@@ -591,6 +591,122 @@ summary {
   margin-left: auto;
   order: -1;
 }
+.campaign-recipients {
+  margin-top: 24px;
+}
+.recipient-columns {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px 26px 18px;
+}
+.recipient-columns fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+.recipient-columns legend {
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 9px;
+}
+.recipient-columns legend small,
+.manual-exclusions > small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.check-row {
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  margin: 0 0 7px;
+  padding: 10px 12px;
+}
+.check-row input {
+  margin-top: 2px;
+  width: auto;
+}
+.check-row span,
+.check-row small {
+  display: block;
+}
+.check-row small {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.manual-exclusions {
+  margin: 0 26px 20px;
+}
+.manual-exclusions textarea {
+  resize: vertical;
+}
+.file-button {
+  align-items: center;
+  color: var(--green);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 6px;
+  margin-top: 7px;
+}
+.file-button input {
+  display: none;
+}
+.recipient-summary {
+  align-items: center;
+  background: #f5f7f3;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 18px;
+  padding: 17px 26px;
+}
+.recipient-summary > div small,
+.recipient-summary > div strong {
+  display: block;
+}
+.recipient-summary > div strong {
+  font-size: 24px;
+}
+.recipient-summary p {
+  color: var(--muted);
+  font-size: 11px;
+}
+.recipient-summary .button {
+  margin-left: auto;
+}
+.send-result {
+  align-items: flex-start;
+  color: var(--green);
+  display: flex;
+  gap: 12px;
+  padding: 22px 26px 26px;
+}
+.send-result.failed {
+  color: var(--red);
+}
+.send-result p {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.send-pulse {
+  animation: pulse 1.2s infinite;
+  background: var(--green);
+  border-radius: 50%;
+  height: 12px;
+  margin: 5px;
+  width: 12px;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
 .campaign-settings-page > .back-link {
   display: inline-flex;
   margin-bottom: 9px;
@@ -2232,6 +2348,16 @@ td strong {
     grid-template-columns: 1fr;
     padding-left: 20px;
     padding-right: 20px;
+  }
+  .recipient-columns {
+    grid-template-columns: 1fr;
+  }
+  .recipient-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .recipient-summary .button {
+    margin-left: 0;
   }
   .settings-fields .wide-field {
     grid-column: auto;

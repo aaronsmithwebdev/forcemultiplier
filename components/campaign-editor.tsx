@@ -8,6 +8,7 @@ import "@templatical/editor/style.css";
 import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
+import { CampaignRecipients } from "./campaign-recipients";
 
 export function CampaignEditor({
   id,
@@ -149,6 +150,7 @@ export function CampaignEditor({
           </span>
         )}
       </div>
+      {preview && <CampaignRecipients id={id} />}
     </div>
   );
 }
