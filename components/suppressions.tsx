@@ -48,9 +48,11 @@ type State = {
 const direction = (value: string) =>
   value === "salesforce_to_forcemultiplier"
     ? "Salesforce → ForceMultiplier"
-    : value === "forcemultiplier_to_salesforce"
-      ? "ForceMultiplier → Salesforce"
-      : "CSV → ForceMultiplier";
+    : value === "resend_to_forcemultiplier"
+      ? "Resend → ForceMultiplier"
+      : value === "forcemultiplier_to_salesforce"
+        ? "ForceMultiplier → Salesforce"
+        : "CSV → ForceMultiplier";
 
 const originatingEmail = (event: Event) =>
   event.subject ||

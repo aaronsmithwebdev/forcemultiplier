@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 import { db } from "../lib/db";
 import {
@@ -7,6 +8,7 @@ import {
   salesforceOptOutQuery,
   salesforceOptOutRows,
 } from "../lib/suppressions";
+import { receiveResendWebhook } from "../lib/resend-webhooks";
 
 function mockMethod(t: any, target: any, name: string, fn: any) {
   const original = target[name];
@@ -41,6 +43,61 @@ test("suppression imports normalize, deduplicate and preserve existing rows", as
       "user-1",
     ),
     { submitted: 2, added: 1, existing: 1 },
+  );
+});
+
+test("signed Resend unsubscribe webhooks are immediate and idempotent", async (t) => {
+  const now = Date.parse("2026-09-27T04:00:00.000Z");
+  const key = Buffer.from("a secure webhook test key");
+  const secret = `whsec_${key.toString("base64")}`;
+  const payload = JSON.stringify({
+    type: "contact.updated",
+    data: {
+      id: "contact-1",
+      email: " Person@Example.org ",
+      updated_at: "2026-09-27T03:59:59.000Z",
+      unsubscribed: true,
+    },
+  });
+  const id = "msg_1";
+  const timestamp = String(now / 1000);
+  const signature = createHmac("sha256", key)
+    .update(`${id}.${timestamp}.${payload}`)
+    .digest("base64");
+  const headers = new Headers({
+    "svix-id": id,
+    "svix-timestamp": timestamp,
+    "svix-signature": `v1,${signature}`,
+  });
+  let suppression: any;
+  let event: any;
+  mockMethod(t, db.suppression, "upsert", async (args: any) => {
+    suppression = args;
+    return args.create;
+  });
+  mockMethod(t, db.suppressionEvent, "createMany", async (args: any) => {
+    event = args;
+    return { count: 1 };
+  });
+  mockMethod(t, db, "$transaction", async (operations: any[]) =>
+    Promise.all(operations),
+  );
+
+  assert.deepEqual(await receiveResendWebhook(payload, headers, secret, now), {
+    received: true,
+    suppressed: true,
+  });
+  assert.equal(suppression.create.email, "person@example.org");
+  assert.equal(event.data[0].dedupeKey, "resend:msg_1");
+  assert.equal(event.data[0].direction, "resend_to_forcemultiplier");
+  assert.equal(event.skipDuplicates, true);
+  await assert.rejects(
+    receiveResendWebhook(`${payload} `, headers, secret, now),
+    /Invalid Resend webhook/,
+  );
+  await assert.rejects(
+    receiveResendWebhook(payload, headers, secret, now + 301_000),
+    /Invalid Resend webhook/,
   );
 });
 

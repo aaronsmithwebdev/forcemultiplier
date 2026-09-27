@@ -32,6 +32,7 @@ import {
 } from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import { resendStatus } from "@/lib/resend";
+import { receiveResendWebhook } from "@/lib/resend-webhooks";
 import {
   resendRetentionState,
   runResendContactCleanup,
@@ -137,6 +138,12 @@ async function handle(
   const method = request.method;
   const params = request.nextUrl.searchParams;
   try {
+    if (key === "webhooks/resend" && method === "POST") {
+      const payload = await request.text();
+      if (payload.length > 100_000)
+        throw new AppError("Resend webhook is too large.", 413);
+      return json(await receiveResendWebhook(payload, request.headers));
+    }
     if (key === "cron/archive" && method === "GET") {
       const secret = process.env.CRON_SECRET;
       if (
