@@ -5,6 +5,7 @@ async function resendRequest(
   init: RequestInit = {},
   key = process.env.RESEND_API_KEY,
   request: typeof fetch = fetch,
+  allowNotFound = false,
 ) {
   if (!key?.trim())
     throw new AppError("Resend is not configured. Add RESEND_API_KEY.", 409);
@@ -22,6 +23,7 @@ async function resendRequest(
   try {
     data = await response.json();
   } catch {}
+  if (allowNotFound && response.status === 404) return null;
   if (!response.ok)
     throw new AppError(
       typeof data?.message === "string"
@@ -30,6 +32,44 @@ async function resendRequest(
       response.status === 429 ? 429 : response.status < 500 ? 409 : 502,
     );
   return data;
+}
+
+export type ResendContact = {
+  id: string;
+  email: string;
+  unsubscribed: boolean;
+};
+
+export async function getResendContact(email: string) {
+  const data = await resendRequest(
+    `/contacts/${encodeURIComponent(email)}`,
+    {},
+    process.env.RESEND_API_KEY,
+    fetch,
+    true,
+  );
+  if (data === null) return null;
+  if (
+    typeof data?.id !== "string" ||
+    typeof data?.email !== "string" ||
+    typeof data?.unsubscribed !== "boolean"
+  )
+    throw new AppError("Resend returned an unexpected contact.", 502);
+  return {
+    id: data.id,
+    email: data.email,
+    unsubscribed: data.unsubscribed,
+  } satisfies ResendContact;
+}
+
+export async function deleteResendContact(email: string) {
+  await resendRequest(
+    `/contacts/${encodeURIComponent(email)}`,
+    { method: "DELETE" },
+    process.env.RESEND_API_KEY,
+    fetch,
+    true,
+  );
 }
 
 export async function resendStatus(

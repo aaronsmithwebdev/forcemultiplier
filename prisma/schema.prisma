@@ -542,18 +542,33 @@ model CampaignSend {
 }
 
 model CampaignRecipient {
-  sendId          String
-  send            CampaignSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
-  email           String
-  name            String?
-  salesforceId    String?
-  status          String       @default("selected")
-  providerEmailId String?
-  messageId       String?
-  lastEventAt     DateTime?
-  updatedAt       DateTime     @updatedAt
+  sendId                   String
+  send                     CampaignSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+  email                    String
+  name                     String?
+  salesforceId             String?
+  status                   String       @default("selected")
+  providerEmailId          String?
+  messageId                String?
+  lastEventAt              DateTime?
+  providerContactDeletedAt DateTime?
+  updatedAt                DateTime     @updatedAt
 
   @@id([sendId, email])
+  @@index([email])
   @@index([sendId, status])
+  @@schema("forcemultiplier")
+}
+
+model WorkspaceSettings {
+  id                         String    @id @default("workspace")
+  resendContactRetentionDays Int       @default(90)
+  resendCleanupLeaseUntil    DateTime?
+  resendCleanupNextRunAt     DateTime?
+  resendCleanupLastRunAt     DateTime?
+  resendCleanupLastDeleted   Int       @default(0)
+  resendCleanupError         String?
+  updatedAt                  DateTime  @updatedAt
+
   @@schema("forcemultiplier")
 }

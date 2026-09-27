@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/cron/cleanup",
-      "schedule": "0 3 * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/unsubscribes",

@@ -33,6 +33,11 @@ import {
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import { resendStatus } from "@/lib/resend";
 import {
+  resendRetentionState,
+  runResendContactCleanup,
+  saveResendRetentionDays,
+} from "@/lib/resend-retention";
+import {
   archivePreview,
   archiveState,
   archiveStep,
@@ -166,7 +171,11 @@ async function handle(
         request.headers.get("authorization") !== `Bearer ${secret}`
       )
         throw new AppError("Cron authorization failed.", 401);
-      return json(await purgeExpiredDeliveryIssues());
+      const [deliveryIssues, resendContacts] = await Promise.all([
+        purgeExpiredDeliveryIssues(),
+        runResendContactCleanup(),
+      ]);
+      return json({ deliveryIssues, resendContacts });
     }
     if (key === "cron/unsubscribes" && method === "GET") {
       const secret = process.env.CRON_SECRET;
@@ -442,6 +451,14 @@ async function handle(
     }
     if (key === "resend/status" && method === "GET")
       return json(await resendStatus());
+    if (key === "settings" && method === "GET")
+      return json(await resendRetentionState());
+    if (key === "settings" && method === "PUT") {
+      const data = z
+        .object({ retentionDays: z.number().int().min(1).max(3650) })
+        .parse(await body(request));
+      return json(await saveResendRetentionDays(data.retentionDays));
+    }
     if (key === "suppressions" && method === "GET")
       return json(await suppressionState(params.get("q") || ""));
     if (key === "suppressions/import" && method === "POST") {

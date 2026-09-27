@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ArrowUpRight,
   ShieldCheck,
+  Settings,
 } from "lucide-react";
 import { api } from "./common";
 const links = [
@@ -26,6 +27,7 @@ const links = [
   ["/resubscriptions", "Resubscriptions", UsersRound],
   ["/activity", "Pull history", Activity],
   ["/connections", "Connections", PlugZap],
+  ["/settings", "Settings", Settings],
 ] as const;
 export function Shell({
   children,
