@@ -11,6 +11,7 @@ A private workspace growing into a complete Constant Contact replacement: Salesf
 - A 25-contact preview and resumable, paginated full pulls, including audiences larger than 2,000 records. Completed snapshots are saved in Supabase and remain visible during subsequent pulls.
 - Constant Contact list browsing, member inspection, empty-list creation, and custom-field catalog browsing.
 - Search across pulled contact names, email addresses, and Salesforce IDs.
+- A consolidated Salesforce Contact view with identity, consent status, latest captured custom-field values, current and historical audience membership, campaign history, and operational activity.
 - Resumable Constant Contact delivery of names, email addresses, and mapped custom fields, with destination-list selection, Salesforce opt-out filtering, consent confirmation, managed-membership reconciliation, provider activity checks, and per-contact issue reporting.
 - Per-audience scheduled syncs that run hourly, daily, or weekly through a secured Vercel Cron worker, with time-zone-aware scheduling, retries, pause/resume, and run history.
 - CSV-driven Constant Contact resubscription jobs that preserve contact details and list memberships, process at most 2,500 requested contacts per UTC day, and can optionally match and prioritize Salesforce Contact fields.

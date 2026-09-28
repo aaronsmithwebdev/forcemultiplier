@@ -2301,6 +2301,107 @@ td strong {
   border-top: 1px solid var(--line);
   padding-top: 21px;
 }
+.contact-link:hover strong,
+.contact-section a:hover,
+.contact-list a:hover strong {
+  color: var(--green);
+  text-decoration: underline;
+}
+.contact-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.contact-status-value {
+  font-size: 24px !important;
+  letter-spacing: -0.5px !important;
+}
+.contact-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 24px;
+}
+.contact-panel .section-toolbar,
+.contact-section .section-toolbar {
+  align-items: flex-start;
+}
+.contact-facts {
+  margin: 0;
+  padding: 5px 26px 19px;
+}
+.contact-facts > div {
+  border-bottom: 1px solid #eef0e8;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  padding: 14px 0;
+}
+.contact-facts > div:last-child {
+  border-bottom: 0;
+}
+.contact-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+.contact-facts dd {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.contact-panel-note,
+.contact-panel-empty {
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  padding: 16px 26px;
+}
+.contact-section {
+  margin-bottom: 24px;
+}
+.contact-value {
+  max-width: 520px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.contact-list {
+  display: grid;
+  padding: 5px 26px 19px;
+}
+.contact-list > a,
+.contact-list > div {
+  align-items: center;
+  border-bottom: 1px solid #eef0e8;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 13px 0;
+}
+.contact-list > :last-child {
+  border-bottom: 0;
+}
+.contact-list strong,
+.contact-list small {
+  display: block;
+}
+.contact-list strong {
+  font-size: 12px;
+}
+.contact-list small {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 3px;
+}
+.contact-activity-list > div {
+  justify-content: flex-start;
+}
+.contact-activity-list svg {
+  color: #7c9175;
+  flex: 0 0 auto;
+}
 @media (min-width: 1500px) {
   .main-content {
     padding-top: 50px;
@@ -2334,6 +2435,9 @@ td strong {
   }
   .connection-card .button-row {
     flex-direction: column;
+  }
+  .contact-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .list-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -2396,6 +2500,9 @@ td strong {
   .connection-grid {
     grid-template-columns: 1fr;
   }
+  .contact-overview-grid {
+    grid-template-columns: 1fr;
+  }
   .connection-card .button-row {
     flex-direction: row;
   }
@@ -2447,6 +2554,10 @@ td strong {
     grid-template-columns: 1fr;
   }
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .contact-facts > div {
+    gap: 4px;
     grid-template-columns: 1fr;
   }
   .stat-card {

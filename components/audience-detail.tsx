@@ -682,8 +682,15 @@ export function AudienceDetail({ id }: { id: string }) {
                   {data.members.map((m: any) => (
                     <tr key={m.salesforceId}>
                       <td>
-                        <strong>{m.name || "Unnamed contact"}</strong>
-                        <small className="block muted">{m.salesforceId}</small>
+                        <Link
+                          className="contact-link"
+                          href={`/contacts/${encodeURIComponent(m.salesforceId)}`}
+                        >
+                          <strong>{m.name || "Unnamed contact"}</strong>
+                          <small className="block muted">
+                            {m.salesforceId}
+                          </small>
+                        </Link>
                       </td>
                       <td>{m.email || "No email"}</td>
                       <td>

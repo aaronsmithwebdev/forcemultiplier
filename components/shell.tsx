@@ -109,7 +109,7 @@ export function Shell({
             Workspace <ChevronRight size={13} />{" "}
             <strong>
               {links.find(([href]) => pathname.startsWith(href))?.[1] ??
-                "Audience"}
+                (pathname.startsWith("/contacts/") ? "Contact" : "Audience")}
             </strong>
           </span>
           <div className="topbar-actions">
