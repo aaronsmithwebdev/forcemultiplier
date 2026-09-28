@@ -135,7 +135,7 @@ export function CampaignEditor({
         >
           {preview ? (
             <>
-              <ArrowLeft size={16} /> Email settings
+              <ArrowLeft size={16} /> Send settings
             </>
           ) : (
             <>

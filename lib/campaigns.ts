@@ -12,6 +12,7 @@ export type CampaignPatch = Partial<{
   fromName: string;
   fromEmail: string;
   replyToEmail: string;
+  serviceNotice: boolean;
 }>;
 
 const campaignSelect = {
@@ -24,6 +25,7 @@ const campaignSelect = {
   fromName: true,
   fromEmail: true,
   replyToEmail: true,
+  serviceNotice: true,
   createdAt: true,
   updatedAt: true,
 } as const;

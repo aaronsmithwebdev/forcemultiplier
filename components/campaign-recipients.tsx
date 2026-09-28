@@ -26,7 +26,10 @@ type Counts = {
   optedOut: number;
   excluded: number;
   fieldExcluded: number;
+  manuallyExcluded?: number;
   suppressed: number;
+  deliveryBlocked?: number;
+  marketingOptOutsIncluded?: number;
   recipients: number;
 };
 type SendState = {
@@ -37,6 +40,7 @@ type SendState = {
   finishedAt: string | null;
 };
 type Review = {
+  serviceNotice: boolean;
   audienceIds: string[];
   exclusionAudienceIds: string[];
   manualExclusions: string[];
@@ -46,7 +50,7 @@ type Review = {
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const working = new Set(["pending", "importing", "ready"]);
+const working = new Set(["pending", "importing", "ready", "sending"]);
 const emptyRules: QueryGroup = { conjunction: "AND", items: [] };
 
 function parseEmails(value: string) {
@@ -320,10 +324,13 @@ export function CampaignRecipients({ id }: { id: string }) {
   }
 
   async function send() {
-    if (!counts?.recipients || parsed.invalid.length || !rulesValid) return;
+    if (!review || !counts?.recipients || parsed.invalid.length || !rulesValid)
+      return;
     if (
       !window.confirm(
-        `Send this campaign to ${counts.recipients.toLocaleString()} recipients? This cannot be undone.`,
+        review.serviceNotice
+          ? `Send this service notice to ${counts.recipients.toLocaleString()} recipients, including ${(counts.marketingOptOutsIncluded || 0).toLocaleString()} who opted out of marketing? This must contain only essential, non-promotional information and cannot be undone.`
+          : `Send this campaign to ${counts.recipients.toLocaleString()} recipients? This cannot be undone.`,
       )
     )
       return;
@@ -357,8 +364,9 @@ export function CampaignRecipients({ id }: { id: string }) {
         <div>
           <h2>Choose recipients</h2>
           <p>
-            Included audiences are combined. Duplicates, opt-outs, and
-            exclusions are removed automatically.
+            {review.serviceNotice
+              ? "Included audiences are combined. Marketing opt-outs may receive this service notice; audience, field, and manual exclusions still apply."
+              : "Included audiences are combined. Duplicates, opt-outs, and exclusions are removed automatically."}
           </p>
         </div>
         <span className="row-icon">
@@ -398,9 +406,13 @@ export function CampaignRecipients({ id }: { id: string }) {
               {sendState.status === "sent"
                 ? `${Number(sendState.counts.recipients || 0).toLocaleString()} addresses were submitted to Resend${sendState.finishedAt ? ` on ${date(sendState.finishedAt)}` : ""}.`
                 : sendState.status === "review"
-                  ? "Resend may have accepted the broadcast before the connection failed. Check the Resend broadcast before taking any further action."
+                  ? review.serviceNotice
+                    ? "Resend may have accepted a transactional batch before the connection failed. Check Resend before taking any further action."
+                    : "Resend may have accepted the broadcast before the connection failed. Check the Resend broadcast before taking any further action."
                   : sendState.error ||
-                    "ForceMultiplier is building the Resend segment and sending the broadcast in the background."}
+                    (review.serviceNotice
+                      ? "ForceMultiplier is sending the service notice through Resend in transactional batches."
+                      : "ForceMultiplier is building the Resend segment and sending the broadcast in the background.")}
             </p>
           </div>
         </div>
@@ -486,9 +498,14 @@ export function CampaignRecipients({ id }: { id: string }) {
                   counts.optedOut +
                   counts.excluded +
                   counts.fieldExcluded +
+                  (counts.manuallyExcluded || 0) +
+                  (counts.deliveryBlocked || 0) +
                   counts.suppressed
                 ).toLocaleString()}{" "}
                 excluded
+                {review.serviceNotice && counts.marketingOptOutsIncluded
+                  ? ` · ${counts.marketingOptOutsIncluded.toLocaleString()} marketing opt-outs included`
+                  : ""}
               </p>
             )}
             <Button

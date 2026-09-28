@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resendStatus } from "../lib/resend";
+import { resendStatus, sendResendBatch } from "../lib/resend";
 
 test("Resend status reads domains without exposing the key", async () => {
   let called = false;
@@ -42,5 +42,41 @@ test("Resend status reads domains without exposing the key", async () => {
       (async () => new Response(null, { status: 401 })) as typeof fetch,
     ),
     /rejected the API key/,
+  );
+});
+
+test("Resend transactional batches are bounded and idempotent", async () => {
+  const email = {
+    from: "Example <service@example.org>",
+    to: ["person@example.org"] as [string],
+    subject: "Service update",
+    html: "<p>Hello</p>",
+    reply_to: "team@example.org",
+  };
+  const request = (async (
+    url: string | URL | Request,
+    options?: RequestInit,
+  ) => {
+    assert.equal(url, "https://api.resend.com/emails/batch");
+    assert.equal(
+      (options?.headers as Record<string, string>)["Idempotency-Key"],
+      "service-notice/send-1/0",
+    );
+    assert.deepEqual(JSON.parse(String(options?.body)), [email]);
+    return Response.json({ data: [{ id: "email_123" }] });
+  }) as typeof fetch;
+
+  assert.deepEqual(
+    await sendResendBatch(
+      [email],
+      "service-notice/send-1/0",
+      "re_test",
+      request,
+    ),
+    [{ id: "email_123" }],
+  );
+  await assert.rejects(
+    sendResendBatch([], "empty", "re_test", request),
+    /1–100 emails/,
   );
 });

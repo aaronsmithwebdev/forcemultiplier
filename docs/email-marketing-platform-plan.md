@@ -8,7 +8,7 @@ Updated 25 September 2026 after implementing provider-neutral suppressions and S
 
 ForceMultiplier owns a provider-neutral global suppression ledger. Administrators can mass import unsubscribe email addresses from CSV without contacting Constant Contact, Salesforce, or Resend. The primary consent integration is a monotonic two-way Salesforce opt-out sync: Salesforce opt-outs flow into the ledger and Resend/local global unsubscribes set the approved Salesforce opt-out field to `true`. Neither direction automatically clears an opt-out; resubscription is a separate, explicitly authorized workflow.
 
-The first sending release is for one trusted internal workspace and one production Salesforce org. It covers Salesforce Contacts and permissioned marketing broadcasts; the Funraisin entrant source follows as a planned phase. It does not require a public signup product, a generic automation journey builder, or replacing Salesforce as the source of CRM data. Leads, Person Accounts, transactional mail, multichannel marketing, and complex automation can be evaluated after the broadcast workflow works end to end.
+The first sending release is for one trusted internal workspace and one production Salesforce org. It covers Salesforce Contacts, permissioned marketing broadcasts, and exceptional service notices for essential non-promotional communication; the Funraisin entrant source follows as a planned phase. It does not require a public signup product, a generic automation journey builder, or replacing Salesforce as the source of CRM data. Leads, Person Accounts, general transactional automation, multichannel marketing, and complex automation can be evaluated after the broadcast workflow works end to end.
 
 ### Ownership and flow
 
@@ -51,7 +51,7 @@ Use server-only `FUNRAISIN_BASE_URL` and `FUNRAISIN_API_KEY` with a Bearer heade
 - Opt-out synchronization is monotonic. Salesforce, Resend, and approved imports may add global suppressions; no automated sync clears one. A future resubscription flow must capture explicit evidence and update each system deliberately.
 - Prefer a campaign-specific Resend segment populated from the approved recipient set so later audience syncs cannot change a queued campaign. Verify segment and scheduled-send timing against current Resend behavior in a small pilot. Record the resolved recipient IDs/count and provider segment ID. If provider behavior cannot guarantee the intended set, schedule preparation in ForceMultiplier and submit the Broadcast only after final reconciliation at dispatch.
 - Freeze template revision, mappings, audience snapshot, sender, subject, and approval in the campaign record. Sending is a one-way action; uncertain API outcomes must be looked up by stored provider ID before any retry.
-- Do not use individual transactional sends as a substitute for Broadcasts merely to avoid recipient management. Use Resend Broadcasts for marketing delivery, unsubscribe handling, and provider queueing.
+- Do not use individual transactional sends as a substitute for Broadcasts merely to avoid recipient management. Use Resend Broadcasts for marketing delivery, unsubscribe handling, and provider queueing. The explicit service-notice setting is the narrow exception for essential, non-promotional messages and retains non-marketing delivery blocks.
 - Keep the current Constant Contact integration read-only during final comparison, except for existing workflows deliberately left active until their individual cutover. No dual sending to the same recipients.
 
 ## Data and implementation shape

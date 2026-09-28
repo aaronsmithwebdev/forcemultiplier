@@ -11,6 +11,7 @@ import {
   createResendContactImport,
   createResendSegment,
   getResendContactImport,
+  sendResendBatch,
   sendResendBroadcast,
 } from "./resend";
 
@@ -29,10 +30,12 @@ type RecipientRow = {
   optedOut: boolean;
   audienceExcluded: boolean;
   fieldExcluded: boolean;
+  manuallyExcluded: boolean;
   suppressed: boolean;
+  deliveryBlocked: boolean;
 };
 
-const active = ["pending", "importing", "ready"];
+const active = ["pending", "importing", "ready", "sending"];
 
 export function uniqueEmails(values: string[]) {
   return [...new Set(values.map((value) => value.trim().toLowerCase()))].filter(
@@ -67,6 +70,74 @@ export function prepareBroadcastHtml(html: string) {
       : `${prepared}${footer}`;
   }
   return prepared;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character]!,
+  );
+}
+
+export function prepareServiceNoticeHtml(
+  html: string,
+  recipient: { email: string; name: string | null },
+) {
+  if (/\{\{\s*unsubscribe_url\s*\}\}/.test(html))
+    throw new AppError(
+      "Service notices cannot contain an unsubscribe link. Remove the unsubscribe merge tag before sending.",
+      409,
+    );
+  const parts = (recipient.name || "").trim().split(/\s+/).filter(Boolean);
+  const values = {
+    FirstName: parts[0] || "there",
+    LastName: parts.slice(1).join(" "),
+    Email: recipient.email,
+  };
+  const prepared = html.replace(
+    /\{\{\s*contact\.(FirstName|LastName|Email)\s*\}\}/g,
+    (_match, field: keyof typeof values) => escapeHtml(values[field]),
+  );
+  const unsupported = [
+    ...prepared.matchAll(
+      /(?<!\{)\{\{(?!\{)\s*contact\.([A-Za-z0-9_.]+)\s*\}\}(?!\})/g,
+    ),
+  ].map((match) => match[1]);
+  if (unsupported.length)
+    throw new AppError(
+      `This service notice uses merge fields that are not ready for delivery: ${[...new Set(unsupported)].join(", ")}. Remove them or use FirstName, LastName, and Email.`,
+      409,
+    );
+  return prepared;
+}
+
+export function recipientIsEligible(
+  row: Pick<
+    RecipientRow,
+    | "optedOut"
+    | "audienceExcluded"
+    | "fieldExcluded"
+    | "manuallyExcluded"
+    | "suppressed"
+    | "deliveryBlocked"
+  >,
+  serviceNotice: boolean,
+) {
+  if (
+    row.audienceExcluded ||
+    row.fieldExcluded ||
+    row.manuallyExcluded ||
+    row.deliveryBlocked
+  )
+    return false;
+  return serviceNotice || (!row.optedOut && !row.suppressed);
 }
 
 async function resolveRuns(ids: string[], label: string) {
@@ -129,37 +200,53 @@ async function recipientRows(
         SELECT 1 FROM "forcemultiplier"."AudienceMember" x
         WHERE x."normalizedEmail" = i.email ${excludedRuns}
       ) AS "audienceExcluded",
-      (${manualMatch} OR EXISTS (
+      ${manualMatch} AS "manuallyExcluded",
+      (EXISTS (
         SELECT 1 FROM "forcemultiplier"."Suppression" s
         WHERE s.email = i.email
+          AND s.kind IN ('global_unsubscribe', 'marketing_unsubscribe')
       ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
         WHERE LOWER(u.email) = i.email
-      )) AS suppressed
+      )) AS suppressed,
+      EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Suppression" s
+        WHERE s.email = i.email
+          AND s.kind NOT IN ('global_unsubscribe', 'marketing_unsubscribe')
+      ) AS "deliveryBlocked"
     FROM included i
     ORDER BY i.email
   `);
 }
 
-function summary(rows: RecipientRow[]) {
+function summary(rows: RecipientRow[], serviceNotice: boolean) {
   const counts = {
     source: 0,
     duplicates: 0,
     optedOut: 0,
     excluded: 0,
     fieldExcluded: 0,
+    manuallyExcluded: 0,
     suppressed: 0,
+    deliveryBlocked: 0,
+    marketingOptOutsIncluded: 0,
     recipients: 0,
   };
   for (const row of rows) {
     const sourceRows = Number(row.sourceRows);
     counts.source += sourceRows;
     counts.duplicates += Math.max(0, sourceRows - 1);
-    if (row.optedOut) counts.optedOut++;
-    else if (row.audienceExcluded) counts.excluded++;
+    if (row.audienceExcluded) counts.excluded++;
     else if (row.fieldExcluded) counts.fieldExcluded++;
-    else if (row.suppressed) counts.suppressed++;
-    else counts.recipients++;
+    else if (row.manuallyExcluded) counts.manuallyExcluded++;
+    else if (row.deliveryBlocked) counts.deliveryBlocked++;
+    else if (!serviceNotice && row.optedOut) counts.optedOut++;
+    else if (!serviceNotice && row.suppressed) counts.suppressed++;
+    else {
+      counts.recipients++;
+      if (serviceNotice && (row.optedOut || row.suppressed))
+        counts.marketingOptOutsIncluded++;
+    }
   }
   return counts;
 }
@@ -262,6 +349,7 @@ export async function campaignAudienceOptions(campaignId: string) {
       where: { id: campaignId },
       select: {
         audienceIds: true,
+        serviceNotice: true,
         exclusionAudienceIds: true,
         manualExclusions: true,
         exclusionRules: true,
@@ -327,7 +415,7 @@ export async function saveAndPreviewCampaignAudience(
     manualExclusions,
     selection.exclusionRules,
   );
-  await db.campaign.update({
+  const campaign = await db.campaign.update({
     where: { id: campaignId },
     data: {
       audienceIds,
@@ -335,8 +423,9 @@ export async function saveAndPreviewCampaignAudience(
       manualExclusions,
       exclusionRules: selection.exclusionRules as Prisma.InputJsonValue,
     },
+    select: { serviceNotice: true },
   });
-  return summary(rows);
+  return summary(rows, campaign.serviceNotice);
 }
 
 export async function startCampaignSend(campaignId: string, userId: string) {
@@ -348,9 +437,17 @@ export async function startCampaignSend(campaignId: string, userId: string) {
   if (campaign.send) return campaign.send;
   if (!campaign.audienceIds.length)
     throw new AppError("Choose at least one audience.");
-  if (!campaign.subject || !campaign.fromName || !campaign.fromEmail)
-    throw new AppError("Complete Email settings before sending.", 409);
-  if (campaign.replyToEmail.toLowerCase() !== campaign.fromEmail.toLowerCase())
+  if (
+    !campaign.subject ||
+    !campaign.fromName ||
+    !campaign.fromEmail ||
+    !campaign.replyToEmail
+  )
+    throw new AppError("Complete Send settings before sending.", 409);
+  if (
+    !campaign.serviceNotice &&
+    campaign.replyToEmail.toLowerCase() !== campaign.fromEmail.toLowerCase()
+  )
     throw new AppError(
       "Resend Broadcasts reply to the From address. Make Reply-to match From before sending.",
       409,
@@ -381,6 +478,8 @@ export async function startCampaignSend(campaignId: string, userId: string) {
         subject: campaign.subject,
         fromName: campaign.fromName,
         fromEmail: campaign.fromEmail,
+        replyToEmail: campaign.replyToEmail,
+        serviceNotice: campaign.serviceNotice,
         includeAudienceIds: campaign.audienceIds,
         excludeAudienceIds: campaign.exclusionAudienceIds,
         includeRunIds,
@@ -451,16 +550,18 @@ export async function campaignSendStep(id?: string) {
         send.manualExclusions,
         send.exclusionRules as unknown as QueryGroup,
       );
-      const counts = summary(rows);
+      const counts = summary(rows, send.serviceNotice);
       if (!counts.recipients)
         throw new AppError("No recipients remain after exclusions.", 409);
-      const eligible = rows.filter(
-        (row) =>
-          !row.optedOut &&
-          !row.audienceExcluded &&
-          !row.fieldExcluded &&
-          !row.suppressed,
+      const eligible = rows.filter((row) =>
+        recipientIsEligible(row, send.serviceNotice),
       );
+      if (send.serviceNotice) {
+        const rendered = await renderCampaignHtml(
+          send.content as unknown as TemplateContent,
+        );
+        prepareServiceNoticeHtml(rendered, eligible[0]!);
+      }
       for (let offset = 0; offset < eligible.length; offset += 5000)
         await db.campaignRecipient.createMany({
           data: eligible.slice(offset, offset + 5000).map((row) => ({
@@ -470,6 +571,15 @@ export async function campaignSendStep(id?: string) {
             salesforceId: row.salesforceId,
           })),
           skipDuplicates: true,
+        });
+      if (send.serviceNotice)
+        return db.campaignSend.update({
+          where: { id: send.id },
+          data: {
+            status: "sending",
+            counts: counts as unknown as Prisma.InputJsonValue,
+            leaseUntil: null,
+          },
         });
       let segmentId = send.segmentId;
       if (!segmentId) {
@@ -513,6 +623,59 @@ export async function campaignSendStep(id?: string) {
           counts: counts as unknown as Prisma.InputJsonValue,
           leaseUntil: null,
         },
+      });
+    }
+    if (send.status === "sending") {
+      const recipients = await db.campaignRecipient.findMany({
+        where: { sendId: send.id, status: "selected" },
+        orderBy: { email: "asc" },
+        take: 100,
+      });
+      if (!recipients.length) {
+        await db.$transaction([
+          db.campaign.update({
+            where: { id: send.campaignId },
+            data: { status: "sent" },
+          }),
+          db.campaignSend.update({
+            where: { id: send.id },
+            data: { status: "sent", finishedAt: new Date(), leaseUntil: null },
+          }),
+        ]);
+        return db.campaignSend.findUnique({ where: { id: send.id } });
+      }
+      const rendered = await renderCampaignHtml(
+        send.content as unknown as TemplateContent,
+      );
+      const submitted = await db.campaignRecipient.count({
+        where: { sendId: send.id, status: "submitted" },
+      });
+      const result = await sendResendBatch(
+        recipients.map((recipient) => ({
+          from: `${send.fromName} <${send.fromEmail}>`,
+          to: [recipient.email],
+          subject: send.subject,
+          html: prepareServiceNoticeHtml(rendered, recipient),
+          reply_to: send.replyToEmail,
+        })),
+        `service-notice/${send.id}/${submitted}`,
+      );
+      await db.$transaction(
+        recipients.map((recipient, index) =>
+          db.campaignRecipient.update({
+            where: {
+              sendId_email: { sendId: send.id, email: recipient.email },
+            },
+            data: {
+              status: "submitted",
+              providerEmailId: result[index]!.id,
+            },
+          }),
+        ),
+      );
+      return db.campaignSend.update({
+        where: { id: send.id },
+        data: { leaseUntil: null },
       });
     }
     if (send.status === "importing") {
@@ -592,7 +755,9 @@ export async function campaignSendStep(id?: string) {
     await db.campaignSend.updateMany({
       where: { id: send.id, leaseUntil: lease },
       data: {
-        status: send.status === "ready" ? "review" : "failed",
+        status: ["ready", "sending"].includes(send.status)
+          ? "review"
+          : "failed",
         error: publicError(error).error,
         leaseUntil: null,
         finishedAt: new Date(),

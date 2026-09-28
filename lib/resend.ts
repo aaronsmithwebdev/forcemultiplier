@@ -178,3 +178,48 @@ export async function sendResendBroadcast(id: string) {
     body: "{}",
   });
 }
+
+export type ResendBatchEmail = {
+  from: string;
+  to: [string];
+  subject: string;
+  html: string;
+  reply_to: string;
+};
+
+export async function sendResendBatch(
+  emails: ResendBatchEmail[],
+  idempotencyKey: string,
+  key = process.env.RESEND_API_KEY,
+  request: typeof fetch = fetch,
+) {
+  if (!emails.length || emails.length > 100)
+    throw new AppError("Resend transactional batches require 1–100 emails.");
+  const data = await resendRequest(
+    "/emails/batch",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey.slice(0, 256),
+      },
+      body: JSON.stringify(emails),
+    },
+    key,
+    request,
+  );
+  if (
+    !Array.isArray(data?.data) ||
+    data.data.length !== emails.length ||
+    data.data.some((item: unknown) =>
+      item && typeof item === "object"
+        ? typeof (item as { id?: unknown }).id !== "string"
+        : true,
+    )
+  )
+    throw new AppError(
+      "Resend returned an unexpected transactional batch.",
+      502,
+    );
+  return data.data as { id: string }[];
+}

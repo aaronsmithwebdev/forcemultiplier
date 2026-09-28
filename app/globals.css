@@ -786,6 +786,109 @@ summary {
 .settings-fields .wide-field {
   grid-column: 1 / -1;
 }
+.service-notice-setting {
+  align-items: center;
+  background: #f7f9f5;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  margin: 8px 0 16px;
+  padding: 14px 16px;
+}
+.service-notice-setting > div > span {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+}
+.service-notice-setting small {
+  color: var(--muted);
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+}
+.setting-tooltip {
+  color: var(--muted);
+  cursor: help;
+  display: inline-flex;
+  position: relative;
+}
+.setting-tooltip::after {
+  background: #263020;
+  border-radius: 6px;
+  color: white;
+  content: attr(data-tooltip);
+  font-size: 10px;
+  font-weight: 400;
+  left: 50%;
+  line-height: 1.45;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform: translate(-50%, -3px);
+  transition:
+    opacity 100ms ease,
+    transform 100ms ease;
+  visibility: hidden;
+  width: 245px;
+  z-index: 30;
+}
+.setting-tooltip:hover::after,
+.setting-tooltip:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  visibility: visible;
+}
+.setting-tooltip:focus-visible {
+  border-radius: 50%;
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.toggle-switch {
+  cursor: pointer;
+  flex: 0 0 auto;
+  margin: 0 0 0 18px;
+}
+.toggle-switch input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+.toggle-switch > span {
+  background: #c8cec3;
+  border-radius: 999px;
+  display: block;
+  height: 24px;
+  padding: 3px;
+  transition: background 120ms ease;
+  width: 43px;
+}
+.toggle-switch > span::after {
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px #24301c42;
+  content: "";
+  display: block;
+  height: 18px;
+  transition: transform 120ms ease;
+  width: 18px;
+}
+.toggle-switch input:checked + span {
+  background: var(--green);
+}
+.toggle-switch input:checked + span::after {
+  transform: translateX(19px);
+}
+.toggle-switch input:focus-visible + span {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
 .settings-actions {
   align-items: center;
   border-top: 1px solid var(--line);

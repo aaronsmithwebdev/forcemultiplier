@@ -497,6 +497,7 @@ model Campaign {
   fromName             String        @default("")
   fromEmail            String        @default("")
   replyToEmail         String        @default("")
+  serviceNotice        Boolean       @default(false)
   audienceIds          String[]      @default([])
   exclusionAudienceIds String[]      @default([])
   manualExclusions     String[]      @default([])
@@ -519,6 +520,8 @@ model CampaignSend {
   subject            String
   fromName           String
   fromEmail          String
+  replyToEmail       String              @default("")
+  serviceNotice      Boolean             @default(false)
   includeAudienceIds String[]
   excludeAudienceIds String[]
   includeRunIds      String[]

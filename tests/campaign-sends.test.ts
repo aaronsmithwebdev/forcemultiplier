@@ -4,6 +4,8 @@ import {
   campaignExclusionSql,
   newlySuppressedCount,
   prepareBroadcastHtml,
+  prepareServiceNoticeHtml,
+  recipientIsEligible,
   uniqueEmails,
 } from "../lib/campaign-sends";
 import { db } from "../lib/db";
@@ -17,6 +19,45 @@ test("broadcast HTML translates Templatical delivery tags", () => {
   assert.match(html, /\{\{\{contact\.email\}\}\}/);
   assert.match(html, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}/);
   assert.equal(html.match(/RESEND_UNSUBSCRIBE_URL/g)?.length, 1);
+});
+
+test("service notices personalize safely without an unsubscribe link", () => {
+  assert.equal(
+    prepareServiceNoticeHtml(
+      "<p>Hello {{contact.FirstName}} {{contact.LastName}} ({{contact.Email}})</p>",
+      { email: "sam@example.org", name: "Sam <Smith>" },
+    ),
+    "<p>Hello Sam &lt;Smith&gt; (sam@example.org)</p>",
+  );
+  assert.throws(
+    () =>
+      prepareServiceNoticeHtml('<a href="{{unsubscribe_url}}">Leave</a>', {
+        email: "sam@example.org",
+        name: "Sam Smith",
+      }),
+    /cannot contain an unsubscribe link/,
+  );
+});
+
+test("service notices include marketing opt-outs but retain explicit exclusions", () => {
+  const optedOut = {
+    optedOut: true,
+    suppressed: true,
+    audienceExcluded: false,
+    fieldExcluded: false,
+    manuallyExcluded: false,
+    deliveryBlocked: false,
+  };
+  assert.equal(recipientIsEligible(optedOut, false), false);
+  assert.equal(recipientIsEligible(optedOut, true), true);
+  assert.equal(
+    recipientIsEligible({ ...optedOut, manuallyExcluded: true }, true),
+    false,
+  );
+  assert.equal(
+    recipientIsEligible({ ...optedOut, deliveryBlocked: true }, true),
+    false,
+  );
 });
 
 test("broadcast HTML adds an unsubscribe footer and rejects unsupported fields", () => {

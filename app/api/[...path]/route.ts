@@ -324,7 +324,7 @@ async function handle(
           !campaign.replyToEmail
         )
           throw new AppError(
-            "Complete and save Email settings before sending a test.",
+            "Complete and save Send settings before sending a test.",
           );
         const fromDomain = campaign.fromEmail.split("@")[1]?.toLowerCase();
         const resend = await resendStatus();
@@ -366,6 +366,7 @@ async function handle(
             fromName: senderName.optional(),
             fromEmail: email.optional(),
             replyToEmail: email.optional(),
+            serviceNotice: z.boolean().optional(),
           })
           .refine((value) => Object.keys(value).length > 0, {
             message: "Include a campaign field to save.",

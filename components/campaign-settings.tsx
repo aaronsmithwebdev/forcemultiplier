@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, AtSign, Mail } from "lucide-react";
+import { ArrowLeft, ArrowRight, AtSign, CircleHelp, Mail } from "lucide-react";
 import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 
@@ -12,6 +12,7 @@ type Settings = {
   fromName: string;
   fromEmail: string;
   replyToEmail: string;
+  serviceNotice: boolean;
 };
 type ResendDomain = { name: string; status: string; sending: boolean };
 const senders = [
@@ -37,6 +38,7 @@ const empty: Settings = {
   fromName: "",
   fromEmail: "",
   replyToEmail: "",
+  serviceNotice: false,
 };
 
 export function CampaignSettings({ id }: { id: string }) {
@@ -64,7 +66,7 @@ export function CampaignSettings({ id }: { id: string }) {
       .catch(() => setDomains([]));
   }, [id]);
 
-  function field(name: keyof Settings, value: string) {
+  function field<Key extends keyof Settings>(name: Key, value: Settings[Key]) {
     setValues((current) => ({ ...current, [name]: value }));
     setMessage("");
   }
@@ -88,7 +90,7 @@ export function CampaignSettings({ id }: { id: string }) {
     try {
       await api(`campaigns/${id}`, "PATCH", values);
       if (goNext) window.location.assign(`/campaigns/${id}/preview`);
-      else setMessage("Email settings saved.");
+      else setMessage("Send settings saved.");
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -114,7 +116,7 @@ export function CampaignSettings({ id }: { id: string }) {
       <section className="card settings-card">
         <div className="section-toolbar">
           <div>
-            <h2>Email settings</h2>
+            <h2>Send settings</h2>
             <p>
               These inbox and sender details follow the same core setup used by
               Constant Contact.
@@ -215,6 +217,38 @@ export function CampaignSettings({ id }: { id: string }) {
               placeholder="team@example.org"
             />
           </label>
+          <div className="service-notice-setting wide-field">
+            <div>
+              <span>
+                Service notice
+                <span
+                  className="setting-tooltip"
+                  title="This may send service emails to people who have unsubscribed from marketing. Use only for essential, non-promotional information."
+                  data-tooltip="This may send service emails to people who have unsubscribed from marketing. Use only for essential, non-promotional information."
+                  aria-label="This may send service emails to people who have unsubscribed from marketing. Use only for essential, non-promotional information."
+                  tabIndex={0}
+                >
+                  <CircleHelp size={15} />
+                </span>
+              </span>
+              <small>
+                Send essential, non-promotional information outside marketing
+                subscription preferences.
+              </small>
+            </div>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={values.serviceNotice}
+                onChange={(event) =>
+                  field("serviceNotice", event.target.checked)
+                }
+                aria-label="Send as a service notice"
+              />
+              <span aria-hidden="true" />
+            </label>
+          </div>
         </div>
         <div className="settings-actions">
           <Link className="button secondary" href={`/campaigns/${id}/design`}>

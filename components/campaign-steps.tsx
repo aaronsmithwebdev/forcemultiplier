@@ -4,7 +4,7 @@ import { Check } from "lucide-react";
 const steps = [
   ["name", "Campaign name"],
   ["design", "Design email"],
-  ["settings", "Email settings"],
+  ["settings", "Send settings"],
   ["preview", "Review & send"],
 ] as const;
 
