@@ -507,6 +507,29 @@ function csvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+export function resendContactImportCsv(
+  recipients: {
+    email: string;
+    name: string | null;
+    salesforceId: string | null;
+  }[],
+) {
+  return [
+    "Email,First Name,Last Name,Salesforce Contact ID",
+    ...recipients.map((recipient) => {
+      const parts = (recipient.name || "").trim().split(/\s+/).filter(Boolean);
+      return [
+        recipient.email,
+        parts[0] || "",
+        parts.slice(1).join(" "),
+        recipient.salesforceId || "",
+      ]
+        .map(csvCell)
+        .join(",");
+    }),
+  ].join("\n");
+}
+
 export async function newlySuppressedCount(sendId: string) {
   const [row] = await db.$queryRaw<{ count: bigint }[]>(Prisma.sql`
     SELECT COUNT(*) AS count
@@ -602,18 +625,7 @@ export async function campaignSendStep(id?: string) {
         where: { sendId: send.id },
         orderBy: { email: "asc" },
       });
-      const csv = [
-        "Email,First Name,Last Name",
-        ...recipients.map((recipient) => {
-          const parts = (recipient.name || "")
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean);
-          return [recipient.email, parts[0] || "", parts.slice(1).join(" ")]
-            .map(csvCell)
-            .join(",");
-        }),
-      ].join("\n");
+      const csv = resendContactImportCsv(recipients);
       const importId = await createResendContactImport(segmentId, csv);
       return db.campaignSend.update({
         where: { id: send.id },

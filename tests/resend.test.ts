@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resendStatus, sendResendBatch } from "../lib/resend";
+import {
+  createResendContactImport,
+  resendStatus,
+  sendResendBatch,
+} from "../lib/resend";
 
 test("Resend status reads domains without exposing the key", async () => {
   let called = false;
@@ -78,5 +82,42 @@ test("Resend transactional batches are bounded and idempotent", async () => {
   await assert.rejects(
     sendResendBatch([], "empty", "re_test", request),
     /1–100 emails/,
+  );
+});
+
+test("Resend imports map Salesforce Contact IDs to a contact property", async () => {
+  const csv =
+    'Email,First Name,Last Name,Salesforce Contact ID\n"sam@example.org","Sam","Smith","003000000000000001"';
+  const request = (async (
+    url: string | URL | Request,
+    options?: RequestInit,
+  ) => {
+    assert.equal(url, "https://api.resend.com/contacts/imports");
+    assert.equal(
+      options?.headers &&
+        (options.headers as Record<string, string>).Authorization,
+      "Bearer re_test",
+    );
+    const form = options?.body as FormData;
+    assert.equal(await (form.get("file") as Blob).text(), csv);
+    assert.deepEqual(JSON.parse(String(form.get("column_map"))), {
+      email: "Email",
+      first_name: "First Name",
+      last_name: "Last Name",
+      properties: {
+        salesforce_contact_id: {
+          column: "Salesforce Contact ID",
+          type: "string",
+        },
+      },
+    });
+    assert.equal(form.get("on_conflict"), "upsert");
+    assert.equal(form.get("segments"), JSON.stringify([{ id: "segment_123" }]));
+    return Response.json({ id: "import_123" });
+  }) as typeof fetch;
+
+  assert.equal(
+    await createResendContactImport("segment_123", csv, "re_test", request),
+    "import_123",
   );
 });

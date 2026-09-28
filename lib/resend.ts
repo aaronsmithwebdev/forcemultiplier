@@ -120,6 +120,8 @@ export async function createResendSegment(name: string) {
 export async function createResendContactImport(
   segmentId: string,
   csv: string,
+  key = process.env.RESEND_API_KEY,
+  request: typeof fetch = fetch,
 ) {
   if (Buffer.byteLength(csv) > 200_000_000)
     throw new AppError("This recipient import exceeds Resend's 200 MB limit.");
@@ -131,14 +133,25 @@ export async function createResendContactImport(
       email: "Email",
       first_name: "First Name",
       last_name: "Last Name",
+      properties: {
+        salesforce_contact_id: {
+          column: "Salesforce Contact ID",
+          type: "string",
+        },
+      },
     }),
   );
   form.set("on_conflict", "upsert");
   form.set("segments", JSON.stringify([{ id: segmentId }]));
-  const data = await resendRequest("/contacts/imports", {
-    method: "POST",
-    body: form,
-  });
+  const data = await resendRequest(
+    "/contacts/imports",
+    {
+      method: "POST",
+      body: form,
+    },
+    key,
+    request,
+  );
   if (typeof data.id !== "string")
     throw new AppError("Resend did not start the recipient import.", 502);
   return data.id as string;

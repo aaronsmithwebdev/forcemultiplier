@@ -6,6 +6,7 @@ import {
   prepareBroadcastHtml,
   prepareServiceNoticeHtml,
   recipientIsEligible,
+  resendContactImportCsv,
   uniqueEmails,
 } from "../lib/campaign-sends";
 import { db } from "../lib/db";
@@ -75,6 +76,19 @@ test("manual exclusions are normalized and deduplicated", () => {
   assert.deepEqual(uniqueEmails([" A@Example.org ", "a@example.org", ""]), [
     "a@example.org",
   ]);
+});
+
+test("Resend contact imports retain the Salesforce Contact ID", () => {
+  assert.equal(
+    resendContactImportCsv([
+      {
+        email: "sam@example.org",
+        name: "Sam Smith",
+        salesforceId: "003000000000000001",
+      },
+    ]),
+    'Email,First Name,Last Name,Salesforce Contact ID\n"sam@example.org","Sam","Smith","003000000000000001"',
+  );
 });
 
 test("campaigns recheck durable suppressions before broadcast", async (t) => {

@@ -110,6 +110,8 @@ Open **Email templates**, create a template, and use the Templatical block libra
 
 Open **Campaigns**, name the draft, and optionally start from a saved email template. Design and save the email in Templatical, resolve the live accessibility/structure/link findings, then choose the Bloody Long Walk or Mito Foundation sender identity and add the subject and preheader. Sender and reply-to fields remain editable, but the From address must use a verified Resend domain. In the final steps, preview or test the message, select included and excluded audiences, review suppression counts, and submit a campaign-specific Resend Broadcast. Test recipients are restricted on the server to the signed-in user's email address.
 
+Campaign contact imports retain the source identity in Resend as the string contact property `salesforce_contact_id`, populated from the Salesforce Contact `Id` saved in the selected audience snapshot.
+
 For essential, non-promotional communication, enable **Service notice** in Send settings. This is off by default and may include people who have opted out of marketing, while audience, field, manual, and non-marketing delivery blocks still apply. Service notices are personalized and sent through Resend's transactional Batch API; they cannot contain the unsubscribe merge tag. Resend account-level hard-bounce and complaint suppressions remain in force.
 
 ## Import unsubscribes
