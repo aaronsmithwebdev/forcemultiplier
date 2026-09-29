@@ -168,7 +168,7 @@ Current limits: 30 additional fields, four parent relationship hops, Contact rec
 - Prisma connects server-side to Supabase PostgreSQL. Supabase Auth uses the browser-safe project URL and publishable key; no secret or service-role key is required.
 - New tables live in the private `forcemultiplier` schema, with RLS enabled and schema/table privileges revoked from public API roles. Do not expose this schema through the Supabase Data API.
 - The old `public` tables and their data remain as a rollback/reference archive. This app neither uses nor migrates their rows or old OAuth tokens.
-- Use `npm run db:deploy`, which checks both URLs target the private schema. Do not run `prisma migrate reset` on the existing project.
+- Vercel runs `npm run db:deploy` before each build, applying checked-in migrations through Prisma's production-safe deploy command. For other hosts, run it during deployment. It checks both URLs target the private schema. Do not run `prisma migrate reset` on the existing project.
 - OAuth state is session-bound, expires, and is consumed once. Tokens/client secrets are encrypted with AES-256-GCM. Mutations require the configured origin. Token refresh, pull processing, deliveries, and scheduled runs use database leases.
 - The app is a single-workspace deployment. Every enabled Supabase Auth user can administer it, so keep public signup disabled and create only trusted users.
 - Pull snapshots are retained until a future retention feature is added. Monitor database size during large repeated pulls.

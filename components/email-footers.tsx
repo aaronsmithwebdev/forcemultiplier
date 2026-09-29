@@ -37,10 +37,19 @@ export function EmailFooters() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  async function load() {
+    setRows(null);
+    setError("");
+    try {
+      setRows(await api("footers"));
+    } catch (cause) {
+      setRows([]);
+      setError((cause as Error).message);
+    }
+  }
+
   useEffect(() => {
-    api("footers")
-      .then(setRows)
-      .catch((cause) => setError(cause.message));
+    void load();
   }, []);
 
   function edit(row: Footer) {
@@ -257,6 +266,13 @@ export function EmailFooters() {
         </div>
         {!rows ? (
           <Loading />
+        ) : error && !rows.length ? (
+          <Empty
+            title="Footers could not load"
+            description="The footer library is temporarily unavailable. Try again after the connection is restored."
+          >
+            <Button onClick={() => void load()}>Try again</Button>
+          </Empty>
         ) : !rows.length ? (
           <Empty
             title="Create your first footer"
