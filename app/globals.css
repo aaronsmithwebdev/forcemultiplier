@@ -452,12 +452,23 @@ summary {
 .template-editor-toolbar .back-link {
   margin: 0;
 }
-.template-editor-toolbar > span {
+.template-editor-toolbar > span,
+.footer-editor-actions > span {
   align-items: center;
   color: var(--muted);
   display: flex;
   font-size: 11px;
   gap: 7px;
+}
+
+.footer-editor-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.footer-editor-actions .button {
+  white-space: nowrap;
 }
 .template-editor-toolbar code {
   background: #eaf0e6;
