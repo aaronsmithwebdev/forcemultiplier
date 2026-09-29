@@ -4,7 +4,7 @@ import type { QueryFilter, QueryGroup } from "./query-builder";
 import { buildContactQuery } from "./query-builder";
 import { db } from "./db";
 import { AppError, publicError } from "./errors";
-import { renderCampaignHtml } from "./campaign-email";
+import { appendEmailFooter, renderCampaignHtml } from "./campaign-email";
 import {
   resendStatus,
   createResendBroadcast,
@@ -431,7 +431,7 @@ export async function saveAndPreviewCampaignAudience(
 export async function startCampaignSend(campaignId: string, userId: string) {
   const campaign = await db.campaign.findUnique({
     where: { id: campaignId },
-    include: { send: true },
+    include: { send: true, footer: true },
   });
   if (!campaign) throw new AppError("Campaign not found.", 404);
   if (campaign.send) return campaign.send;
@@ -444,6 +444,8 @@ export async function startCampaignSend(campaignId: string, userId: string) {
     !campaign.replyToEmail
   )
     throw new AppError("Complete Send settings before sending.", 409);
+  if (!campaign.footer?.html.trim())
+    throw new AppError("Choose an email footer before sending.", 409);
   if (
     !campaign.serviceNotice &&
     campaign.replyToEmail.toLowerCase() !== campaign.fromEmail.toLowerCase()
@@ -480,6 +482,8 @@ export async function startCampaignSend(campaignId: string, userId: string) {
         fromEmail: campaign.fromEmail,
         replyToEmail: campaign.replyToEmail,
         serviceNotice: campaign.serviceNotice,
+        footerName: campaign.footer.name,
+        footerHtml: campaign.footer.html,
         includeAudienceIds: campaign.audienceIds,
         excludeAudienceIds: campaign.exclusionAudienceIds,
         includeRunIds,
@@ -583,7 +587,10 @@ export async function campaignSendStep(id?: string) {
         const rendered = await renderCampaignHtml(
           send.content as unknown as TemplateContent,
         );
-        prepareServiceNoticeHtml(rendered, eligible[0]!);
+        prepareServiceNoticeHtml(
+          appendEmailFooter(rendered, send.footerHtml),
+          eligible[0]!,
+        );
       }
       for (let offset = 0; offset < eligible.length; offset += 5000)
         await db.campaignRecipient.createMany({
@@ -667,7 +674,10 @@ export async function campaignSendStep(id?: string) {
           from: `${send.fromName} <${send.fromEmail}>`,
           to: [recipient.email],
           subject: send.subject,
-          html: prepareServiceNoticeHtml(rendered, recipient),
+          html: prepareServiceNoticeHtml(
+            appendEmailFooter(rendered, send.footerHtml),
+            recipient,
+          ),
           reply_to: send.replyToEmail,
         })),
         `service-notice/${send.id}/${submitted}`,
@@ -725,7 +735,9 @@ export async function campaignSendStep(id?: string) {
         name: campaign.name,
         from: `${send.fromName} <${send.fromEmail}>`,
         subject: send.subject,
-        html: prepareBroadcastHtml(rendered),
+        html: prepareBroadcastHtml(
+          appendEmailFooter(rendered, send.footerHtml),
+        ),
       });
       return db.campaignSend.update({
         where: { id: send.id },

@@ -2,8 +2,9 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, AtSign, CircleHelp, Mail } from "lucide-react";
-import { api, Button, Loading, Notice } from "./common";
+import { api, Badge, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
+import { FooterPreview } from "./footer-preview";
 
 type Settings = {
   name: string;
@@ -13,8 +14,15 @@ type Settings = {
   fromEmail: string;
   replyToEmail: string;
   serviceNotice: boolean;
+  footerId: string;
 };
 type ResendDomain = { name: string; status: string; sending: boolean };
+type Footer = {
+  id: string;
+  name: string;
+  html: string;
+  isDefault: boolean;
+};
 const senders = [
   {
     id: "bloody-long-walk",
@@ -39,6 +47,7 @@ const empty: Settings = {
   fromEmail: "",
   replyToEmail: "",
   serviceNotice: false,
+  footerId: "",
 };
 
 export function CampaignSettings({ id }: { id: string }) {
@@ -48,10 +57,14 @@ export function CampaignSettings({ id }: { id: string }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [domains, setDomains] = useState<ResendDomain[]>([]);
+  const [footers, setFooters] = useState<Footer[]>([]);
 
   useEffect(() => {
-    api(`campaigns/${id}`)
-      .then((campaign) => setValues(campaign))
+    Promise.all([api(`campaigns/${id}`), api("footers")])
+      .then(([campaign, footerRows]) => {
+        setValues(campaign);
+        setFooters(footerRows);
+      })
       .catch((cause) => setError(cause.message))
       .finally(() => setLoading(false));
     api("resend/status")
@@ -84,6 +97,10 @@ export function CampaignSettings({ id }: { id: string }) {
   }
 
   async function save(goNext = false) {
+    if (!values.footerId) {
+      setError("Choose an email footer before continuing.");
+      return;
+    }
     setBusy(true);
     setError("");
     setMessage("");
@@ -249,6 +266,45 @@ export function CampaignSettings({ id }: { id: string }) {
               <span aria-hidden="true" />
             </label>
           </div>
+          <fieldset className="campaign-footer-field wide-field">
+            <legend>Email footer</legend>
+            <p>
+              Required on every send. The selected footer is saved with the
+              send, so later footer edits cannot change sent campaigns.
+            </p>
+            {!footers.length ? (
+              <div className="footer-required-empty">
+                No footers are available. Create a default in Email footers
+                before sending. <Link href="/footers">Open Email footers</Link>
+              </div>
+            ) : (
+              <div className="campaign-footer-options">
+                {footers.map((footer) => (
+                  <label
+                    className={`campaign-footer-option ${values.footerId === footer.id ? "selected" : ""}`}
+                    key={footer.id}
+                  >
+                    <input
+                      type="radio"
+                      name="footerId"
+                      value={footer.id}
+                      checked={values.footerId === footer.id}
+                      onChange={() => field("footerId", footer.id)}
+                    />
+                    <FooterPreview
+                      html={footer.html}
+                      title={`${footer.name} footer thumbnail`}
+                      className="footer-thumbnail"
+                    />
+                    <span>
+                      <strong>{footer.name}</strong>
+                      {footer.isDefault && <Badge tone="green">Default</Badge>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
         </div>
         <div className="settings-actions">
           <Link className="button secondary" href={`/campaigns/${id}/design`}>

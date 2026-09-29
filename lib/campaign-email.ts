@@ -7,7 +7,17 @@ export type CampaignEmailSettings = {
   fromName: string;
   fromEmail: string;
   replyToEmail: string;
+  footerHtml: string;
 };
+
+export function appendEmailFooter(html: string, footerHtml: string) {
+  if (!footerHtml.trim())
+    throw new AppError("An email footer is required before sending.", 409);
+  const footer = `<div data-email-footer="true">${footerHtml}</div>`;
+  return /<\/body\s*>/i.test(html)
+    ? html.replace(/<\/body\s*>/i, (closingBody) => `${footer}${closingBody}`)
+    : `${html}${footer}`;
+}
 
 export function resendTestPayload(
   settings: CampaignEmailSettings,
@@ -54,7 +64,13 @@ export async function sendResendTest(
       Authorization: `Bearer ${key.trim()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(resendTestPayload(settings, recipient, html)),
+    body: JSON.stringify(
+      resendTestPayload(
+        settings,
+        recipient,
+        appendEmailFooter(html, settings.footerHtml),
+      ),
+    ),
     signal: AbortSignal.timeout(15000),
     cache: "no-store",
     redirect: "error",

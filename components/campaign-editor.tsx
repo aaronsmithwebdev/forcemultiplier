@@ -9,6 +9,7 @@ import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
+import { FooterPreview } from "./footer-preview";
 
 export function CampaignEditor({
   id,
@@ -24,6 +25,9 @@ export function CampaignEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [footer, setFooter] = useState<{ name: string; html: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!container.current) return;
@@ -38,7 +42,11 @@ export function CampaignEditor({
           mergeTags: { syntax: "liquid", tags },
           media: templateMediaProvider(),
           templates: {
-            load: (campaignId) => api(`campaigns/${campaignId}`),
+            load: async (campaignId) => {
+              const campaign = await api(`campaigns/${campaignId}`);
+              setFooter(campaign.footer);
+              return campaign;
+            },
             create: false,
             save: (
               campaignId: string,
@@ -127,6 +135,21 @@ export function CampaignEditor({
         {loading && <Loading />}
         <div ref={container} className="templatical-container" />
       </div>
+      {preview && footer && (
+        <section className="card selected-footer-preview">
+          <div>
+            <span>SELECTED EMAIL FOOTER</span>
+            <h2>{footer.name}</h2>
+            <p>
+              This required footer is appended to test and production sends.
+            </p>
+          </div>
+          <FooterPreview
+            html={footer.html}
+            title={`${footer.name} footer preview`}
+          />
+        </section>
+      )}
       <div className="campaign-next-actions">
         <Button
           busy={saving}

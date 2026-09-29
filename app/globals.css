@@ -2402,12 +2402,199 @@ td strong {
   color: #7c9175;
   flex: 0 0 auto;
 }
+.footer-library-card {
+  margin-top: 20px;
+}
+.footer-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 24px 26px 28px;
+}
+.footer-card {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  min-width: 0;
+  overflow: hidden;
+}
+.footer-preview,
+.footer-thumbnail {
+  background: #f3f5f1;
+  border: 0;
+  display: block;
+  width: 100%;
+}
+.footer-thumbnail {
+  border-bottom: 1px solid var(--line);
+  height: 160px;
+}
+.footer-preview {
+  height: 260px;
+}
+.footer-card-body {
+  padding: 15px 16px 12px;
+}
+.footer-card-body > div,
+.campaign-footer-option > span {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.footer-card-body small {
+  color: var(--muted);
+  display: block;
+  margin-top: 6px;
+}
+.footer-card-actions {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 6px;
+  padding: 11px 12px;
+}
+.footer-card-actions .button:last-child {
+  margin-left: auto;
+}
+.footer-editor-card {
+  margin-bottom: 20px;
+}
+.footer-editor-grid {
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+  padding: 6px 26px 24px;
+}
+.footer-editor-grid textarea {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+.footer-live-preview {
+  padding-top: 18px;
+}
+.footer-live-preview > span,
+.selected-footer-preview > div > span {
+  color: var(--muted);
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  margin-bottom: 7px;
+}
+.footer-live-preview .footer-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.footer-default-choice {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+.footer-default-choice input {
+  margin: 0;
+  width: auto;
+}
+.campaign-footer-field {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 8px -26px -10px;
+  padding: 21px 26px 26px;
+}
+.campaign-footer-field legend {
+  float: left;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  width: 100%;
+}
+.campaign-footer-field > p {
+  clear: both;
+  font-size: 10px;
+  padding-top: 4px;
+}
+.campaign-footer-options {
+  display: grid;
+  gap: 13px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+.campaign-footer-option {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  margin: 0;
+  overflow: hidden;
+  position: relative;
+}
+.campaign-footer-option:hover,
+.campaign-footer-option.selected {
+  border-color: #73947f;
+  box-shadow: 0 0 0 2px #73947f22;
+}
+.campaign-footer-option > input {
+  height: 17px;
+  left: 11px;
+  margin: 0;
+  position: absolute;
+  top: 11px;
+  width: 17px;
+  z-index: 2;
+}
+.campaign-footer-option .footer-thumbnail {
+  height: 125px;
+  pointer-events: none;
+}
+.campaign-footer-option > span {
+  min-height: 48px;
+  padding: 10px 12px;
+}
+.campaign-footer-option > span strong {
+  flex: 1;
+}
+.footer-required-empty {
+  background: #fff8ef;
+  border: 1px solid #edd6b8;
+  border-radius: 7px;
+  clear: both;
+  color: #875a25;
+  font-size: 11px;
+  margin-top: 14px;
+  padding: 12px 14px;
+}
+.footer-required-empty a {
+  font-weight: 700;
+  text-decoration: underline;
+}
+.selected-footer-preview {
+  align-items: center;
+  display: grid;
+  gap: 25px;
+  grid-template-columns: 240px 1fr;
+  margin-top: 18px;
+  padding: 20px 24px;
+}
+.selected-footer-preview p {
+  font-size: 11px;
+  margin-top: 5px;
+}
+.selected-footer-preview .footer-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  height: 180px;
+}
 @media (min-width: 1500px) {
   .main-content {
     padding-top: 50px;
   }
 }
 @media (max-width: 1150px) {
+  .footer-grid,
+  .campaign-footer-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .footer-editor-grid {
+    grid-template-columns: 1fr;
+  }
   .sidebar {
     width: 220px;
     padding-left: 15px;
@@ -2549,6 +2736,22 @@ td strong {
   }
 }
 @media (max-width: 550px) {
+  .footer-grid,
+  .campaign-footer-options,
+  .selected-footer-preview {
+    grid-template-columns: 1fr;
+  }
+  .footer-grid,
+  .footer-editor-grid {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .campaign-footer-field {
+    margin-left: -20px;
+    margin-right: -20px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
   .schedule-summary,
   .schedule-fields {
     grid-template-columns: 1fr;

@@ -91,6 +91,12 @@ import {
   templateMergeTags,
 } from "@/lib/email-templates";
 import {
+  createFooter,
+  deleteFooter,
+  listFooters,
+  updateFooter,
+} from "@/lib/email-footers";
+import {
   createCampaign,
   deleteCampaign,
   getCampaign,
@@ -217,6 +223,7 @@ async function handle(
       .passthrough();
     const templateName = z.string().trim().min(1).max(120);
     const templateId = z.string().min(1).max(100);
+    const footerHtml = z.string().trim().min(1).max(50_000);
     const campaignContent = templateContent;
     const campaignName = z.string().trim().min(1).max(120);
     const singleLine = (max: number) =>
@@ -269,6 +276,35 @@ async function handle(
       manualExclusions: z.array(email).max(5000).default([]),
       exclusionRules: exclusionGroup,
     });
+    if (key === "footers" && method === "GET")
+      return json(await listFooters(params.get("q") || ""));
+    if (key === "footers" && method === "POST") {
+      const data = z
+        .object({
+          name: templateName,
+          html: footerHtml,
+          isDefault: z.boolean().optional(),
+        })
+        .parse(await body(request, 60_000));
+      return json(await createFooter(data, user.id), 201);
+    }
+    if (p[0] === "footers" && p[1] && p.length === 2) {
+      const id = templateId.parse(p[1]);
+      if (method === "PATCH") {
+        const data = z
+          .object({
+            name: templateName.optional(),
+            html: footerHtml.optional(),
+            isDefault: z.boolean().optional(),
+          })
+          .refine((value) => Object.keys(value).length > 0, {
+            message: "Include a footer field to save.",
+          })
+          .parse(await body(request, 60_000));
+        return json(await updateFooter(id, data));
+      }
+      if (method === "DELETE") return json(await deleteFooter(id));
+    }
     if (key === "campaigns" && method === "GET")
       return json(await listCampaigns(params.get("q") || ""));
     if (key === "campaigns" && method === "POST") {
@@ -342,7 +378,7 @@ async function handle(
           );
         return json(
           await sendResendTest(
-            campaign,
+            { ...campaign, footerHtml: campaign.footer.html },
             data.recipient,
             data.content as unknown as TemplateContent,
           ),
@@ -367,6 +403,7 @@ async function handle(
             fromEmail: email.optional(),
             replyToEmail: email.optional(),
             serviceNotice: z.boolean().optional(),
+            footerId: templateId.optional(),
           })
           .refine((value) => Object.keys(value).length > 0, {
             message: "Include a campaign field to save.",

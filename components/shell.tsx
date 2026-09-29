@@ -15,12 +15,14 @@ import {
   ArrowUpRight,
   ShieldCheck,
   Settings,
+  PanelBottom,
 } from "lucide-react";
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
   ["/campaigns", "Campaigns", Send],
   ["/templates", "Email templates", FilePenLine],
+  ["/footers", "Email footers", PanelBottom],
   ["/suppressions", "Suppressions", ShieldCheck],
   ["/archive", "Email archive", Mail],
   ["/lists", "Constant Contact lists", List],

@@ -487,6 +487,20 @@ model EmailTemplateRevision {
   @@schema("forcemultiplier")
 }
 
+model EmailFooter {
+  id        String     @id @default(cuid())
+  name      String
+  html      String     @db.Text
+  isDefault Boolean    @default(false)
+  createdBy String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  campaigns Campaign[]
+
+  @@index([updatedAt])
+  @@schema("forcemultiplier")
+}
+
 model Campaign {
   id                   String        @id @default(cuid())
   name                 String
@@ -498,6 +512,8 @@ model Campaign {
   fromEmail            String        @default("")
   replyToEmail         String        @default("")
   serviceNotice        Boolean       @default(false)
+  footerId             String
+  footer               EmailFooter   @relation(fields: [footerId], references: [id], onDelete: Restrict)
   audienceIds          String[]      @default([])
   exclusionAudienceIds String[]      @default([])
   manualExclusions     String[]      @default([])
@@ -507,6 +523,7 @@ model Campaign {
   updatedAt            DateTime      @updatedAt
   send                 CampaignSend?
 
+  @@index([footerId])
   @@index([updatedAt])
   @@schema("forcemultiplier")
 }
@@ -522,6 +539,8 @@ model CampaignSend {
   fromEmail          String
   replyToEmail       String              @default("")
   serviceNotice      Boolean             @default(false)
+  footerName         String
+  footerHtml         String              @db.Text
   includeAudienceIds String[]
   excludeAudienceIds String[]
   includeRunIds      String[]

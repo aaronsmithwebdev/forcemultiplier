@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { createDefaultTemplateContent } from "@templatical/types";
 import type { TemplateContent } from "@templatical/types";
 import { db } from "./db";
+import { getDefaultFooter } from "./email-footers";
 import { AppError } from "./errors";
 
 export type CampaignPatch = Partial<{
@@ -13,6 +14,7 @@ export type CampaignPatch = Partial<{
   fromEmail: string;
   replyToEmail: string;
   serviceNotice: boolean;
+  footerId: string;
 }>;
 
 const campaignSelect = {
@@ -26,6 +28,10 @@ const campaignSelect = {
   fromEmail: true,
   replyToEmail: true,
   serviceNotice: true,
+  footerId: true,
+  footer: {
+    select: { id: true, name: true, html: true, isDefault: true },
+  },
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -61,12 +67,15 @@ export async function createCampaign(
   userId: string,
   templateId?: string,
 ) {
-  const template = templateId
-    ? await db.emailTemplate.findUnique({
-        where: { id: templateId },
-        select: { content: true },
-      })
-    : null;
+  const [template, footer] = await Promise.all([
+    templateId
+      ? db.emailTemplate.findUnique({
+          where: { id: templateId },
+          select: { content: true },
+        })
+      : null,
+    getDefaultFooter(),
+  ]);
   if (templateId && !template)
     throw new AppError("Email template not found.", 404);
   const content = (template?.content ||
@@ -75,13 +84,20 @@ export async function createCampaign(
     (content as unknown as TemplateContent).settings?.preheaderText || "",
   );
   return db.campaign.create({
-    data: { name, content, preheader, createdBy: userId },
+    data: { name, content, preheader, footerId: footer.id, createdBy: userId },
     select: campaignSelect,
   });
 }
 
 export async function saveCampaign(id: string, patch: CampaignPatch) {
   const current = await getCampaign(id);
+  if (patch.footerId !== undefined) {
+    const footer = await db.emailFooter.findUnique({
+      where: { id: patch.footerId },
+      select: { id: true },
+    });
+    if (!footer) throw new AppError("Email footer not found.", 404);
+  }
   let content = (patch.content ||
     current.content) as unknown as TemplateContent;
   if (patch.preheader !== undefined) {
