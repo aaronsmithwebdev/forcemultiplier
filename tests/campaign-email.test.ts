@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TemplateContent } from "@templatical/types";
+import { createParagraphBlock, type TemplateContent } from "@templatical/types";
 import {
-  appendEmailFooter,
+  renderCampaignHtml,
   resendTestPayload,
   sendResendTest,
 } from "../lib/campaign-email";
@@ -12,10 +12,20 @@ const settings = {
   fromName: "Example Foundation",
   fromEmail: "news@example.org",
   replyToEmail: "team@example.org",
-  footerHtml: "<p>Required footer</p>",
+  footerContent: {
+    blocks: [createParagraphBlock({ content: "<p>Required footer</p>" })],
+    settings: {
+      width: 600,
+      backgroundColor: "#ffffff",
+      textColor: "#1a1a1a",
+      linkUnderline: true,
+      fontFamily: "Arial",
+      locale: "en",
+    },
+  },
 };
 const content: TemplateContent = {
-  blocks: [],
+  blocks: [createParagraphBlock({ content: "<p>Message body</p>" })],
   settings: {
     width: 600,
     backgroundColor: "#ffffff",
@@ -63,22 +73,21 @@ test("campaign test email renders Templatical content and sends through Resend",
     { id: "email_123" },
   );
   assert.match(String(sent?.html), /<!doctype html>/i);
-  assert.match(String(sent?.html), /data-email-footer="true"/);
   assert.match(String(sent?.html), /Required footer/);
   assert.equal(sent?.subject, "[TEST] Spring update");
 });
 
-test("required footers are appended inside an email body", () => {
-  assert.equal(
-    appendEmailFooter(
-      "<html><body><p>Message</p></body></html>",
-      "<p>Footer $&</p>",
-    ),
-    '<html><body><p>Message</p><div data-email-footer="true"><p>Footer $&</p></div></body></html>',
-  );
+test("campaign HTML renders the required footer through a Templatical layout", async () => {
+  const html = await renderCampaignHtml(content, settings.footerContent);
+  assert.match(html, /Required footer/);
+  assert.ok(html.indexOf("Message body") < html.indexOf("Required footer"));
   assert.throws(
-    () => appendEmailFooter("<p>Message</p>", " "),
-    /footer is required/i,
+    () =>
+      renderCampaignHtml(content, {
+        ...settings.footerContent,
+        blocks: [],
+      }),
+    /footer content is required/i,
   );
 });
 

@@ -20,7 +20,7 @@ type ResendDomain = { name: string; status: string; sending: boolean };
 type Footer = {
   id: string;
   name: string;
-  html: string;
+  previewHtml: string;
   isDefault: boolean;
 };
 const senders = [
@@ -292,7 +292,7 @@ export function CampaignSettings({ id }: { id: string }) {
                       onChange={() => field("footerId", footer.id)}
                     />
                     <FooterPreview
-                      html={footer.html}
+                      html={footer.previewHtml}
                       title={`${footer.name} footer thumbnail`}
                       className="footer-thumbnail"
                     />

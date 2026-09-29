@@ -4,7 +4,8 @@ import type { QueryFilter, QueryGroup } from "./query-builder";
 import { buildContactQuery } from "./query-builder";
 import { db } from "./db";
 import { AppError, publicError } from "./errors";
-import { appendEmailFooter, renderCampaignHtml } from "./campaign-email";
+import { renderCampaignHtml } from "./campaign-email";
+import { normalizeFooterContent } from "./email-footers";
 import {
   resendStatus,
   createResendBroadcast,
@@ -444,8 +445,7 @@ export async function startCampaignSend(campaignId: string, userId: string) {
     !campaign.replyToEmail
   )
     throw new AppError("Complete Send settings before sending.", 409);
-  if (!campaign.footer?.html.trim())
-    throw new AppError("Choose an email footer before sending.", 409);
+  const footerContent = normalizeFooterContent(campaign.footer?.content);
   if (
     !campaign.serviceNotice &&
     campaign.replyToEmail.toLowerCase() !== campaign.fromEmail.toLowerCase()
@@ -483,7 +483,7 @@ export async function startCampaignSend(campaignId: string, userId: string) {
         replyToEmail: campaign.replyToEmail,
         serviceNotice: campaign.serviceNotice,
         footerName: campaign.footer.name,
-        footerHtml: campaign.footer.html,
+        footerContent: footerContent as unknown as Prisma.InputJsonValue,
         includeAudienceIds: campaign.audienceIds,
         excludeAudienceIds: campaign.exclusionAudienceIds,
         includeRunIds,
@@ -586,11 +586,9 @@ export async function campaignSendStep(id?: string) {
       if (send.serviceNotice) {
         const rendered = await renderCampaignHtml(
           send.content as unknown as TemplateContent,
+          normalizeFooterContent(send.footerContent),
         );
-        prepareServiceNoticeHtml(
-          appendEmailFooter(rendered, send.footerHtml),
-          eligible[0]!,
-        );
+        prepareServiceNoticeHtml(rendered, eligible[0]!);
       }
       for (let offset = 0; offset < eligible.length; offset += 5000)
         await db.campaignRecipient.createMany({
@@ -665,6 +663,7 @@ export async function campaignSendStep(id?: string) {
       }
       const rendered = await renderCampaignHtml(
         send.content as unknown as TemplateContent,
+        normalizeFooterContent(send.footerContent),
       );
       const submitted = await db.campaignRecipient.count({
         where: { sendId: send.id, status: "submitted" },
@@ -674,10 +673,7 @@ export async function campaignSendStep(id?: string) {
           from: `${send.fromName} <${send.fromEmail}>`,
           to: [recipient.email],
           subject: send.subject,
-          html: prepareServiceNoticeHtml(
-            appendEmailFooter(rendered, send.footerHtml),
-            recipient,
-          ),
+          html: prepareServiceNoticeHtml(rendered, recipient),
           reply_to: send.replyToEmail,
         })),
         `service-notice/${send.id}/${submitted}`,
@@ -729,15 +725,14 @@ export async function campaignSendStep(id?: string) {
       });
       const rendered = await renderCampaignHtml(
         send.content as unknown as TemplateContent,
+        normalizeFooterContent(send.footerContent),
       );
       const broadcastId = await createResendBroadcast({
         segmentId: send.segmentId,
         name: campaign.name,
         from: `${send.fromName} <${send.fromEmail}>`,
         subject: send.subject,
-        html: prepareBroadcastHtml(
-          appendEmailFooter(rendered, send.footerHtml),
-        ),
+        html: prepareBroadcastHtml(rendered),
       });
       return db.campaignSend.update({
         where: { id: send.id },

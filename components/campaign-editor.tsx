@@ -9,7 +9,7 @@ import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
-import { FooterPreview } from "./footer-preview";
+import { footerLayout } from "@/lib/email-layout";
 
 export function CampaignEditor({
   id,
@@ -25,9 +25,6 @@ export function CampaignEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [footer, setFooter] = useState<{ name: string; html: string } | null>(
-    null,
-  );
 
   useEffect(() => {
     if (!container.current) return;
@@ -35,17 +32,29 @@ export function CampaignEditor({
     let editor: TemplaticalEditor | null = null;
     async function mount() {
       try {
-        const tags: MergeTag[] = await api("templates/merge-tags");
+        const [tags, campaign]: [
+          MergeTag[],
+          {
+            id: string;
+            name: string;
+            content: TemplateContent;
+            footer: { content: TemplateContent };
+          },
+        ] = await Promise.all([
+          api("templates/merge-tags"),
+          api(`campaigns/${id}`),
+        ]);
         if (cancelled || !container.current) return;
         const instance = await init({
           container: container.current,
+          layout: footerLayout(campaign.content, campaign.footer.content),
           mergeTags: { syntax: "liquid", tags },
           media: templateMediaProvider(),
           templates: {
             load: async (campaignId) => {
-              const campaign = await api(`campaigns/${campaignId}`);
-              setFooter(campaign.footer);
-              return campaign;
+              return campaignId === id
+                ? campaign
+                : api(`campaigns/${campaignId}`);
             },
             create: false,
             save: (
@@ -135,21 +144,6 @@ export function CampaignEditor({
         {loading && <Loading />}
         <div ref={container} className="templatical-container" />
       </div>
-      {preview && footer && (
-        <section className="card selected-footer-preview">
-          <div>
-            <span>SELECTED EMAIL FOOTER</span>
-            <h2>{footer.name}</h2>
-            <p>
-              This required footer is appended to test and production sends.
-            </p>
-          </div>
-          <FooterPreview
-            html={footer.html}
-            title={`${footer.name} footer preview`}
-          />
-        </section>
-      )}
       <div className="campaign-next-actions">
         <Button
           busy={saving}

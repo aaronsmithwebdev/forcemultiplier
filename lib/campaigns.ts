@@ -30,7 +30,7 @@ const campaignSelect = {
   serviceNotice: true,
   footerId: true,
   footer: {
-    select: { id: true, name: true, html: true, isDefault: true },
+    select: { id: true, name: true, content: true, isDefault: true },
   },
   createdAt: true,
   updatedAt: true,

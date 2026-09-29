@@ -1,23 +1,15 @@
 import mjml2html from "mjml";
 import type { TemplateContent } from "@templatical/types";
 import { AppError } from "./errors";
+import { footerLayout } from "./email-layout";
 
 export type CampaignEmailSettings = {
   subject: string;
   fromName: string;
   fromEmail: string;
   replyToEmail: string;
-  footerHtml: string;
+  footerContent: TemplateContent;
 };
-
-export function appendEmailFooter(html: string, footerHtml: string) {
-  if (!footerHtml.trim())
-    throw new AppError("An email footer is required before sending.", 409);
-  const footer = `<div data-email-footer="true">${footerHtml}</div>`;
-  return /<\/body\s*>/i.test(html)
-    ? html.replace(/<\/body\s*>/i, (closingBody) => `${footer}${closingBody}`)
-    : `${html}${footer}`;
-}
 
 export function resendTestPayload(
   settings: CampaignEmailSettings,
@@ -33,9 +25,12 @@ export function resendTestPayload(
   };
 }
 
-export async function renderCampaignHtml(content: TemplateContent) {
+export async function renderEmailHtml(
+  content: TemplateContent,
+  layout?: TemplateContent,
+) {
   const { renderToMjml } = await import("@templatical/renderer");
-  const mjml = await renderToMjml(content, { allowHtmlBlocks: true });
+  const mjml = await renderToMjml(content, { allowHtmlBlocks: true, layout });
   const result = await mjml2html(mjml, { validationLevel: "strict" });
   if (result.errors.length)
     throw new AppError(
@@ -43,6 +38,13 @@ export async function renderCampaignHtml(content: TemplateContent) {
       422,
     );
   return result.html;
+}
+
+export function renderCampaignHtml(
+  content: TemplateContent,
+  footer: TemplateContent,
+) {
+  return renderEmailHtml(content, footerLayout(content, footer));
 }
 
 export async function sendResendTest(
@@ -57,20 +59,14 @@ export async function sendResendTest(
       "Resend is not configured. Add RESEND_API_KEY, then try again.",
       409,
     );
-  const html = await renderCampaignHtml(content);
+  const html = await renderCampaignHtml(content, settings.footerContent);
   const response = await request("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key.trim()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(
-      resendTestPayload(
-        settings,
-        recipient,
-        appendEmailFooter(html, settings.footerHtml),
-      ),
-    ),
+    body: JSON.stringify(resendTestPayload(settings, recipient, html)),
     signal: AbortSignal.timeout(15000),
     cache: "no-store",
     redirect: "error",

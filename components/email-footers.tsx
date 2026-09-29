@@ -1,38 +1,20 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  Check,
-  FilePenLine,
-  MailCheck,
-  Plus,
-  Star,
-  Trash2,
-  X,
-} from "lucide-react";
+import { FilePenLine, MailCheck, Plus, Star, Trash2 } from "lucide-react";
 import { api, Badge, Button, Empty, Heading, Loading, Notice } from "./common";
 import { FooterPreview } from "./footer-preview";
 
 type Footer = {
   id: string;
   name: string;
-  html: string;
+  previewHtml: string;
   isDefault: boolean;
   _count: { campaigns: number };
 };
 
-type Draft = {
-  id?: string;
-  name: string;
-  html: string;
-  isDefault: boolean;
-};
-
-const starterHtml =
-  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #dfe5dc;margin-top:24px"><tr><td style="padding:24px 20px;text-align:center;font-family:Arial,sans-serif;color:#5f6e66;font-size:12px;line-height:1.6"><p style="margin:0 0 4px"><strong style="color:#1d3029">Organisation name</strong></p><p style="margin:0 0 4px">A short organisation or legal message.</p><p style="margin:0"><a href="https://example.org" style="color:#256248">example.org</a></p></td></tr></table>';
-
 export function EmailFooters() {
   const [rows, setRows] = useState<Footer[] | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -52,41 +34,16 @@ export function EmailFooters() {
     void load();
   }, []);
 
-  function edit(row: Footer) {
-    setDraft({
-      id: row.id,
-      name: row.name,
-      html: row.html,
-      isDefault: row.isDefault,
-    });
+  async function create() {
+    setBusy("create");
     setError("");
-    setMessage("");
-  }
-
-  async function save() {
-    if (!draft) return;
-    setBusy("save");
-    setError("");
-    setMessage("");
     try {
-      const saved: Footer = draft.id
-        ? await api(`footers/${draft.id}`, "PATCH", draft)
-        : await api("footers", "POST", draft);
-      setRows((current) => {
-        const next = (current || []).filter((row) => row.id !== saved.id);
-        return [saved, ...next]
-          .map((row) =>
-            saved.isDefault && row.id !== saved.id
-              ? { ...row, isDefault: false }
-              : row,
-          )
-          .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+      const footer = await api("footers", "POST", {
+        name: "Untitled footer",
       });
-      setDraft(null);
-      setMessage(saved.isDefault ? "Default footer saved." : "Footer saved.");
+      window.location.assign(`/footers/${footer.id}`);
     } catch (cause) {
       setError((cause as Error).message);
-    } finally {
       setBusy("");
     }
   }
@@ -133,125 +90,20 @@ export function EmailFooters() {
     }
   }
 
-  const defaultIsLocked = Boolean(
-    draft?.id && rows?.find((row) => row.id === draft.id)?.isDefault,
-  );
-
   return (
     <>
       <Heading
         eyebrow="REUSABLE EMAIL DETAILS"
         title="Email footers"
-        description="Create reusable footers, preview them at a glance, and choose a default for new campaigns."
+        description="Build required campaign footers with Templatical and choose the default for new campaigns."
         action={
-          <Button
-            onClick={() =>
-              setDraft({
-                name: "Untitled footer",
-                html: starterHtml,
-                isDefault: false,
-              })
-            }
-          >
+          <Button busy={busy === "create"} onClick={() => void create()}>
             <Plus size={17} /> New footer
           </Button>
         }
       />
       <Notice message={error} />
       <Notice message={message} success />
-      {draft && (
-        <section className="card footer-editor-card">
-          <div className="section-toolbar">
-            <div>
-              <h2>{draft.id ? "Edit footer" : "Create footer"}</h2>
-              <p>The preview updates as you edit the email-safe HTML.</p>
-            </div>
-            <button
-              className="button ghost icon-button"
-              aria-label="Close footer editor"
-              onClick={() => setDraft(null)}
-            >
-              <X size={17} />
-            </button>
-          </div>
-          <div className="footer-editor-grid">
-            <div>
-              <label>
-                Footer name
-                <input
-                  required
-                  maxLength={120}
-                  value={draft.name}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current!,
-                      name: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Footer HTML
-                <textarea
-                  required
-                  rows={12}
-                  maxLength={50_000}
-                  value={draft.html}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current!,
-                      html: event.target.value,
-                    }))
-                  }
-                />
-                <small>
-                  Use a fragment only. Scripts, forms, document tags, and merge
-                  tags are blocked. Marketing unsubscribe links are added at
-                  send.
-                </small>
-              </label>
-              <label className="footer-default-choice">
-                <input
-                  type="checkbox"
-                  checked={draft.isDefault}
-                  disabled={defaultIsLocked}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current!,
-                      isDefault: event.target.checked,
-                    }))
-                  }
-                />
-                {defaultIsLocked
-                  ? "Default for new campaigns"
-                  : "Make this the default for new campaigns"}
-              </label>
-            </div>
-            <div className="footer-live-preview">
-              <span>LIVE PREVIEW</span>
-              <FooterPreview
-                html={draft.html}
-                title={`${draft.name || "Footer"} preview`}
-              />
-            </div>
-          </div>
-          <div className="settings-actions">
-            <small>Every campaign must have one footer selected.</small>
-            <div>
-              <Button variant="secondary" onClick={() => setDraft(null)}>
-                Cancel
-              </Button>
-              <Button
-                busy={busy === "save"}
-                disabled={!draft.name.trim() || !draft.html.trim()}
-                onClick={() => void save()}
-              >
-                <Check size={16} /> Save footer
-              </Button>
-            </div>
-          </div>
-        </section>
-      )}
       <section className="card footer-library-card">
         <div className="section-toolbar">
           <div>
@@ -283,7 +135,7 @@ export function EmailFooters() {
             {rows.map((row) => (
               <article className="footer-card" key={row.id}>
                 <FooterPreview
-                  html={row.html}
+                  html={row.previewHtml}
                   title={`${row.name} thumbnail`}
                   className="footer-thumbnail"
                 />
@@ -298,9 +150,12 @@ export function EmailFooters() {
                   </small>
                 </div>
                 <div className="footer-card-actions">
-                  <Button variant="secondary" onClick={() => edit(row)}>
+                  <Link
+                    className="button secondary"
+                    href={`/footers/${row.id}`}
+                  >
                     <FilePenLine size={15} /> Edit
-                  </Button>
+                  </Link>
                   {!row.isDefault && (
                     <Button
                       variant="ghost"

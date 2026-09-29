@@ -93,6 +93,7 @@ import {
 import {
   createFooter,
   deleteFooter,
+  getFooter,
   listFooters,
   updateFooter,
 } from "@/lib/email-footers";
@@ -223,7 +224,6 @@ async function handle(
       .passthrough();
     const templateName = z.string().trim().min(1).max(120);
     const templateId = z.string().min(1).max(100);
-    const footerHtml = z.string().trim().min(1).max(50_000);
     const campaignContent = templateContent;
     const campaignName = z.string().trim().min(1).max(120);
     const singleLine = (max: number) =>
@@ -282,25 +282,26 @@ async function handle(
       const data = z
         .object({
           name: templateName,
-          html: footerHtml,
+          content: templateContent.optional(),
           isDefault: z.boolean().optional(),
         })
-        .parse(await body(request, 60_000));
+        .parse(await body(request, 2_000_000));
       return json(await createFooter(data, user.id), 201);
     }
     if (p[0] === "footers" && p[1] && p.length === 2) {
       const id = templateId.parse(p[1]);
+      if (method === "GET") return json(await getFooter(id));
       if (method === "PATCH") {
         const data = z
           .object({
             name: templateName.optional(),
-            html: footerHtml.optional(),
+            content: templateContent.optional(),
             isDefault: z.boolean().optional(),
           })
           .refine((value) => Object.keys(value).length > 0, {
             message: "Include a footer field to save.",
           })
-          .parse(await body(request, 60_000));
+          .parse(await body(request, 2_000_000));
         return json(await updateFooter(id, data));
       }
       if (method === "DELETE") return json(await deleteFooter(id));
@@ -378,7 +379,11 @@ async function handle(
           );
         return json(
           await sendResendTest(
-            { ...campaign, footerHtml: campaign.footer.html },
+            {
+              ...campaign,
+              footerContent: campaign.footer
+                .content as unknown as TemplateContent,
+            },
             data.recipient,
             data.content as unknown as TemplateContent,
           ),

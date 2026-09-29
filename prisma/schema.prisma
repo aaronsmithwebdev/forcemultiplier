@@ -490,7 +490,7 @@ model EmailTemplateRevision {
 model EmailFooter {
   id        String     @id @default(cuid())
   name      String
-  html      String     @db.Text
+  content   Json
   isDefault Boolean    @default(false)
   createdBy String
   createdAt DateTime   @default(now())
@@ -540,7 +540,7 @@ model CampaignSend {
   replyToEmail       String              @default("")
   serviceNotice      Boolean             @default(false)
   footerName         String
-  footerHtml         String              @db.Text
+  footerContent      Json
   includeAudienceIds String[]
   excludeAudienceIds String[]
   includeRunIds      String[]

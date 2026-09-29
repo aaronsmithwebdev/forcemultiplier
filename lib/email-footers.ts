@@ -1,53 +1,97 @@
 import { Prisma } from "@prisma/client";
+import {
+  assertNoSlotInContent,
+  assertNoWrapperInContent,
+  createDefaultTemplateContent,
+  createParagraphBlock,
+  createSectionBlock,
+  isRenderableTemplateContent,
+  uniformBorder,
+  type TemplateContent,
+} from "@templatical/types";
 import { db } from "./db";
 import { AppError } from "./errors";
+import { renderEmailHtml } from "./campaign-email";
 
 type FooterInput = {
   name: string;
-  html: string;
+  content?: unknown;
   isDefault?: boolean;
 };
 
 const footerSelect = {
   id: true,
   name: true,
-  html: true,
+  content: true,
   isDefault: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { campaigns: true } },
 } as const;
 
-export function normalizeFooterHtml(value: string) {
-  const html = value.trim();
-  if (!html) throw new AppError("Footer content is required.");
-  if (
-    /<\/?(?:html|head|body|script|iframe|object|embed|form|input|button|textarea|select|meta|link)\b/i.test(
-      html,
-    )
-  )
-    throw new AppError(
-      "Use an email-safe HTML fragment without document, form, script, or iframe tags.",
-    );
-  if (/\son[a-z]+\s*=/i.test(html))
-    throw new AppError("Event handlers are not allowed in email footers.");
-  if (/(?:href|src)\s*=\s*["']?\s*(?:javascript|data):/i.test(html))
-    throw new AppError("Footer links and images must use safe URLs.");
-  if (/\{[{%]/.test(html))
-    throw new AppError(
-      "Footer merge tags are not supported. Marketing unsubscribe links are added automatically.",
-    );
-  return html;
+export function createStarterFooterContent() {
+  const content = createDefaultTemplateContent();
+  const border = uniformBorder({
+    width: 0,
+    style: "solid",
+    color: "#dfe5dc",
+  });
+  border.top.width = 1;
+  content.blocks = [
+    createSectionBlock({
+      border,
+      styles: { padding: { top: 24, right: 20, bottom: 24, left: 20 } },
+      children: [
+        [
+          createParagraphBlock({
+            content:
+              '<p style="text-align:center"><strong style="color:#1d3029;font-size:12px">Organisation name</strong></p><p style="text-align:center"><span style="color:#5f6e66;font-size:12px">A short organisation or legal message.</span></p><p style="text-align:center"><a href="https://example.org" style="font-size:12px">example.org</a></p>',
+            styles: { padding: { top: 0, right: 0, bottom: 0, left: 0 } },
+          }),
+        ],
+      ],
+    }),
+  ];
+  return content;
+}
+
+export function normalizeFooterContent(value: unknown): TemplateContent {
+  if (!isRenderableTemplateContent(value) || !value.blocks.length)
+    throw new AppError("Footer content is required.");
+  try {
+    assertNoSlotInContent(value);
+    assertNoWrapperInContent(value);
+  } catch {
+    throw new AppError("Footer content contains unsupported layout blocks.");
+  }
+  return value;
+}
+
+async function withPreview<Row extends { content: unknown }>(row: Row) {
+  return {
+    ...row,
+    previewHtml: await renderEmailHtml(normalizeFooterContent(row.content)),
+  };
 }
 
 export async function listFooters(search = "") {
-  return db.emailFooter.findMany({
+  const rows = await db.emailFooter.findMany({
     where: search
       ? { name: { contains: search.slice(0, 100), mode: "insensitive" } }
       : undefined,
     orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
     select: footerSelect,
   });
+  return Promise.all(rows.map(withPreview));
+}
+
+export async function getFooter(id: string) {
+  const footer = await db.emailFooter.findUnique({
+    where: { id },
+    select: footerSelect,
+  });
+  if (!footer) throw new AppError("Email footer not found.", 404);
+  return footer;
 }
 
 export async function getDefaultFooter() {
@@ -64,9 +108,13 @@ export async function getDefaultFooter() {
 }
 
 export async function createFooter(input: FooterInput, userId: string) {
+  const content = normalizeFooterContent(
+    input.content || createStarterFooterContent(),
+  );
+  await renderEmailHtml(content);
   const data = {
     name: input.name,
-    html: normalizeFooterHtml(input.html),
+    content: content as unknown as Prisma.InputJsonValue,
     createdBy: userId,
   };
   if (!input.isDefault)
@@ -91,10 +139,15 @@ export async function updateFooter(id: string, input: Partial<FooterInput>) {
   if (!current) throw new AppError("Email footer not found.", 404);
   if (current.isDefault && input.isDefault === false)
     throw new AppError("Choose another default footer first.", 409);
+  const content =
+    input.content === undefined
+      ? undefined
+      : normalizeFooterContent(input.content);
+  if (content) await renderEmailHtml(content);
   const data = {
     ...(input.name !== undefined ? { name: input.name } : {}),
-    ...(input.html !== undefined
-      ? { html: normalizeFooterHtml(input.html) }
+    ...(content
+      ? { content: content as unknown as Prisma.InputJsonValue }
       : {}),
   };
   if (!input.isDefault)
