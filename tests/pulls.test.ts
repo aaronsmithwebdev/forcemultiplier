@@ -18,6 +18,7 @@ function fixture(t: any, total: number) {
   };
   const members = new Map<string, any>();
   let failPage = -1;
+  let failDatabaseOnce = false;
   let malformed = false;
   const config: any = {
     provider: "salesforce",
@@ -56,6 +57,12 @@ function fixture(t: any, total: number) {
         },
         audienceMember: {
           createMany: async ({ data }: any) => {
+            if (failDatabaseOnce) {
+              failDatabaseOnce = false;
+              throw Object.assign(new Error("Connection pool timed out"), {
+                code: "P2024",
+              });
+            }
             let count = 0;
             for (const r of data)
               if (!members.has(r.salesforceId)) {
@@ -118,6 +125,9 @@ function fixture(t: any, total: number) {
     failAt: (page: number) => {
       failPage = page;
     },
+    failDatabaseOnce: () => {
+      failDatabaseOnce = true;
+    },
     malform: () => {
       malformed = true;
     },
@@ -148,6 +158,18 @@ test("provider failure preserves cursor and successful pages; resume completes w
   await pullStep("run");
   assert.equal(f.state.status, "completed");
   assert.equal(f.members.size, 450);
+});
+test("a temporary database timeout is retried without pausing or duplicating a page", async (t) => {
+  const f = fixture(t, 200);
+  let logged: any[] = [];
+  mockMethod(t, console, "error", (...values: any[]) => (logged = values));
+  f.failDatabaseOnce();
+  const result = await pullStep("run");
+  assert.equal(result.status, "completed");
+  assert.equal(result.processed, 200);
+  assert.equal(f.members.size, 200);
+  assert.equal(logged[1].stage, "save page");
+  assert.equal(logged[1].retry, true);
 });
 test("truncated extraction pauses instead of publishing a partial snapshot", async (t) => {
   const f = fixture(t, 25);

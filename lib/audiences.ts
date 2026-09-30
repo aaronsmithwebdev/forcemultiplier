@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { AppError, publicError } from "./errors";
+import { AppError, publicError, transientError } from "./errors";
 import { connection, sfQuery } from "./providers";
 import { sourceQuery, validatePaths, enrich } from "./salesforce";
 import { validateQuery } from "./soql";
@@ -94,16 +94,56 @@ export async function startPull(id: string) {
     throw error;
   }
 }
+async function pullStage<T>(
+  runId: string,
+  stage: string,
+  operation: () => Promise<T>,
+) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code;
+      const retry =
+        transientError(error) &&
+        attempt === 0 &&
+        (stage !== "save page" || code === "P2024");
+      if (!(error instanceof AppError))
+        console.error("Audience pull step failed", {
+          runId,
+          stage,
+          attempt: attempt + 1,
+          retry,
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  code,
+                  causeCode: (error as Error & { cause?: { code?: unknown } })
+                    .cause?.code,
+                  stack: error.stack,
+                }
+              : String(error),
+        });
+      if (!retry) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw new Error("Unreachable pull retry state.");
+}
 export async function pullStep(id: string) {
   const lease = new Date(Date.now() + 90000);
-  const acquired = await db.pullRun.updateMany({
-    where: {
-      id,
-      status: { in: ["pending", "running", "paused"] },
-      OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
-    },
-    data: { leaseUntil: lease, status: "running", error: null },
-  });
+  const acquired = await pullStage(id, "claim run", () =>
+    db.pullRun.updateMany({
+      where: {
+        id,
+        status: { in: ["pending", "running", "paused"] },
+        OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
+      },
+      data: { leaseUntil: lease, status: "running", error: null },
+    }),
+  );
   if (!acquired.count) {
     const run = await db.pullRun.findUnique({ where: { id } });
     if (run?.status === "completed") return run;
@@ -113,14 +153,20 @@ export async function pullStep(id: string) {
     );
   }
   try {
-    const run = (await db.pullRun.findUnique({ where: { id } }))!;
-    const config = await connection("salesforce");
+    const run = (await pullStage(id, "load run", () =>
+      db.pullRun.findUnique({ where: { id } }),
+    ))!;
+    const config = await pullStage(id, "load Salesforce connection", () =>
+      connection("salesforce"),
+    );
     if (config.externalId !== run.orgId || !config.tokens)
       throw new AppError(
         "The Salesforce connection changed. Reconnect the original org.",
         409,
       );
-    const page = await sfQuery(run.query, run.cursor);
+    const page = await pullStage(id, "fetch Salesforce page", () =>
+      sfQuery(run.query, run.cursor),
+    );
     if (
       !Array.isArray(page.records) ||
       typeof page.done !== "boolean" ||
@@ -136,13 +182,17 @@ export async function pullStep(id: string) {
         "This audience exceeds the 150,000-record manual pull limit. Narrow the query; Bulk extraction is a later milestone.",
         422,
       );
-    const records = await enrich(page.records, run.fields as string[]);
+    const records = await pullStage(id, "enrich Salesforce contacts", () =>
+      enrich(page.records, run.fields as string[]),
+    );
     if (records.length !== page.records.length)
       throw new AppError(
         "Salesforce returned duplicate Contact IDs. Restart this pull.",
         409,
       );
-    const latest = await connection("salesforce");
+    const latest = await pullStage(id, "recheck Salesforce connection", () =>
+      connection("salesforce"),
+    );
     if (
       latest.version !== config.version ||
       latest.externalId !== run.orgId ||
@@ -164,54 +214,60 @@ export async function pullStep(id: string) {
         "The extracted record count does not match Salesforce. Restart this pull.",
         409,
       );
-    return await db.$transaction(
-      async (tx) => {
-        const owner = await tx.pullRun.updateMany({
-          where: { id, leaseUntil: lease, status: "running" },
-          data: {
-            processed,
-            total,
-            cursor: page.done ? null : page.nextRecordsUrl,
-            status: page.done ? "completed" : "running",
-            finishedAt: page.done ? new Date() : null,
-            leaseUntil: null,
-          },
-        });
-        if (!owner.count)
-          throw new AppError(
-            "This pull changed while the page was loading. Refresh and resume.",
-            409,
-          );
-        const inserted = await tx.audienceMember.createMany({
-          data: records.map((record) => ({
-            runId: id,
-            salesforceId: record.Id,
-            email: record.Email || null,
-            normalizedEmail: normalizedEmail(record.Email),
-            name: [record.FirstName, record.LastName].filter(Boolean).join(" "),
-            optedOut: record.HasOptedOutOfEmail === true,
-            data: JSON.parse(JSON.stringify(record)),
-          })),
-          skipDuplicates: true,
-        });
-        if (inserted.count !== records.length)
-          throw new AppError(
-            "Contact IDs repeated across pages. Restart this pull.",
-            409,
-          );
-        return tx.pullRun.findUniqueOrThrow({ where: { id } });
-      },
-      { timeout: 15000 },
+    return await pullStage(id, "save page", () =>
+      db.$transaction(
+        async (tx) => {
+          const owner = await tx.pullRun.updateMany({
+            where: { id, leaseUntil: lease, status: "running" },
+            data: {
+              processed,
+              total,
+              cursor: page.done ? null : page.nextRecordsUrl,
+              status: page.done ? "completed" : "running",
+              finishedAt: page.done ? new Date() : null,
+              leaseUntil: null,
+            },
+          });
+          if (!owner.count)
+            throw new AppError(
+              "This pull changed while the page was loading. Refresh and resume.",
+              409,
+            );
+          const inserted = await tx.audienceMember.createMany({
+            data: records.map((record) => ({
+              runId: id,
+              salesforceId: record.Id,
+              email: record.Email || null,
+              normalizedEmail: normalizedEmail(record.Email),
+              name: [record.FirstName, record.LastName]
+                .filter(Boolean)
+                .join(" "),
+              optedOut: record.HasOptedOutOfEmail === true,
+              data: JSON.parse(JSON.stringify(record)),
+            })),
+            skipDuplicates: true,
+          });
+          if (inserted.count !== records.length)
+            throw new AppError(
+              "Contact IDs repeated across pages. Restart this pull.",
+              409,
+            );
+          return tx.pullRun.findUniqueOrThrow({ where: { id } });
+        },
+        { maxWait: 15000, timeout: 15000 },
+      ),
     );
   } catch (error) {
-    await db.pullRun.updateMany({
-      where: { id, leaseUntil: lease, status: "running" },
-      data: {
-        status: "paused",
-        error: publicError(error).error,
-        leaseUntil: null,
-      },
-    });
+    await pullStage(id, "pause run", () =>
+      db.pullRun.updateMany({
+        where: { id, leaseUntil: lease, status: "running" },
+        data: {
+          status: "paused",
+          error: publicError(error).error,
+          leaseUntil: null,
+        },
+      }),
+    );
     throw error;
   }
 }
