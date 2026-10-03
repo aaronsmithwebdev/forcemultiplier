@@ -62,12 +62,18 @@ export function Audiences() {
         </div>
         <div className="stat-card">
           <span>
-            <PlugZap size={18} />
-            Connected accounts
+            <Database size={18} />
+            Total contacts
           </span>
           <strong>
-            {connected}
-            <em> / 2</em>
+            {rows
+              ? rows
+                  .reduce(
+                    (total, row) => total + (row.runs[0]?.processed ?? 0),
+                    0,
+                  )
+                  .toLocaleString()
+              : "—"}
           </strong>
         </div>
       </div>
