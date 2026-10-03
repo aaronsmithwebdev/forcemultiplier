@@ -151,11 +151,7 @@ export function AudienceBuilder() {
         <ArrowLeft size={15} />
         Audience library
       </Link>
-      <Heading
-        eyebrow="BUILD AN AUDIENCE"
-        title="Start with the right people."
-        description="Choose your criteria, add the fields you need, and preview the results."
-      />
+      <Heading title="New audience" />
       <Notice message={error} />
       <div className="source-types">
         {types.map(([key, label, description, Icon]) => (
@@ -339,8 +335,7 @@ export function AudienceBuilder() {
         </section>
         <aside className="builder-aside">
           <div className="card">
-            <span className="eyebrow">HOW IT WORKS</span>
-            <h3>A definition you can reuse.</h3>
+            <h3>How audience pulls work</h3>
             <ol className="how-list">
               <li>
                 <strong>Choose who belongs</strong>

@@ -41,9 +41,7 @@ export default async function Page({
         {backAudience ? `Back to ${backAudience.name}` : "Back to audiences"}
       </Link>
       <Heading
-        eyebrow="CONTACT RECORD"
         title={contact.name}
-        description={`${contact.email || "No email address"} · Last observed ${shownAt(contact.capturedAt)}`}
         action={
           contact.salesforceUrl ? (
             <a

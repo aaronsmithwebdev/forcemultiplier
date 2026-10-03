@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FolderPlus, Plus, Search, X } from "lucide-react";
-import { api, Button, Notice } from "./common";
+import { api, Button, Loading, Notice } from "./common";
 import {
   buildContactQuery,
   QueryFilter,
@@ -512,7 +512,7 @@ export function ContactQueryBuilder({
       </div>
       <p className="muted">{description}</p>
       <Notice message={error} />
-      {!fields && !error && <p role="status">Loading Contact fields…</p>}
+      {!fields && !error && <Loading />}
       <div className="query-groups">{renderGroup(root)}</div>
       {generated.error && (
         <p className="query-hint" role="status">

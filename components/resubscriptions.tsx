@@ -168,11 +168,7 @@ export function Resubscriptions() {
 
   return (
     <>
-      <Heading
-        eyebrow="CONTACT RECOVERY"
-        title="Resubscriptions"
-        description="Restore email subscriptions requested through your app, up to 2,500 contacts per day across all jobs."
-      />
+      <Heading title="Resubscriptions" />
       <Notice message={error} />
       <Notice message={message} success />
       {state && !state.schedulerReady && (

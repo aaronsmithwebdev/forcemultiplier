@@ -9,15 +9,11 @@ export default async function Page() {
   });
   return (
     <>
-      <Heading
-        eyebrow="A CLEAR RECORD"
-        title="Every pull, accounted for."
-        description="See what ran, what completed, and what needs your attention."
-      />
+      <Heading title="Pull history" />
       <section className="card">
         {!runs.length ? (
           <Empty
-            title="Your history starts here"
+            title="No pulls"
             description="Pull an audience from Salesforce and its progress will appear here."
           />
         ) : (

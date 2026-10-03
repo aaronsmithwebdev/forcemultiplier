@@ -32,9 +32,7 @@ export function Audiences() {
   return (
     <>
       <Heading
-        eyebrow="PEOPLE, WITH PURPOSE"
-        title="Your audiences."
-        description="Turn Salesforce criteria into lists you can work with."
+        title="Audiences"
         action={
           <Link className="button" href="/audiences/new">
             <Plus size={17} />
@@ -50,7 +48,6 @@ export function Audiences() {
             Saved audiences
           </span>
           <strong>{rows?.length ?? "—"}</strong>
-          <small>Across your Salesforce sources</small>
         </div>
         <div className="stat-card">
           <span>
@@ -62,7 +59,6 @@ export function Audiences() {
               ? rows.filter((r) => r.runs[0]?.status === "completed").length
               : "—"}
           </strong>
-          <small>Complete snapshots, ready to inspect</small>
         </div>
         <div className="stat-card">
           <span>
@@ -73,7 +69,6 @@ export function Audiences() {
             {connected}
             <em> / 2</em>
           </strong>
-          <small>Salesforce and Constant Contact</small>
         </div>
       </div>
       {connections.length > 0 && connected < 2 && (
@@ -82,7 +77,7 @@ export function Audiences() {
             <PlugZap size={23} />
           </div>
           <div>
-            <h3>Start with your connections</h3>
+            <h3>Connections required</h3>
             <p>
               Authorize your accounts to browse Salesforce sources and Constant
               Contact lists.
@@ -96,10 +91,6 @@ export function Audiences() {
       )}
       <section className="card">
         <div className="section-toolbar">
-          <div>
-            <h2>Audience library</h2>
-            <p>Saved criteria. Reusable lists.</p>
-          </div>
           <div className="search-box">
             <Search size={17} />
             <input
@@ -114,10 +105,8 @@ export function Audiences() {
           <Loading />
         ) : !filtered?.length ? (
           <Empty
-            title={
-              search ? "No matching audiences" : "Build your first audience"
-            }
-            description="Start with a SOQL query, a saved report, a list view, or a Salesforce Campaign."
+            title={search ? "No matching audiences" : "No audiences"}
+            description="Create one from a Salesforce query, report, list view, or campaign."
           >
             <Link href="/audiences/new" className="button secondary">
               <Plus size={17} />

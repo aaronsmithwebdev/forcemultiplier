@@ -323,9 +323,7 @@ export function AudienceDetail({ id }: { id: string }) {
         Audience library
       </Link>
       <Heading
-        eyebrow={`${data.sourceType.toUpperCase()} AUDIENCE`}
         title={data.name}
-        description="Pull contacts into your workspace and inspect a complete snapshot."
         action={
           <div className="button-row">
             <Button busy={busy} disabled={busy || sending} onClick={pull}>
@@ -659,7 +657,7 @@ export function AudienceDetail({ id }: { id: string }) {
         </div>
         {!data.completeRun ? (
           <Empty
-            title="Ready for your first pull"
+            title="No contacts pulled"
             description="Pull the full audience from Salesforce. This saves contacts here without adding them to Constant Contact."
           />
         ) : contactsLoading ? (

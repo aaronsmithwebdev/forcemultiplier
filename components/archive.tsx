@@ -204,11 +204,7 @@ export function Archive() {
   const job = state?.importJob;
   return (
     <>
-      <Heading
-        eyebrow="PAST CAMPAIGNS"
-        title="Email archive"
-        description="Search sent Constant Contact emails. Originals remain available as reference when you create a new campaign."
-      />
+      <Heading title="Email archive" />
       <Notice message={error} />
       {!state ? (
         <Loading />

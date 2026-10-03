@@ -151,11 +151,7 @@ export function Suppressions() {
 
   return (
     <>
-      <Heading
-        eyebrow="CONSENT"
-        title="Suppressions"
-        description="Maintain and audit the global do-not-email list used by every campaign and legacy delivery."
-      />
+      <Heading title="Suppressions" />
       <Notice message={error} />
       <Notice message={message} success />
       {sync && !sync.schedulerReady && (

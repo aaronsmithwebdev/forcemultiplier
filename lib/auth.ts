@@ -7,7 +7,7 @@ export async function session() {
 }
 export async function requireSession() {
   const value = await session();
-  if (!value) throw new AppError("Sign in to your workspace.", 401);
+  if (!value) throw new AppError("Sign in.", 401);
   return value;
 }
 export async function login(email: string, password: string) {

@@ -75,11 +75,7 @@ export function Connections() {
   }, []);
   return (
     <>
-      <Heading
-        eyebrow="YOUR INTEGRATIONS"
-        title="Make the connection."
-        description="Connect your accounts once. Build your audiences from here."
-      />
+      <Heading title="Connections" />
       <Notice message={error} />
       <Notice message={message} success />
       {!rows ? (
@@ -95,10 +91,10 @@ export function Connections() {
       <div className="info-strip">
         <KeyRound size={19} />
         <div>
-          <strong>Your credentials stay protected.</strong>
+          <strong>Credentials</strong>
           <p>
-            Application secrets and authorization tokens are encrypted. Only
-            your signed-in workspace can access these connections.
+            Application secrets and authorization tokens are encrypted and
+            available only to the signed-in account.
           </p>
         </div>
       </div>
@@ -236,11 +232,6 @@ function ConnectionCard({
         </Badge>
       </div>
       <h2>{sf ? "Salesforce" : "Constant Contact"}</h2>
-      <p className="card-description">
-        {sf
-          ? "Your contacts, relationships, and audience criteria."
-          : "Your destination lists and contact field catalog."}
-      </p>
       <Notice message={error || row.error || ""} />
       <Notice message={message} success />
       {row.connected ? (

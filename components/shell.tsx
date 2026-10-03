@@ -12,7 +12,6 @@ import {
   Activity,
   LogOut,
   ChevronRight,
-  ArrowUpRight,
   ShieldCheck,
   Settings,
   PanelBottom,
@@ -42,21 +41,29 @@ export function Shell({
   return (
     <div className="workspace">
       <aside className="sidebar">
-        <Link href="/audiences" className="brand">
-          <span className="brand-symbol">
-            <Layers3 size={22} />
-          </span>
-          <span>
-            Force<span className="brand-light">Multiplier</span>
-          </span>
-        </Link>
-        <div className="workspace-label">
-          <span className="workspace-avatar">F</span>
-          <div>
-            Your workspace<small>Salesforce + Resend</small>
-          </div>
+        <div className="sidebar-header">
+          <Link href="/audiences" className="brand">
+            <span className="brand-symbol">
+              <Layers3 size={22} />
+            </span>
+            <span>
+              Force<span className="brand-light">Multiplier</span>
+            </span>
+          </Link>
+          <button
+            className="mobile-signout"
+            aria-label="Sign out"
+            onClick={async () => {
+              try {
+                await api("auth/logout", "POST");
+              } finally {
+                window.location.assign("/login");
+              }
+            }}
+          >
+            <LogOut size={15} />
+          </button>
         </div>
-        <div className="nav-label">WORKSPACE</div>
         <nav>
           {links.map(([href, label, Icon]) => (
             <Link
@@ -73,18 +80,6 @@ export function Shell({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-tip">
-            <div className="tip-dot" />
-            Connections come first
-            <p>
-              Connect your accounts, then bring your first audience into the
-              workspace.
-            </p>
-            <Link href="/connections">
-              Manage connections
-              <ArrowUpRight size={15} />
-            </Link>
-          </div>
           <button
             className="signout"
             onClick={async () => {
@@ -97,46 +92,13 @@ export function Shell({
             }}
           >
             <span className="avatar">{email[0]?.toUpperCase()}</span>
-            <span>
-              {email}
-              <small>Workspace administrator</small>
-            </span>
+            <span>{email}</span>
             <LogOut size={16} />
           </button>
         </div>
       </aside>
       <div className="main-shell">
-        <div className="topbar">
-          <span>
-            Workspace <ChevronRight size={13} />{" "}
-            <strong>
-              {links.find(([href]) => pathname.startsWith(href))?.[1] ??
-                (pathname.startsWith("/contacts/") ? "Contact" : "Audience")}
-            </strong>
-          </span>
-          <div className="topbar-actions">
-            <span className="topbar-label">
-              <span className="status-dot" /> Manual pulls
-            </span>
-            <button
-              className="mobile-signout"
-              aria-label="Sign out"
-              onClick={async () => {
-                try {
-                  await api("auth/logout", "POST");
-                } finally {
-                  window.location.assign("/login");
-                }
-              }}
-            >
-              <LogOut size={15} />
-            </button>
-          </div>
-        </div>
         <main className="main-content">{children}</main>
-        <footer className="footer">
-          ForceMultiplier <span>Built for a more connected workflow.</span>
-        </footer>
       </div>
     </div>
   );

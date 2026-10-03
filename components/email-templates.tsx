@@ -60,9 +60,7 @@ export function EmailTemplates() {
   return (
     <>
       <Heading
-        eyebrow="DESIGN ONCE, PERSONALISE EVERY SEND"
         title="Email templates"
-        description="Build responsive emails with reusable content and Salesforce merge tags."
         action={
           <Button busy={busy === "create"} onClick={() => void create()}>
             <Plus size={17} /> New template
@@ -72,10 +70,6 @@ export function EmailTemplates() {
       <Notice message={error} />
       <section className="card">
         <div className="section-toolbar">
-          <div>
-            <h2>Template library</h2>
-            <p>Drafts stay editable and every saved design keeps a version.</p>
-          </div>
           <div className="search-box">
             <Search size={17} />
             <input
@@ -89,10 +83,7 @@ export function EmailTemplates() {
         {!rows ? (
           <Loading />
         ) : !filtered?.length ? (
-          <Empty
-            title={search ? "No matching templates" : "Create your first email"}
-            description="Start with a blank canvas, then add text, images, buttons, columns, HTML, and personalised fields."
-          >
+          <Empty title={search ? "No matching templates" : "No templates"}>
             {!search && (
               <Button busy={busy === "create"} onClick={() => void create()}>
                 <Plus size={17} /> Create a template

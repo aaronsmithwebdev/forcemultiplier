@@ -47,11 +47,7 @@ export function WorkspaceSettings() {
 
   return (
     <>
-      <Heading
-        eyebrow="WORKSPACE SETTINGS"
-        title="Keep only the contacts you use."
-        description="Control how long campaign contacts remain in Resend after their latest send."
-      />
+      <Heading title="Settings" />
       <Notice message={error} />
       <Notice message={message} success />
       {!settings ? (

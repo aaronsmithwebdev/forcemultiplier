@@ -93,9 +93,7 @@ export function EmailFooters() {
   return (
     <>
       <Heading
-        eyebrow="REUSABLE EMAIL DETAILS"
         title="Email footers"
-        description="Build required campaign footers with Templatical and choose the default for new campaigns."
         action={
           <Button busy={busy === "create"} onClick={() => void create()}>
             <Plus size={17} /> New footer
@@ -107,7 +105,6 @@ export function EmailFooters() {
       <section className="card footer-library-card">
         <div className="section-toolbar">
           <div>
-            <h2>Footer library</h2>
             <p>
               The default is selected automatically when a campaign is created.
             </p>
@@ -127,7 +124,7 @@ export function EmailFooters() {
           </Empty>
         ) : !rows.length ? (
           <Empty
-            title="Create your first footer"
+            title="No footers"
             description="Campaigns cannot send until a default footer exists."
           />
         ) : (

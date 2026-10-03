@@ -93,9 +93,7 @@ export function ContactLists() {
   return (
     <>
       <Heading
-        eyebrow="YOUR DESTINATION"
-        title="Lists, all in one place."
-        description="Browse Constant Contact lists, inspect their members, or create a new list."
+        title="Constant Contact lists"
         action={
           <Button disabled={!connected} onClick={() => setCreating(true)}>
             <Plus size={17} />
@@ -111,7 +109,7 @@ export function ContactLists() {
         <section className="card">
           <Empty
             title="Connect Constant Contact"
-            description="Authorize your account to bring your existing lists and custom fields into this workspace."
+            description="Authorize the account to load its lists and custom fields."
           >
             <Link className="button" href="/connections">
               Go to connections
@@ -124,7 +122,6 @@ export function ContactLists() {
           <section className="card">
             <div className="section-toolbar">
               <div>
-                <h2>Constant Contact lists</h2>
                 <p>
                   {rows.length} lists loaded{cursor ? " · More available" : ""}
                 </p>
@@ -148,10 +145,7 @@ export function ContactLists() {
             {loading && !rows.length ? (
               <Loading />
             ) : rows.length === 0 ? (
-              <Empty
-                title="No lists yet"
-                description="Create your first destination list when you’re ready."
-              />
+              <Empty title="No lists" />
             ) : (
               <div className="list-grid">
                 {rows
@@ -172,7 +166,7 @@ export function ContactLists() {
                         <ArrowUpRight size={17} />
                       </div>
                       <h3>{row.name}</h3>
-                      <p>{row.description || "Constant Contact list"}</p>
+                      {row.description && <p>{row.description}</p>}
                       <small>
                         {typeof row.membership_count === "number"
                           ? row.membership_count.toLocaleString() + " members"
@@ -245,7 +239,7 @@ export function ContactLists() {
                 try {
                   await api("constant-contact/lists", "POST", data);
                   setCreating(false);
-                  setSuccess("Your new list is ready.");
+                  setSuccess("List created.");
                   await load();
                 } catch (e) {
                   setError((e as Error).message);
@@ -289,11 +283,6 @@ export function ContactLists() {
                 <h2 id="list-detail-title">
                   {selected?.name || "Account custom fields"}
                 </h2>
-                <p>
-                  {selected
-                    ? "Existing contacts and their email permission state."
-                    : "Fields available in your connected Constant Contact account."}
-                </p>
               </div>
               <button
                 className="icon-button"

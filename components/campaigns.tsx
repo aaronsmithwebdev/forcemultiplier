@@ -68,9 +68,7 @@ export function Campaigns() {
   return (
     <>
       <Heading
-        eyebrow="BUILD, CHECK, THEN SEND"
         title="Campaigns"
-        description="Create, preview, test, and send campaigns to saved Salesforce audiences."
         action={
           <Button onClick={() => setCreating(true)}>
             <Plus size={17} /> New campaign
@@ -127,10 +125,6 @@ export function Campaigns() {
       )}
       <section className="card">
         <div className="section-toolbar">
-          <div>
-            <h2>Campaign drafts</h2>
-            <p>Build the email, review recipients, and send through Resend.</p>
-          </div>
           <div className="search-box">
             <Search size={17} />
             <input
@@ -144,12 +138,7 @@ export function Campaigns() {
         {!rows ? (
           <Loading />
         ) : !filtered?.length ? (
-          <Empty
-            title={
-              search ? "No matching campaigns" : "Create your first campaign"
-            }
-            description="Name the campaign, build the email, add sending details, then preview and test it."
-          >
+          <Empty title={search ? "No matching campaigns" : "No campaigns"}>
             {!search && (
               <Button onClick={() => setCreating(true)}>
                 <MailPlus size={17} /> Create a campaign

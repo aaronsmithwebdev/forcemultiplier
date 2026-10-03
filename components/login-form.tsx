@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ArrowUpRight, Layers3, ShieldCheck, ArrowRight } from "lucide-react";
+import { ArrowRight, Layers3 } from "lucide-react";
 import { api, Button, Notice } from "./common";
 export function LoginForm({ initialError }: { initialError: string }) {
   const [error, setError] = useState(initialError),
@@ -21,43 +21,15 @@ export function LoginForm({ initialError }: { initialError: string }) {
   }
   return (
     <main className="login">
-      <section className="login-story">
-        <div className="brand">
-          <span className="brand-symbol">
-            <Layers3 size={23} />
-          </span>
-          ForceMultiplier
-        </div>
-        <div>
-          <div className="eyebrow">A MORE CONNECTED WORKDAY</div>
-          <h1>
-            The right people.
-            <br />
-            The right lists.
-            <br />
-            <em>One workspace.</em>
-          </h1>
-          <p>
-            Bring your Salesforce audiences and Constant Contact lists together,
-            with the details that make every connection count.
-          </p>
-          <div className="connection-graphic">
-            <span className="provider-logo salesforce">sf</span>
-            <span className="graphic-line" />
-            <ArrowUpRight />
-            <span className="graphic-line" />
-            <span className="provider-logo constant-contact">cc</span>
-          </div>
-        </div>
-        <div className="login-foot">
-          <ShieldCheck size={17} /> A private workspace for your team
-        </div>
-      </section>
       <section className="login-form">
         <div className="form-width">
-          <div className="eyebrow">LET’S GET CONNECTED</div>
-          <h2>Welcome back</h2>
-          <p>Sign in with the user managed in your Supabase project.</p>
+          <div className="brand">
+            <span className="brand-symbol">
+              <Layers3 size={23} />
+            </span>
+            ForceMultiplier
+          </div>
+          <h1>Sign in</h1>
           <Notice message={error} />
           <form onSubmit={submit}>
             <label>
@@ -85,10 +57,6 @@ export function LoginForm({ initialError }: { initialError: string }) {
               <ArrowRight size={17} />
             </Button>
           </form>
-          <p className="login-note">
-            Your Salesforce and Constant Contact credentials are configured
-            after you sign in.
-          </p>
         </div>
       </section>
     </main>

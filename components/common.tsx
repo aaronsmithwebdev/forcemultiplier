@@ -47,8 +47,8 @@ export function Notice({
 }
 export function Loading() {
   return (
-    <div className="loading">
-      <Loader2 className="spin" size={20} /> Loading your workspace…
+    <div className="loading" role="status" aria-label="Loading">
+      <Loader2 className="spin" size={20} aria-hidden="true" />
     </div>
   );
 }
@@ -72,23 +72,15 @@ export function Button({
   );
 }
 export function Heading({
-  eyebrow,
   title,
-  description,
   action,
 }: {
-  eyebrow: string;
   title: string;
-  description: string;
   action?: ReactNode;
 }) {
   return (
     <header className="page-heading">
-      <div>
-        <div className="eyebrow">{eyebrow}</div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
+      <h1>{title}</h1>
       {action}
     </header>
   );
@@ -99,7 +91,7 @@ export function Empty({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   children?: ReactNode;
 }) {
   return (
@@ -108,7 +100,7 @@ export function Empty({
         <PlugZap size={28} />
       </span>
       <h2>{title}</h2>
-      <p>{description}</p>
+      {description && <p>{description}</p>}
       {children}
     </div>
   );
