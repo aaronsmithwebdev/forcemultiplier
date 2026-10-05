@@ -64,6 +64,7 @@ import {
   unsubscribeState,
 } from "@/lib/unsubscribes";
 import {
+  confirmConsentBaseline,
   importSuppressions,
   retrySalesforceSuppressionEvents,
   runSalesforceSuppressionSync,
@@ -511,6 +512,12 @@ async function handle(
     }
     if (key === "suppressions" && method === "GET")
       return json(await suppressionState(params.get("q") || ""));
+    if (key === "suppressions/baseline" && method === "PUT") {
+      const data = z
+        .object({ confirmed: z.boolean() })
+        .parse(await body(request));
+      return json(await confirmConsentBaseline(data.confirmed, user.id));
+    }
     if (key === "suppressions/import" && method === "POST") {
       const data = z
         .object({

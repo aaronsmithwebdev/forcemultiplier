@@ -292,6 +292,8 @@ model SalesforceSuppressionSync {
   error           String?
   lastRunAt       DateTime?
   lastCompletedAt DateTime?
+  baselineConfirmedAt DateTime?
+  baselineConfirmedBy String?
   updatedAt       DateTime  @updatedAt
 
   @@schema("forcemultiplier")

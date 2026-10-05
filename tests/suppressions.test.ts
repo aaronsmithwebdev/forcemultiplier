@@ -33,6 +33,20 @@ test("suppression imports normalize, deduplicate and preserve existing rows", as
     );
     return { count: 2 };
   });
+  let confirmationCleared = false;
+  mockMethod(
+    t,
+    db.salesforceSuppressionSync,
+    "updateMany",
+    async ({ data }: any) => {
+      assert.deepEqual(data, {
+        baselineConfirmedAt: null,
+        baselineConfirmedBy: null,
+      });
+      confirmationCleared = true;
+      return { count: 1 };
+    },
+  );
   mockMethod(t, db, "$transaction", async (operations: any[]) =>
     Promise.all(operations),
   );
@@ -44,6 +58,7 @@ test("suppression imports normalize, deduplicate and preserve existing rows", as
     ),
     { submitted: 2, added: 1, existing: 1 },
   );
+  assert.equal(confirmationCleared, true);
 });
 
 test("signed Resend unsubscribe webhooks are immediate and idempotent", async (t) => {

@@ -40,6 +40,7 @@ type SendState = {
   finishedAt: string | null;
 };
 type Review = {
+  consent: { ready: boolean; reason: string | null } | null;
   serviceNotice: boolean;
   audienceIds: string[];
   exclusionAudienceIds: string[];
@@ -381,6 +382,16 @@ export function CampaignRecipients({ id }: { id: string }) {
             : "")
         }
       />
+      {!review.serviceNotice &&
+        !sendState &&
+        review.consent &&
+        !review.consent.ready && (
+          <p role="status">
+            Marketing is waiting: {review.consent.reason}{" "}
+            <a href="/suppressions">Open Suppressions</a>. Consent is checked
+            again when you send.
+          </p>
+        )}
       {sendState ? (
         <div
           className={`send-result ${["failed", "review"].includes(sendState.status) ? "failed" : ""}`}
@@ -400,7 +411,9 @@ export function CampaignRecipients({ id }: { id: string }) {
                   ? "Send status needs review"
                   : sendState.status === "failed"
                     ? "Send stopped safely"
-                    : "Preparing and sending…"}
+                    : sendState.error?.startsWith("Waiting for consent checks:")
+                      ? "Waiting for consent checks"
+                      : "Preparing and sending…"}
             </strong>
             <p>
               {sendState.status === "sent"

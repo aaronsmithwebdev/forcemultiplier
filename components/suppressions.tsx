@@ -24,6 +24,12 @@ type Event = {
 };
 
 type State = {
+  consent: {
+    ready: boolean;
+    reason: string | null;
+    verifiedThrough: string | null;
+    baselineConfirmedAt: string | null;
+  };
   total: number;
   recentSuppressions: {
     email: string;
@@ -68,6 +74,7 @@ export function Suppressions() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [baselineChecked, setBaselineChecked] = useState(false);
 
   async function refresh(query = search) {
     setState(
@@ -108,6 +115,7 @@ export function Suppressions() {
     event.preventDefault();
     if (!csv) return;
     setBusy("import");
+    setBaselineChecked(false);
     setError("");
     setMessage("");
     let added = 0;
@@ -157,6 +165,87 @@ export function Suppressions() {
       {sync && !sync.schedulerReady && (
         <Notice message="Scheduled Salesforce opt-out sync needs CRON_SECRET configured in the hosting environment." />
       )}
+      <section className="card schedule-card">
+        <h2>Marketing consent readiness</h2>
+        <Badge tone={state?.consent.ready ? "green" : "amber"}>
+          {state?.consent.ready ? "Ready" : "Marketing sends waiting"}
+        </Badge>
+        <p>{state?.consent.reason}</p>
+        <p>
+          Marketing uses saved audiences and current local suppressions. The
+          Salesforce opt-out checks must be no more than 15 minutes behind; no
+          audience refresh is required. Consent verified through{" "}
+          {date(state?.consent.verifiedThrough)}.
+        </p>
+        {state?.consent.baselineConfirmedAt ? (
+          <>
+            <p>Baseline confirmed {date(state.consent.baselineConfirmedAt)}.</p>
+            <Button
+              variant="ghost"
+              disabled={!!busy}
+              onClick={() =>
+                syncAction(
+                  "baseline",
+                  () => {
+                    setBaselineChecked(false);
+                    return api("suppressions/baseline", "PUT", {
+                      confirmed: false,
+                    });
+                  },
+                  "Baseline confirmation cleared. Marketing sends will wait.",
+                )
+              }
+            >
+              Reopen baseline review
+            </Button>
+          </>
+        ) : (
+          <>
+            <label>
+              <input
+                type="checkbox"
+                checked={baselineChecked}
+                disabled={!!busy}
+                onChange={(event) => setBaselineChecked(event.target.checked)}
+              />
+              I have finished importing all approved historical unsubscribe
+              sources, reviewed any invalid or missing rows, and verified that a
+              test Resend unsubscribe reaches this workspace.
+            </label>
+            <p>
+              New CSV imports clear this confirmation until you review the
+              completed upload.
+            </p>
+            <Button
+              variant="secondary"
+              disabled={!!busy || !baselineChecked || !sync?.enabled}
+              onClick={() =>
+                syncAction(
+                  "baseline",
+                  () =>
+                    api("suppressions/baseline", "PUT", { confirmed: true }),
+                  "Consent baseline confirmation recorded.",
+                )
+              }
+            >
+              Confirm baseline
+            </Button>
+          </>
+        )}
+        <Button
+          variant="ghost"
+          disabled={!!busy}
+          onClick={() =>
+            syncAction(
+              "refresh",
+              () => Promise.resolve(),
+              "Consent readiness refreshed.",
+            )
+          }
+        >
+          Refresh readiness
+        </Button>
+      </section>
       <section className="card schedule-card">
         <div className="writeback-title">
           <span>

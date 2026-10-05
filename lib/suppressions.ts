@@ -5,6 +5,7 @@ import { AppError, publicError } from "./errors";
 import { connection, providerRequest, SF_VERSION } from "./providers";
 import { hash } from "./security";
 import { quote, sfId } from "./soql";
+import { marketingConsentReadiness } from "./consent-readiness";
 
 const SYNC_ID = "salesforce";
 const TO_FORCE_MULTIPLIER = "salesforce_to_forcemultiplier";
@@ -49,7 +50,7 @@ export async function suppressionState(search = "") {
   const query = search.trim().toLowerCase().slice(0, 254);
   const suppressionWhere = query ? { email: { contains: query } } : undefined;
   const eventWhere = query ? { email: { contains: query } } : undefined;
-  const [total, recentSuppressions, recentEvents, sync, grouped] =
+  const [total, recentSuppressions, recentEvents, sync, grouped, consent] =
     await Promise.all([
       db.suppression.count(),
       db.suppression.findMany({
@@ -93,9 +94,11 @@ export async function suppressionState(search = "") {
         by: ["direction", "status"],
         _count: { _all: true },
       }),
+      marketingConsentReadiness(),
     ]);
   return {
     total,
+    consent,
     recentSuppressions,
     recentEvents,
     sync: {
@@ -149,12 +152,40 @@ export async function importSuppressions(
       })),
       skipDuplicates: true,
     }),
+    // A partial CSV upload must not retain an earlier baseline confirmation.
+    db.salesforceSuppressionSync.updateMany({
+      where: { id: SYNC_ID },
+      data: { baselineConfirmedAt: null, baselineConfirmedBy: null },
+    }),
   ]);
   return {
     submitted: emails.length,
     added: suppressions.count,
     existing: emails.length - suppressions.count,
   };
+}
+
+export async function confirmConsentBaseline(
+  confirmed: boolean,
+  userId: string,
+) {
+  const account = confirmed ? await salesforceAccount() : null;
+  const result = await db.salesforceSuppressionSync.updateMany({
+    where: {
+      id: SYNC_ID,
+      ...(account ? { enabled: true, orgId: account.externalId } : {}),
+    },
+    data: {
+      baselineConfirmedAt: confirmed ? new Date() : null,
+      baselineConfirmedBy: confirmed ? userId : null,
+    },
+  });
+  if (confirmed && !result.count)
+    throw new AppError(
+      "Enable opt-out sync for the connected Salesforce org first.",
+      409,
+    );
+  return { ok: true };
 }
 
 export async function setSalesforceSuppressionSync(enabled: boolean) {
@@ -182,7 +213,16 @@ export async function setSalesforceSuppressionSync(enabled: boolean) {
     update: {
       enabled: true,
       orgId: account.externalId,
-      ...(sameOrg ? {} : { cursor: null, scanCursor: null, scanUntil: null }),
+      ...(sameOrg
+        ? {}
+        : {
+            cursor: null,
+            scanCursor: null,
+            scanUntil: null,
+            lastCompletedAt: null,
+            baselineConfirmedAt: null,
+            baselineConfirmedBy: null,
+          }),
       leaseUntil: null,
       error: null,
     },

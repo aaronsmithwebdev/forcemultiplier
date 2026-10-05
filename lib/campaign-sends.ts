@@ -6,6 +6,7 @@ import { db } from "./db";
 import { AppError, publicError } from "./errors";
 import { renderCampaignHtml } from "./campaign-email";
 import { normalizeFooterContent } from "./email-footers";
+import { marketingConsentReadiness } from "./consent-readiness";
 import {
   resendStatus,
   createResendBroadcast,
@@ -383,6 +384,7 @@ export async function campaignAudienceOptions(campaignId: string) {
   if (!campaign) throw new AppError("Campaign not found.", 404);
   return {
     ...campaign,
+    consent: campaign.serviceNotice ? null : await marketingConsentReadiness(),
     audiences: audiences.map((audience) => ({
       id: audience.id,
       name: audience.name,
@@ -454,6 +456,17 @@ export async function startCampaignSend(campaignId: string, userId: string) {
       "Resend Broadcasts reply to the From address. Make Reply-to match From before sending.",
       409,
     );
+  const [includeRunIds, excludeRunIds] = await Promise.all([
+    resolveRuns(campaign.audienceIds, "included"),
+    resolveRuns(campaign.exclusionAudienceIds, "excluded"),
+  ]);
+  if (!campaign.serviceNotice) {
+    const consent = await marketingConsentReadiness([
+      ...includeRunIds,
+      ...excludeRunIds,
+    ]);
+    if (!consent.ready) throw new AppError(consent.reason!, 409);
+  }
   const domain = campaign.fromEmail.split("@")[1]?.toLowerCase();
   const resend = await resendStatus();
   if (
@@ -468,10 +481,6 @@ export async function startCampaignSend(campaignId: string, userId: string) {
       "The From email must use a verified Resend sending domain.",
       409,
     );
-  const [includeRunIds, excludeRunIds] = await Promise.all([
-    resolveRuns(campaign.audienceIds, "included"),
-    resolveRuns(campaign.exclusionAudienceIds, "excluded"),
-  ]);
   try {
     return await db.campaignSend.create({
       data: {
@@ -554,8 +563,11 @@ export async function campaignSendStep(id?: string) {
   const send = id
     ? await db.campaignSend.findUnique({ where: { id } })
     : await db.campaignSend.findFirst({
-        where: { status: { in: active } },
-        orderBy: { createdAt: "asc" },
+        where: {
+          status: { in: active },
+          OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
+        },
+        orderBy: [{ updatedAt: "asc" }, { createdAt: "asc" }],
       });
   if (!send || !active.includes(send.status)) return send;
   const lease = new Date(Date.now() + 90_000);
@@ -569,7 +581,35 @@ export async function campaignSendStep(id?: string) {
   });
   if (!acquired.count)
     return db.campaignSend.findUnique({ where: { id: send.id } });
+  const waitForConsent = async () => {
+    let reason: string | null;
+    try {
+      const consent = await marketingConsentReadiness([
+        ...send.includeRunIds,
+        ...send.excludeRunIds,
+      ]);
+      if (consent.ready) return false;
+      reason = consent.reason;
+    } catch (error) {
+      reason = publicError(error).error;
+    }
+    await db.campaignSend.updateMany({
+      where: { id: send.id, leaseUntil: lease },
+      data: {
+        error: `Waiting for consent checks: ${reason} Sending resumes automatically when these checks pass.`,
+        // Retain the current stage and let other campaigns run while this waits.
+        leaseUntil: new Date(Date.now() + 60_000),
+      },
+    });
+    return true;
+  };
   try {
+    if (
+      !send.serviceNotice &&
+      send.status !== "ready" &&
+      (await waitForConsent())
+    )
+      return db.campaignSend.findUnique({ where: { id: send.id } });
     if (send.status === "pending") {
       const rows = await recipientRows(
         send.includeRunIds,
@@ -754,6 +794,8 @@ export async function campaignSendStep(id?: string) {
       });
       return db.campaignSend.findUnique({ where: { id: send.id } });
     }
+    if (await waitForConsent())
+      return db.campaignSend.findUnique({ where: { id: send.id } });
     await sendResendBroadcast(send.broadcastId);
     await db.$transaction([
       db.campaignRecipient.updateMany({

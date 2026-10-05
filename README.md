@@ -129,6 +129,18 @@ Open **Suppressions** and enable **Salesforce two-way opt-out sync** after conne
 
 The unsubscribe activity log retains the normalized email, direction, source, recorded time, Salesforce Contact ID, processing result, retries, and errors. Resend contact updates arrive through the signed webhook immediately. For Salesforce-originated records, the displayed observed time is the Contact's `SystemModstamp`; Salesforce does not expose the exact opt-out action time or originating campaign/message through this field.
 
+### Marketing consent readiness
+
+Before the first marketing send, open **Suppressions**, finish importing all approved historical unsubscribe sources, review rejected or missing addresses, and verify that a test Resend unsubscribe appears in this workspace. Record that review with **Confirm baseline**. This records the operator and confirmation time; it does not infer completeness from the number of imported addresses. Each new CSV import clears the confirmation, including partial uploads. Switching Salesforce orgs also requires a new baseline review.
+
+Marketing sends require a connected matching Salesforce org, enabled opt-out sync, `CRON_SECRET`, `RESEND_WEBHOOK_SECRET`, the baseline confirmation, and a complete Salesforce consent scan covering a boundary no more than 15 minutes old, with no current sync error. Finishing a long scan does not make its old boundary fresh: the background worker must catch up. A newer scan in progress is fine while the previous complete boundary is still fresh.
+
+These checks read only local configuration and snapshot metadata. They do not refresh audiences, scan their recipients again for consent readiness, or query Salesforce per recipient. Older audience snapshots remain usable when consent is current; existing recipient suppression checks still run. Only snapshots from the verified Salesforce org are supported; future sources such as Funraisin must establish their own consent integration before marketing eligibility is enabled.
+
+Readiness is enforced when a campaign is requested, during preparation, and immediately before Broadcast submission. A queued campaign whose consent checks become unavailable retains its stage, displays the reason, and retries automatically after a minute. Once readiness returns, recipient suppressions are checked again before sending; a newly suppressed recipient still stops that campaign for rebuilding. Service notices retain their existing marketing opt-out exception.
+
+The webhook check verifies configuration plus the operator's baseline test; it does not monitor webhook delivery health or recover missed events. Consent can lag within the 15-minute window, and these checks cannot recall a Broadcast already handed to Resend. Webhook reconciliation and the other consent-review recommendations remain separate work.
+
 ## Run a resubscription job
 
 Open **Resubscriptions** and upload a CSV with an `Email` or `Email Address` column. Choose the Constant Contact list that each successfully restored contact should join. Optional Salesforce filters match Contacts by email, require a selected field to have a value, and require an amount field to exceed a threshold; amount-filtered jobs process the largest values first.
