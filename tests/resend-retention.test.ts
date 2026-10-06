@@ -26,6 +26,10 @@ test("Resend retention uses exact calendar-day milliseconds", () => {
 
 test("cleanup preserves an unsubscribe before deleting the Resend contact", async (t) => {
   const now = new Date("2026-09-27T03:00:00.000Z");
+  mockMethod(t, Date, "now", () => now.getTime());
+  mockMethod(t, db.workspaceSettings, "findUnique", async () => ({
+    resendCleanupLeaseUntil: new Date(now.getTime() + 90000),
+  }));
   const deleted: string[] = [];
   let suppression: any;
   let event: any;
@@ -72,4 +76,31 @@ test("cleanup preserves an unsubscribe before deleting the Resend contact", asyn
   assert.equal(event.direction, "resend_to_forcemultiplier");
   assert.deepEqual(deleted, ["person@example.org"]);
   assert.deepEqual(tombstoned.data.providerContactDeletedAt, now);
+});
+
+test("cleanup that loses its lease cannot delete a contact during consent reconciliation", async (t) => {
+  const now = new Date();
+  let owner = new Date(now.getTime() + 90000);
+  let deleted = false;
+  mockMethod(t, db.workspaceSettings, "upsert", async () => ({
+    resendContactRetentionDays: 90,
+  }));
+  mockMethod(t, db.workspaceSettings, "updateMany", async () => ({ count: 1 }));
+  mockMethod(t, db.workspaceSettings, "findUnique", async () => ({
+    resendCleanupLeaseUntil: owner,
+  }));
+  mockMethod(t, db, "$queryRaw", async () => [
+    { email: "person@example.org", lastActivityAt: new Date(0) },
+  ]);
+  const result = await runResendContactCleanup(now, {
+    get: async (email) => {
+      owner = new Date(now.getTime() + 300000);
+      return { id: "contact-1", email, unsubscribed: false };
+    },
+    delete: async () => {
+      deleted = true;
+    },
+  });
+  assert.equal(deleted, false);
+  assert.deepEqual(result, { deleted: 0, remaining: true });
 });

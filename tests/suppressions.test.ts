@@ -19,6 +19,11 @@ function mockMethod(t: any, target: any, name: string, fn: any) {
 }
 
 test("suppression imports normalize, deduplicate and preserve existing rows", async (t) => {
+  mockMethod(t, db.suppression, "updateMany", async ({ where, data }: any) => {
+    assert.deepEqual(where.email.in, ["one@example.com", "two@example.com"]);
+    assert.deepEqual(data, { revision: { increment: 1 } });
+    return { count: 2 };
+  });
   mockMethod(t, db.suppression, "createMany", async ({ data }: any) => {
     assert.deepEqual(
       data.map((row: any) => row.email),
@@ -94,18 +99,25 @@ test("signed Resend unsubscribe webhooks are immediate and idempotent", async (t
     event = args;
     return { count: 1 };
   });
-  mockMethod(t, db, "$transaction", async (operations: any[]) =>
-    Promise.all(operations),
-  );
+  mockMethod(t, db, "$transaction", async (operation: any) => operation(db));
 
   assert.deepEqual(await receiveResendWebhook(payload, headers, secret, now), {
     received: true,
     suppressed: true,
   });
   assert.equal(suppression.create.email, "person@example.org");
+  assert.deepEqual(suppression.update, { revision: { increment: 1 } });
   assert.equal(event.data[0].dedupeKey, "resend:msg_1");
   assert.equal(event.data[0].direction, "resend_to_forcemultiplier");
   assert.equal(event.skipDuplicates, true);
+  mockMethod(t, db.suppressionEvent, "createMany", async () => ({ count: 0 }));
+  mockMethod(t, db.suppression, "upsert", async () => {
+    throw new Error("Duplicate webhook must not suppress again");
+  });
+  assert.deepEqual(await receiveResendWebhook(payload, headers, secret, now), {
+    received: true,
+    suppressed: false,
+  });
   await assert.rejects(
     receiveResendWebhook(`${payload} `, headers, secret, now),
     /Invalid Resend webhook/,
@@ -175,4 +187,24 @@ test("Salesforce opt-outs retain observed time and direction", () => {
     new Date("2026-09-24T23:59:00.000Z"),
   );
   assert.equal(rows.events[1].status, "invalid_email");
+});
+
+test("Salesforce observes a second opt-out for the same contact as a new audit event", () => {
+  const record = {
+    Id: "003000000000000001",
+    Email: "person@example.org",
+    HasOptedOutOfEmail: true,
+    SystemModstamp: "2026-10-01T00:00:00Z",
+  };
+  const first = salesforceOptOutRows([record], "org-1", new Date()).events[0];
+  assert.equal(
+    salesforceOptOutRows([record], "org-1", new Date()).events[0].dedupeKey,
+    first.dedupeKey,
+  );
+  const second = salesforceOptOutRows(
+    [{ ...record, SystemModstamp: "2026-10-02T00:00:00Z" }],
+    "org-1",
+    new Date(),
+  ).events[0];
+  assert.notEqual(second.dedupeKey, first.dedupeKey);
 });

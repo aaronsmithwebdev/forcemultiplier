@@ -46,7 +46,7 @@ export async function setUnsubscribeSync(
     await db.unsubscribeSync.upsert({
       where: { id: SYNC_ID },
       create: { id: SYNC_ID },
-      update: { enabled: false, leaseUntil: null },
+      update: { enabled: false },
     });
     return unsubscribeState();
   }
@@ -78,7 +78,6 @@ export async function setUnsubscribeSync(
             scanCursor: null,
             scanUntil: null,
           }),
-      leaseUntil: null,
       error: null,
     },
   });
@@ -230,7 +229,11 @@ async function scan(sync: {
   });
 }
 
-async function writeEvents(accountId: string, orgId: string) {
+async function writeEvents(
+  accountId: string,
+  orgId: string,
+  guard: () => Promise<void>,
+) {
   const events = await db.unsubscribeEvent.findMany({
     where: {
       accountId,
@@ -340,6 +343,7 @@ async function writeEvents(accountId: string, orgId: string) {
         })),
       }),
     },
+    { externalId: orgId, beforeRequest: guard, timeoutMs: 12000 },
   );
   if (!Array.isArray(result) || result.length !== updates.length)
     throw new AppError("Salesforce returned an incomplete write result.", 502);
@@ -437,7 +441,20 @@ export async function runUnsubscribeSync() {
       scanCursor: sync.scanCursor,
       scanUntil: sync.scanUntil,
     });
-    await writeEvents(sync.accountId!, sync.orgId!);
+    await writeEvents(sync.accountId!, sync.orgId!, async () => {
+      const current = await db.unsubscribeSync.findUnique({
+        where: { id: SYNC_ID },
+      });
+      if (
+        !current?.enabled ||
+        current.leaseUntil?.getTime() !== lease.getTime() ||
+        lease.getTime() - Date.now() < 15000
+      )
+        throw new AppError(
+          "Legacy opt-out writeback stopped or its lease expired.",
+          409,
+        );
+    });
     await db.unsubscribeSync.updateMany({
       where: { id: SYNC_ID, leaseUntil: lease },
       data: { leaseUntil: null },

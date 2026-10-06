@@ -210,6 +210,12 @@ async function recipientRows(
       ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
         WHERE LOWER(u.email) = i.email
+          AND NOT EXISTS (
+            SELECT 1 FROM "forcemultiplier"."MarketingResubscription" consent
+            WHERE consent.email = i.email AND consent.status = 'completed'
+              AND consent."consentAt" > u."optOutAt"
+              AND consent."createdAt" > u."discoveredAt"
+          )
       )) AS suppressed,
       EXISTS (
         SELECT 1 FROM "forcemultiplier"."Suppression" s
@@ -554,6 +560,12 @@ export async function newlySuppressedCount(sendId: string) {
       ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
         WHERE LOWER(u.email) = r.email
+          AND NOT EXISTS (
+            SELECT 1 FROM "forcemultiplier"."MarketingResubscription" consent
+            WHERE consent.email = r.email AND consent.status = 'completed'
+              AND consent."consentAt" > u."optOutAt"
+              AND consent."createdAt" > u."discoveredAt"
+          )
       ))
   `);
   return Number(row?.count ?? 0);

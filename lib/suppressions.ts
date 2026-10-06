@@ -140,6 +140,10 @@ export async function importSuppressions(
       })),
       skipDuplicates: true,
     }),
+    db.suppression.updateMany({
+      where: { email: { in: emails } },
+      data: { revision: { increment: 1 } },
+    }),
     db.suppressionEvent.createMany({
       data: emails.map((email) => ({
         dedupeKey: `csv:${hash(`${sourceRef}\0${email}`)}`,
@@ -193,7 +197,7 @@ export async function setSalesforceSuppressionSync(enabled: boolean) {
     await db.salesforceSuppressionSync.upsert({
       where: { id: SYNC_ID },
       create: { id: SYNC_ID },
-      update: { enabled: false, leaseUntil: null },
+      update: { enabled: false },
     });
     return suppressionState();
   }
@@ -223,7 +227,6 @@ export async function setSalesforceSuppressionSync(enabled: boolean) {
             baselineConfirmedAt: null,
             baselineConfirmedBy: null,
           }),
-      leaseUntil: null,
       error: null,
     },
   });
@@ -276,7 +279,7 @@ export function salesforceOptOutRows(
         occurredAt,
       });
     events.push({
-      dedupeKey: `sf_in:${orgId}:${record.Id}:${email ?? "no-email"}`,
+      dedupeKey: `sf_in:${orgId}:${record.Id}:${email ?? "no-email"}:${occurredAt.toISOString()}`,
       orgId,
       email,
       direction: TO_FORCE_MULTIPLIER,
@@ -295,7 +298,11 @@ export function salesforceOptOutRows(
   return { suppressions, events };
 }
 
-async function scanSalesforceOptOuts(sync: SyncCursor, orgId: string) {
+async function scanSalesforceOptOuts(
+  sync: SyncCursor,
+  orgId: string,
+  guard: () => Promise<void>,
+) {
   const boundary = sync.scanUntil ?? new Date();
   const path = scanPath(sync, boundary);
   const page = await providerRequest(
@@ -322,8 +329,13 @@ async function scanSalesforceOptOuts(sync: SyncCursor, orgId: string) {
     recordedAt,
   );
 
+  await guard();
   await db.$transaction([
     db.suppression.createMany({ data: suppressions, skipDuplicates: true }),
+    db.suppression.updateMany({
+      where: { email: { in: suppressions.map((row) => row.email) } },
+      data: { revision: { increment: 1 } },
+    }),
     db.suppressionEvent.createMany({ data: events, skipDuplicates: true }),
     db.salesforceSuppressionSync.update({
       where: { id: SYNC_ID },
@@ -340,6 +352,7 @@ async function scanSalesforceOptOuts(sync: SyncCursor, orgId: string) {
 }
 
 type OutboundCandidate = {
+  revision: number;
   email: string;
   source: string;
   sourceRef: string | null;
@@ -353,7 +366,7 @@ type OutboundCandidate = {
 
 async function queueOutbound(orgId: string) {
   const rows = await db.$queryRaw<OutboundCandidate[]>(Prisma.sql`
-    SELECT s.email, s.source, s."sourceRef", s."occurredAt", s."createdAt",
+    SELECT s.email, s.revision, s.source, s."sourceRef", s."occurredAt", s."createdAt",
       origin."campaignId", origin."campaignName", origin.subject,
       origin."providerMessageId"
     FROM "forcemultiplier"."Suppression" s
@@ -365,24 +378,27 @@ async function queueOutbound(orgId: string) {
       LIMIT 1
     ) origin ON TRUE
     WHERE NOT EXISTS (
+        SELECT 1 FROM "forcemultiplier"."MarketingResubscription" r
+        WHERE r.email = s.email AND r.status <> 'completed'
+          AND r."createdAt" >= s."createdAt"
+          AND r."suppressionRevision" = s.revision
+      )
+      AND NOT EXISTS (
       SELECT 1 FROM "forcemultiplier"."SuppressionEvent" e
       WHERE e.email = s.email AND e."orgId" = ${orgId}
         AND e.direction = ${TO_SALESFORCE}
+        AND e."recordedAt" >= s."createdAt"
+        AND e."suppressionRevision" = s.revision
     )
-      AND NOT EXISTS (
-        SELECT 1 FROM "forcemultiplier"."SuppressionEvent" e
-        WHERE e.email = s.email AND e."orgId" = ${orgId}
-          AND e.direction = ${TO_FORCE_MULTIPLIER}
-          AND e.status = 'recorded'
-      )
     ORDER BY s."createdAt", s.email
     LIMIT 100
   `);
   if (!rows.length) return;
   await db.suppressionEvent.createMany({
     data: rows.map((row) => ({
-      dedupeKey: `sf_out:${orgId}:${row.email}`,
+      dedupeKey: `sf_out:${orgId}:${row.email}:${row.createdAt.toISOString()}:${row.revision}`,
       orgId,
+      suppressionRevision: row.revision,
       email: row.email,
       direction: TO_SALESFORCE,
       source: row.source,
@@ -498,7 +514,7 @@ function failedEvent(event: { id: string; attempts: number }, error: string) {
   });
 }
 
-async function writeOutbound(orgId: string) {
+async function writeOutbound(orgId: string, guard: () => Promise<void>) {
   const events = await db.suppressionEvent.findMany({
     where: {
       orgId,
@@ -526,7 +542,7 @@ async function writeOutbound(orgId: string) {
         })),
       }),
     },
-    { externalId: orgId, timeoutMs: 12000 },
+    { externalId: orgId, beforeRequest: guard, timeoutMs: 12000 },
   );
   if (!Array.isArray(result) || result.length !== events.length)
     throw new AppError("Salesforce returned an incomplete opt-out write.", 502);
@@ -602,10 +618,22 @@ export async function runSalesforceSuppressionSync() {
         "The connected Salesforce org changed. Disable and re-enable opt-out sync.",
         409,
       );
-    await scanSalesforceOptOuts(sync, sync.orgId!);
+    const guard = async () => {
+      const current = await db.salesforceSuppressionSync.findUnique({
+        where: { id: SYNC_ID },
+      });
+      if (
+        !current?.enabled ||
+        current.orgId !== sync.orgId ||
+        current.leaseUntil?.getTime() !== lease.getTime() ||
+        lease.getTime() - Date.now() < 15000
+      )
+        throw new AppError("Opt-out sync lease expired. Run sync again.", 409);
+    };
+    await scanSalesforceOptOuts(sync, sync.orgId!, guard);
     await queueOutbound(sync.orgId!);
     await matchOutbound(sync.orgId!);
-    await writeOutbound(sync.orgId!);
+    await writeOutbound(sync.orgId!, guard);
     await db.salesforceSuppressionSync.updateMany({
       where: { id: SYNC_ID, leaseUntil: lease },
       data: { leaseUntil: null },

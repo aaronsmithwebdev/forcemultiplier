@@ -77,18 +77,8 @@ export async function receiveResendWebhook(
     throw new AppError("Invalid Resend contact update.", 400);
   if (!contact.unsubscribed) return { received: true };
   const recordedAt = new Date(now);
-  await db.$transaction([
-    db.suppression.upsert({
-      where: { email },
-      create: {
-        email,
-        source: "resend",
-        sourceRef: contact.id,
-        occurredAt,
-      },
-      update: {},
-    }),
-    db.suppressionEvent.createMany({
+  const suppressed = await db.$transaction(async (tx) => {
+    const event = await tx.suppressionEvent.createMany({
       data: [
         {
           dedupeKey: `resend:${webhookId}`,
@@ -102,7 +92,15 @@ export async function receiveResendWebhook(
         },
       ],
       skipDuplicates: true,
-    }),
-  ]);
-  return { received: true, suppressed: true };
+    });
+    // A retried delivery of an already-recorded webhook is not a new opt-out.
+    if (!event.count) return false;
+    await tx.suppression.upsert({
+      where: { email },
+      create: { email, source: "resend", sourceRef: contact.id, occurredAt },
+      update: { revision: { increment: 1 } },
+    });
+    return true;
+  });
+  return { received: true, suppressed };
 }

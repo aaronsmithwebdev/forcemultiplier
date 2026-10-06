@@ -1,3 +1,10 @@
+import {
+  marketingResubscriptionInput,
+  marketingResubscriptionState,
+  createMarketingResubscription,
+  verifyMarketingResubscription,
+  retryMarketingResubscription,
+} from "@/lib/marketing-resubscriptions";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { TemplateContent } from "@templatical/types";
@@ -114,7 +121,7 @@ import {
 } from "@/lib/campaign-sends";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 const credentials = z.object({
   email: z
     .email()
@@ -539,6 +546,29 @@ async function handle(
       return json(await runSalesforceSuppressionSync());
     if (key === "suppressions/salesforce-sync/retry" && method === "POST")
       return json(await retrySalesforceSuppressionEvents());
+    if (key === "marketing-resubscriptions" && method === "GET")
+      return json(await marketingResubscriptionState());
+    if (key === "marketing-resubscriptions" && method === "POST")
+      return json(
+        await createMarketingResubscription(
+          marketingResubscriptionInput.parse(await body(request)),
+          user.id,
+        ),
+      );
+    if (
+      p[0] === "marketing-resubscriptions" &&
+      p[1] &&
+      p[2] === "verify" &&
+      method === "POST"
+    )
+      return json(await verifyMarketingResubscription(z.uuid().parse(p[1])));
+    if (
+      p[0] === "marketing-resubscriptions" &&
+      p[1] &&
+      p[2] === "retry" &&
+      method === "POST"
+    )
+      return json(await retryMarketingResubscription(z.uuid().parse(p[1])));
     if (key === "resubscriptions" && method === "GET")
       return json(await resubscribeState());
     if (key === "resubscriptions" && method === "POST")

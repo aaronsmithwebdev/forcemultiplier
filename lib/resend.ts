@@ -236,3 +236,40 @@ export async function sendResendBatch(
     );
   return data.data as { id: string }[];
 }
+
+// Only the audited marketing resubscription workflow may call this helper.
+export async function resubscribeResendContact(id: string) {
+  const data = await resendRequest(`/contacts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unsubscribed: false }),
+  });
+  if (data?.id !== id)
+    throw new AppError("Resend did not confirm the contact update.", 502);
+}
+
+export async function assertNoResendSuppression(email: string) {
+  const suppression = await resendRequest(
+    `/suppressions/${encodeURIComponent(email)}`,
+    {},
+    process.env.RESEND_API_KEY,
+    fetch,
+    true,
+  );
+  if (suppression !== null)
+    throw new AppError(
+      "Resend has a delivery suppression for this address. Resubscription cannot remove delivery blocks.",
+      409,
+    );
+}
+
+export async function createBlockedResendContact(email: string) {
+  const data = await resendRequest("/contacts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, unsubscribed: true }),
+  });
+  if (typeof data?.id !== "string" || !data.id)
+    throw new AppError("Resend did not confirm contact creation.", 502);
+  return { id: data.id as string, email, unsubscribed: true };
+}

@@ -104,12 +104,12 @@ async function preserveUnsubscribe(
         sourceRef: contact.id,
         occurredAt: recordedAt,
       },
-      update: {},
+      update: { revision: { increment: 1 } },
     }),
     db.suppressionEvent.createMany({
       data: [
         {
-          dedupeKey: `resend_cleanup:${contact.id}`,
+          dedupeKey: `resend_cleanup:${contact.id}:${recordedAt.toISOString()}`,
           email,
           direction: "resend_to_forcemultiplier",
           source: "resend",
@@ -157,14 +157,35 @@ export async function runResendContactCleanup(
   if (!acquired.count) return { idle: true, deleted: 0 };
 
   let deleted = 0;
+  let interrupted = false;
   try {
     const rows = await candidates(
       resendRetentionCutoff(current.resendContactRetentionDays, now),
     );
     for (const row of rows) {
+      const active = await db.workspaceSettings.findUnique({
+        where: { id: SETTINGS_ID },
+      });
+      if (
+        active?.resendCleanupLeaseUntil?.getTime() !== leaseUntil.getTime() ||
+        leaseUntil.getTime() - Date.now() < 65000
+      ) {
+        interrupted = true;
+        break;
+      }
       const contact = await resend.get(row.email);
       if (contact) {
         await preserveUnsubscribe(row.email, contact, now);
+        const owner = await db.workspaceSettings.findUnique({
+          where: { id: SETTINGS_ID },
+        });
+        if (
+          owner?.resendCleanupLeaseUntil?.getTime() !== leaseUntil.getTime() ||
+          leaseUntil.getTime() - Date.now() < 35000
+        ) {
+          interrupted = true;
+          break;
+        }
         await resend.delete(row.email);
         deleted += 1;
       }
@@ -178,11 +199,13 @@ export async function runResendContactCleanup(
       data: {
         resendCleanupLeaseUntil: null,
         resendCleanupNextRunAt:
-          rows.length === BATCH_SIZE ? now : new Date(now.getTime() + IDLE_MS),
+          interrupted || rows.length === BATCH_SIZE
+            ? now
+            : new Date(now.getTime() + IDLE_MS),
         resendCleanupLastDeleted: deleted,
       },
     });
-    return { deleted, remaining: rows.length === BATCH_SIZE };
+    return { deleted, remaining: interrupted || rows.length === BATCH_SIZE };
   } catch (error) {
     const failure = publicError(error);
     await db.workspaceSettings.updateMany({

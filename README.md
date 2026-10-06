@@ -202,3 +202,9 @@ npm run test:smoke
 Unit tests cover OAuth state/replay/rotation, disconnect races, query restrictions, filter translation, encryption, pagination beyond 2,000, interrupted/truncated pulls, and outbound eligibility mapping. The browser smoke test verifies the login/configuration state without credentials. Set `SUPABASE_SMOKE_EMAIL` and `SUPABASE_SMOKE_PASSWORD` temporarily to include signed-in desktop/mobile pages and protected APIs. It never authorizes or writes to either provider. End-to-end provider authorization, Constant Contact imports, and org-specific report comparisons still require your real app credentials.
 
 See [the email marketing platform plan](docs/email-marketing-platform-plan.md) for the target product and Constant Contact cutover, [Salesforce source design](docs/salesforce-audience-sources.md) for audience extraction, and the [earlier Cazoomi replacement plan](docs/cazoomi-replacement-plan.md) for implementation history. The implemented scope above is authoritative for this release.
+
+### Explicit marketing resubscriptions
+
+Use **Marketing resubscriptions** to record an explicit request and its evidence, then reconcile Salesforce and Resend before releasing the local marketing block. The scope is all workspace marketing across brands. Provider failures and concurrent opt-outs keep the block in place; ambiguous writes are never automatically repeated. Refresh audience snapshots before including a resubscribed contact in a new campaign.
+
+See [the workflow, recovery rules and scenario checks](docs/marketing-resubscriptions.md). The older Constant Contact tool remains separately labeled on the same page.

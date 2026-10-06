@@ -269,6 +269,7 @@ model UnsubscribeEvent {
 }
 
 model Suppression {
+  revision   Int       @default(0)
   email      String    @id
   kind       String    @default("global_unsubscribe")
   source     String
@@ -300,6 +301,7 @@ model SalesforceSuppressionSync {
 }
 
 model SuppressionEvent {
+  suppressionRevision Int?
   id                String    @id @default(cuid())
   dedupeKey         String    @unique
   orgId             String?
@@ -594,5 +596,29 @@ model WorkspaceSettings {
   resendCleanupError         String?
   updatedAt                  DateTime  @updatedAt
 
+  @@schema("forcemultiplier")
+}
+
+model MarketingResubscription {
+  id              String    @id
+  email           String
+  scope           String    @default("all_workspace_marketing")
+  consentAt       DateTime
+  source          String
+  evidence        String    @db.Text
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  orgId           String
+  resendKeyHash   String
+  salesforceId    String?
+  resendContactId String?
+  suppressionRevision Int @default(0)
+  previousSuppression Json?
+  writeStartedAt DateTime?
+  status          String    @default("processing")
+  error           String?
+  completedAt     DateTime?
+
+  @@index([email, createdAt])
   @@schema("forcemultiplier")
 }
