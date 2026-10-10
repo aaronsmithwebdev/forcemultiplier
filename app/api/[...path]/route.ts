@@ -9,6 +9,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { TemplateContent } from "@templatical/types";
 import { db } from "@/lib/db";
+import {
+  contactMirrorState,
+  rebuildContactMirror,
+  runContactMirrorStep,
+  setContactMirrorEnabled,
+} from "@/lib/contact-mirror";
 import { AppError, publicError } from "@/lib/errors";
 import { login, logout, requireSession } from "@/lib/auth";
 import { appUrl, checkOrigin, encrypt, salesforceHost } from "@/lib/security";
@@ -216,6 +222,15 @@ async function handle(
       )
         throw new AppError("Cron authorization failed.", 401);
       return json((await campaignSendStep()) || { idle: true });
+    }
+    if (key === "cron/contact-mirror" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await runContactMirrorStep());
     }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {
@@ -659,6 +674,18 @@ async function handle(
         }),
       );
     }
+    if (key === "contact-mirror" && method === "GET")
+      return json(await contactMirrorState());
+    if (key === "contact-mirror" && method === "PUT") {
+      const { enabled } = z
+        .object({ enabled: z.boolean() })
+        .parse(await body(request));
+      return json(await setContactMirrorEnabled(enabled, user.id));
+    }
+    if (key === "contact-mirror/rebuild" && method === "POST")
+      return json(await rebuildContactMirror());
+    if (key === "contact-mirror/step" && method === "POST")
+      return json(await runContactMirrorStep());
     if (key === "unsubscribe-sync" && method === "PUT") {
       const data = z
         .object({

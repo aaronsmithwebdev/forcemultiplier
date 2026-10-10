@@ -25,6 +25,10 @@
     {
       "path": "/api/cron/campaign-sends",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/contact-mirror",
+      "schedule": "* * * * *"
     }
   ]
 }

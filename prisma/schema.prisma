@@ -622,3 +622,45 @@ model MarketingResubscription {
   @@index([email, createdAt])
   @@schema("forcemultiplier")
 }
+
+// Current, server-only Salesforce Contact fields. Consent history remains in Suppression.
+model ContactMirror {
+  orgId           String
+  salesforceId    String
+  email           String?
+  normalizedEmail String?
+  firstName       String?
+  lastName        String?
+  optedOut        Boolean
+  systemModstamp  DateTime
+  observedAt      DateTime @default(now())
+  deletedAt       DateTime?
+  lastSeenScan    String?
+
+  @@id([orgId, salesforceId])
+  @@index([orgId, normalizedEmail])
+  @@schema("forcemultiplier")
+}
+
+model ContactMirrorSync {
+  id              String    @id @default("salesforce")
+  enabled         Boolean   @default(false)
+  orgId           String?
+  phase           String    @default("bootstrap")
+  cursor          DateTime?
+  deletedThrough  DateTime?
+  scanUntil       DateTime?
+  queryCursor     String?
+  scanId          String?
+  total           Int       @default(0)
+  processed       Int       @default(0)
+  lastFullCount   Int?
+  dueAt           DateTime  @default(now())
+  lastCompletedAt DateTime?
+  leaseUntil      DateTime?
+  error           String?
+  enabledBy       String?
+  updatedAt       DateTime  @updatedAt
+
+  @@schema("forcemultiplier")
+}

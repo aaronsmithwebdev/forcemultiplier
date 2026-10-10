@@ -55,6 +55,19 @@ type ResendStatus = {
   domains: { name: string; status: string; sending: boolean }[];
   hasMore: boolean;
 };
+type MirrorStatus = {
+  enabled: boolean;
+  phase: string;
+  orgId?: string | null;
+  processed?: number;
+  total?: number;
+  lastFullCount?: number | null;
+  coveredThrough?: string | null;
+  deletedThrough?: string | null;
+  lastCompletedAt?: string | null;
+  error?: string | null;
+  schedulerReady: boolean;
+};
 export function Connections() {
   const [rows, setRows] = useState<Connection[] | null>(null),
     [error, setError] = useState(""),
@@ -86,6 +99,7 @@ export function Connections() {
             <ConnectionCard key={row.provider} row={row} refresh={load} />
           ))}
           <ResendCard />
+          <ContactMirrorCard />
         </div>
       )}
       <div className="info-strip">
@@ -99,6 +113,99 @@ export function Connections() {
         </div>
       </div>
     </>
+  );
+}
+function ContactMirrorCard() {
+  const [status, setStatus] = useState<MirrorStatus | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setStatus(await api("contact-mirror"));
+  }
+  useEffect(() => {
+    void load().catch((e) => setError(e.message));
+  }, []);
+  async function action(method: string, path: string, data?: unknown) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(path, method, data);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="card connection-card">
+      <div className="connection-card-top">
+        <span className="provider-logo salesforce">sf</span>
+        <Badge tone={status?.enabled ? "green" : ""}>
+          {status?.enabled ? "Enabled" : "Off"}
+        </Badge>
+      </div>
+      <h2>Salesforce Contact mirror</h2>
+      <p className="card-description">
+        Private, read-only copy of Contact identity and opt-out fields. This
+        first stage does not change audiences or sending.
+      </p>
+      <Notice message={error || status?.error || ""} />
+      {status ? (
+        <div className="connected-details">
+          <p>Phase: {status.phase.replaceAll("_", " ")}</p>
+          {status.orgId && <p>Salesforce org: {status.orgId}</p>}
+          {!!status.total && (
+            <p>
+              {status.processed || 0} of {status.total} records in this scan
+            </p>
+          )}
+          {status.lastFullCount !== null &&
+            status.lastFullCount !== undefined && (
+              <p>Last full Salesforce scan: {status.lastFullCount} Contacts</p>
+            )}
+          <small>
+            Contact changes covered through {date(status.coveredThrough)} ·
+            deletions through {date(status.deletedThrough)}
+          </small>
+          <small>Last complete cycle {date(status.lastCompletedAt)}</small>
+          {!status.schedulerReady && (
+            <p>Set CRON_SECRET to allow scheduled mirror steps.</p>
+          )}
+          <div className="button-row">
+            <Button
+              variant="secondary"
+              busy={busy}
+              onClick={() =>
+                void action("PUT", "contact-mirror", {
+                  enabled: !status.enabled,
+                })
+              }
+            >
+              {status.enabled ? "Pause mirror" : "Enable mirror"}
+            </Button>
+            {status.enabled && (
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void action("POST", "contact-mirror/step")}
+              >
+                <Play size={15} /> Run next step
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void load().catch((e) => setError(e.message))}
+            >
+              <RefreshCw size={15} /> Refresh
+            </Button>
+          </div>
+        </div>
+      ) : (
+        !error && <Loading />
+      )}
+    </section>
   );
 }
 function ResendCard() {

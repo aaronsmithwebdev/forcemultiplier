@@ -7,6 +7,7 @@ A private workspace growing into a complete Constant Contact replacement: Salesf
 - Supabase Auth sign-in using users managed in the Supabase dashboard.
 - Separate Salesforce and Constant Contact connection settings, OAuth callbacks, encrypted credentials, automatic token refresh, connection testing, and disconnect/reconnect.
 - Audiences from Contact SOQL queries, Contact list views, Salesforce Campaign members, and supported standard Contacts report filters.
+- An optional, private Salesforce Contact mirror that incrementally copies core identity and opt-out fields for a later audience cutover. It does not affect current audiences or sends. See [the mirror runbook](docs/salesforce-contact-mirror.md).
 - A metadata field explorer for Contact custom fields and parent relationships, including custom lookups. Selected fields are fetched separately from audience membership.
 - A 25-contact preview and resumable, paginated full pulls, including audiences larger than 2,000 records. Completed snapshots are saved in Supabase and remain visible during subsequent pulls.
 - Constant Contact list browsing, member inspection, empty-list creation, and custom-field catalog browsing.
