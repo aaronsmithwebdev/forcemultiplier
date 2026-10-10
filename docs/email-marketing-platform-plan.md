@@ -1,6 +1,6 @@
 # ForceMultiplier email marketing platform plan
 
-Updated 25 September 2026 after implementing provider-neutral suppressions and Salesforce opt-out synchronization. This is the target product scope and implementation plan. The [README](../README.md) describes what is running today. The earlier [Cazoomi replacement plan](cazoomi-replacement-plan.md) is retained as implementation history; its Constant Contact destination and unsubscribe polling no longer define the target.
+Updated 10 October 2026 for the Salesforce Contact mirror decision. This is the target product scope and implementation plan. The [Salesforce Contact and audience cutover plan](salesforce-contact-cutover-plan.md) is the working sequence for the current data architecture change. The [README](../README.md) describes what is running today. The earlier [Cazoomi replacement plan](cazoomi-replacement-plan.md) is retained as implementation history; its Constant Contact destination and unsubscribe polling no longer define the target.
 
 ## Product decision
 
@@ -62,7 +62,7 @@ Salesforce `Contact.HasOptedOutOfEmail` exposes a boolean and the Contact `Syste
 
 Use server-only Resend credentials, verified sender domains, and a signed webhook endpoint. Templatical runs in a client editor, while saving, rendering, test sends, media uploads, and publishing require authenticated server routes. Escape or validate personalization values, render a real sample recipient before approval, and retain a plain-text alternative. The current one-workspace admin access should gain at least author/reviewer/send permissions before multiple staff can launch campaigns; keep audit records of who approved and sent each one.
 
-Do not rebuild the Salesforce extractor. Its complete paginated snapshots and related-field mapping are the base. Archive sent Constant Contact emails before replacing its destination-specific delivery path with Resend contact/segment reconciliation, then add campaign sending and the Funraisin source. Do not rename or delete existing Constant Contact tables until the cutover and archive are complete and recoverable.
+Keep the existing complete paginated audience snapshots and related-field handling while validating the new private Contact mirror. Then move supported Contact-only evaluation to local rows, keep Salesforce queries for related-object membership, and remove redundant core Contact re-fetching after parity checks. The [cutover plan](salesforce-contact-cutover-plan.md) records the stages and gates. Do not rename or delete existing Constant Contact tables until the cutover and archive are complete and recoverable.
 
 ## Delivery sequence and acceptance gates
 

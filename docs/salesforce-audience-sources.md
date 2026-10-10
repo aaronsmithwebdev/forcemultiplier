@@ -2,6 +2,8 @@
 
 Plan updated 19 September 2026. The user is comfortable composing SOQL and wants to retain Salesforce reports as editable audience definitions where their criteria can be translated. The Salesforce extraction design remains relevant to the [email marketing platform plan](email-marketing-platform-plan.md). References below to Constant Contact describe the former destination, not the new target of Resend. This document does not implement new sources or change live data.
 
+**Current architecture update:** the [Salesforce Contact and audience cutover plan](salesforce-contact-cutover-plan.md) supersedes this document's earlier advice to defer a local Contact replica. Its SOQL, report, and related-object completeness rules still apply.
+
 ## Recommendation
 
 Use SOQL as the primary extraction engine. Support both directly authored SOQL and a saved Salesforce report whose supported metadata is translated into an equivalent audience query. Retain Campaigns, list views, and raw report results as additional sources, all feeding the same identity, consent, mapping, and sync engine. Prioritize the query editor, report-definition translator, and related-field browser over a complete visual condition builder.
