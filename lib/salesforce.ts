@@ -5,6 +5,7 @@ export type MetadataField = {
   name: string;
   label: string;
   type: string;
+  calculated?: boolean;
   relationshipName?: string | null;
   referenceTo?: string[];
   filterable?: boolean;
@@ -20,12 +21,17 @@ export type ObjectMetadata = {
     field: string;
   }[];
 };
-export async function describe(object: string): Promise<ObjectMetadata> {
+export async function describe(
+  object: string,
+  externalId?: string,
+): Promise<ObjectMetadata> {
   if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(object))
     throw new AppError("Invalid object name.");
   return providerRequest(
     "salesforce",
     `/services/data/${SF_VERSION}/sobjects/${object}/describe`,
+    {},
+    externalId ? { externalId } : undefined,
   );
 }
 export async function validatePaths(paths: string[]) {

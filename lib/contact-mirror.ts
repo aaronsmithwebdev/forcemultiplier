@@ -4,11 +4,14 @@ import { db } from "./db";
 import { normalizedEmail } from "./email";
 import { AppError, publicError } from "./errors";
 import { connection, providerRequest, SF_VERSION } from "./providers";
+import {
+  CORE_CONTACT_FIELDS,
+  mirrorFieldAllowed,
+} from "./contact-mirror-fields";
+import { describe } from "./salesforce";
 import { sfId } from "./soql";
 
 const SYNC_ID = "salesforce";
-const FIELDS =
-  "Id, Email, FirstName, LastName, HasOptedOutOfEmail, SystemModstamp";
 const DAY = 86_400_000;
 const MINUTE = 60_000;
 const LEASE = 90_000;
@@ -22,9 +25,33 @@ type SalesforceContact = {
   LastName?: unknown;
   HasOptedOutOfEmail: unknown;
   SystemModstamp: unknown;
+  [field: string]: unknown;
 };
 
-export function mirrorContactRow(record: SalesforceContact, orgId: string) {
+function selectedFields(value: Prisma.JsonValue): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 30 ||
+    value.some(
+      (name) =>
+        typeof name !== "string" ||
+        !/^[A-Za-z][A-Za-z0-9_]*$/.test(name) ||
+        CORE_CONTACT_FIELDS.includes(name),
+    ) ||
+    new Set(value).size !== value.length
+  )
+    throw new AppError(
+      "The Contact mirror field selection is invalid. Pause and review it.",
+      409,
+    );
+  return value as string[];
+}
+
+export function mirrorContactRow(
+  record: SalesforceContact,
+  orgId: string,
+  fields: string[] = [],
+) {
   const stamp = new Date(String(record.SystemModstamp ?? ""));
   if (
     typeof record.Id !== "string" ||
@@ -44,6 +71,29 @@ export function mirrorContactRow(record: SalesforceContact, orgId: string) {
       502,
     );
   const email = (record.Email as string | null | undefined)?.trim() || null;
+  const extraFields = Object.fromEntries(
+    fields.map((name) => {
+      const value = record[name];
+      if (
+        !Object.hasOwn(record, name) ||
+        (value !== null &&
+          typeof value !== "string" &&
+          typeof value !== "boolean" &&
+          !(typeof value === "number" && Number.isFinite(value))) ||
+        (typeof value === "string" && value.length > 4096)
+      )
+        throw new AppError(
+          "Salesforce returned an invalid selected Contact field. The mirror did not advance.",
+          502,
+        );
+      return [name, value];
+    }),
+  );
+  if (JSON.stringify(extraFields).length > 16_384)
+    throw new AppError(
+      "A selected Contact field is too large to mirror. The mirror did not advance.",
+      502,
+    );
   return {
     orgId,
     salesforceId: record.Id as string,
@@ -51,6 +101,7 @@ export function mirrorContactRow(record: SalesforceContact, orgId: string) {
     normalizedEmail: normalizedEmail(email),
     firstName: (record.FirstName as string | null | undefined) ?? null,
     lastName: (record.LastName as string | null | undefined) ?? null,
+    extraFields,
     optedOut: record.HasOptedOutOfEmail,
     systemModstamp: stamp,
   };
@@ -64,6 +115,7 @@ export async function contactMirrorState() {
         enabled: row.enabled,
         orgId: row.orgId,
         phase: row.phase,
+        fields: selectedFields(row.fields),
         processed: row.processed,
         total: row.total,
         lastFullCount: row.lastFullCount,
@@ -76,8 +128,91 @@ export async function contactMirrorState() {
     : {
         enabled: false,
         phase: "not_started",
+        fields: [],
         schedulerReady: Boolean(process.env.CRON_SECRET),
       };
+}
+
+export async function setContactMirrorFields(fields: string[]) {
+  if (
+    fields.length > 30 ||
+    new Set(fields).size !== fields.length ||
+    fields.some((name) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(name))
+  )
+    throw new AppError("Select up to 30 distinct Contact fields.");
+  const account = await connection("salesforce");
+  if (!account.tokens || !account.externalId)
+    throw new AppError(
+      "Connect Salesforce before choosing Contact fields.",
+      409,
+    );
+  const metadata = await describe("Contact", account.externalId);
+  for (const name of fields) {
+    const field = metadata.fields.find((item) => item.name === name);
+    if (!field || !mirrorFieldAllowed(field))
+      throw new AppError(
+        `Contact field ${name} cannot be mirrored. Choose a direct, non-calculated scalar field.`,
+      );
+  }
+  const current = await db.contactMirrorSync.findUnique({
+    where: { id: SYNC_ID },
+  });
+  if (current?.orgId && current.orgId !== account.externalId)
+    throw new AppError(
+      "The Salesforce org changed. Review the existing mirror first.",
+      409,
+    );
+  if (
+    current &&
+    JSON.stringify(selectedFields(current.fields)) === JSON.stringify(fields)
+  )
+    return contactMirrorState();
+  if (!current) {
+    await db.contactMirrorSync.create({
+      data: {
+        id: SYNC_ID,
+        orgId: account.externalId,
+        fields,
+      },
+    });
+  } else {
+    await db.$transaction(
+      async (tx) => {
+        const updated = await tx.contactMirrorSync.updateMany({
+          where: { id: SYNC_ID, orgId: account.externalId, enabled: false },
+          data: {
+            fields,
+            phase: "bootstrap",
+            cursor: null,
+            deletedThrough: null,
+            scanUntil: null,
+            queryCursor: null,
+            scanId: null,
+            processed: 0,
+            total: 0,
+            lastFullCount: null,
+            lastCompletedAt: null,
+            dueAt: new Date(),
+            error: null,
+            leaseUntil: null,
+          },
+        });
+        if (!updated.count)
+          throw new AppError(
+            "Pause the mirror before changing its fields.",
+            409,
+          );
+        // shortcut: Clearing a very large mirror can exceed this transaction window; batch the purge if that occurs.
+        await tx.$executeRaw`
+          UPDATE "forcemultiplier"."ContactMirror"
+          SET "extraFields" = '{}'::jsonb
+          WHERE "orgId" = ${account.externalId} AND "extraFields" <> '{}'::jsonb
+        `;
+      },
+      { timeout: 180_000 },
+    );
+  }
+  return contactMirrorState();
 }
 
 export async function setContactMirrorEnabled(
@@ -170,12 +305,17 @@ export async function rebuildContactMirror() {
 function minute(value: Date) {
   return new Date(Math.floor(value.getTime() / MINUTE) * MINUTE);
 }
-function contactQuery(phase: string, cursor: Date | null, boundary: Date) {
+function contactQuery(
+  phase: string,
+  cursor: Date | null,
+  boundary: Date,
+  fields: string[],
+) {
   const lower =
     phase === "changes" && cursor
       ? ` AND SystemModstamp >= ${new Date(cursor.getTime() - 2 * MINUTE).toISOString()}`
       : "";
-  return `SELECT ${FIELDS} FROM Contact WHERE SystemModstamp <= ${boundary.toISOString()}${lower} ORDER BY SystemModstamp, Id`;
+  return `SELECT ${[...CORE_CONTACT_FIELDS, ...fields].join(", ")} FROM Contact WHERE SystemModstamp <= ${boundary.toISOString()}${lower} ORDER BY SystemModstamp, Id`;
 }
 
 function rowValues(
@@ -186,7 +326,7 @@ function rowValues(
     rows.map(
       (r) => Prisma.sql`(
     ${r.orgId}, ${r.salesforceId}, ${r.email}, ${r.normalizedEmail},
-    ${r.firstName}, ${r.lastName}, ${r.optedOut}, ${r.systemModstamp}, NOW(), NULL, ${scanId}
+    ${r.firstName}, ${r.lastName}, ${JSON.stringify(r.extraFields)}::jsonb, ${r.optedOut}, ${r.systemModstamp}, NOW(), NULL, ${scanId}
   )`,
     ),
   );
@@ -199,9 +339,10 @@ async function saveContactPage(
 ) {
   const scanId =
     sync.phase === "bootstrap" ? (sync.scanId ?? randomUUID()) : null;
+  const fields = selectedFields(sync.fields);
   const path =
     sync.queryCursor ||
-    `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(contactQuery(sync.phase, sync.cursor, boundary))}`;
+    `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(contactQuery(sync.phase, sync.cursor, boundary, fields))}`;
   const page = await providerRequest(
     "salesforce",
     path,
@@ -225,7 +366,7 @@ async function saveContactPage(
       502,
     );
   const rows = page.records.map((record: SalesforceContact) =>
-    mirrorContactRow(record, sync.orgId!),
+    mirrorContactRow(record, sync.orgId!, fields),
   );
   if (
     rows.some(
@@ -295,11 +436,12 @@ async function saveContactPage(
       await tx.$executeRaw(Prisma.sql`
       INSERT INTO "forcemultiplier"."ContactMirror" (
         "orgId", "salesforceId", email, "normalizedEmail", "firstName", "lastName",
-        "optedOut", "systemModstamp", "observedAt", "deletedAt", "lastSeenScan"
+        "extraFields", "optedOut", "systemModstamp", "observedAt", "deletedAt", "lastSeenScan"
       ) VALUES ${rowValues(rows.slice(offset, offset + 250), scanId)}
       ON CONFLICT ("orgId", "salesforceId") DO UPDATE SET
         email = EXCLUDED.email, "normalizedEmail" = EXCLUDED."normalizedEmail",
         "firstName" = EXCLUDED."firstName", "lastName" = EXCLUDED."lastName",
+        "extraFields" = EXCLUDED."extraFields",
         "optedOut" = EXCLUDED."optedOut", "systemModstamp" = EXCLUDED."systemModstamp",
         "observedAt" = EXCLUDED."observedAt", "deletedAt" = NULL,
         "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "ContactMirror"."lastSeenScan")
@@ -309,7 +451,8 @@ async function saveContactPage(
       await tx.$executeRaw`
         UPDATE "forcemultiplier"."ContactMirror" SET
           email = NULL, "normalizedEmail" = NULL, "firstName" = NULL,
-          "lastName" = NULL, "optedOut" = true, "deletedAt" = ${boundary},
+          "lastName" = NULL, "extraFields" = '{}'::jsonb,
+          "optedOut" = true, "deletedAt" = ${boundary},
           "observedAt" = NOW()
         WHERE "orgId" = ${sync.orgId} AND "lastSeenScan" IS DISTINCT FROM ${scanId}
           AND "deletedAt" IS NULL AND "systemModstamp" <= ${boundary}
@@ -406,7 +549,7 @@ async function saveDeletedWindow(sync: ContactMirrorSync, lease: Date) {
       await tx.$executeRaw(Prisma.sql`
         UPDATE "forcemultiplier"."ContactMirror" AS c SET
           email = NULL, "normalizedEmail" = NULL, "firstName" = NULL,
-          "lastName" = NULL, "optedOut" = true,
+          "lastName" = NULL, "extraFields" = '{}'::jsonb, "optedOut" = true,
           "systemModstamp" = d."deletedAt", "deletedAt" = d."deletedAt",
           "observedAt" = NOW()
         FROM (VALUES ${values}) AS d(id, "deletedAt")

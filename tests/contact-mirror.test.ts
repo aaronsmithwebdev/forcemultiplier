@@ -6,6 +6,7 @@ import {
   contactMirrorState,
   mirrorContactRow,
   runContactMirrorStep,
+  setContactMirrorFields,
 } from "../lib/contact-mirror";
 
 function mock(t: TestContext, target: any, name: string, value: any) {
@@ -34,11 +35,13 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
     LastName: "Contact",
     HasOptedOutOfEmail: false,
     SystemModstamp: new Date(now - 5 * 60_000).toISOString(),
+    Region__c: "South",
   });
   const sync: any = {
     id: "salesforce",
     enabled: true,
     orgId: "org-1",
+    fields: ["Region__c"],
     phase: "bootstrap",
     cursor: null,
     deletedThrough: null,
@@ -130,6 +133,12 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
   assert.equal(sync.processed, 1);
   assert.ok(sync.scanId);
   assert.equal(sync.queryCursor, "/services/data/v66.0/query/locator");
+  assert.ok(
+    new URL(queries.at(-1)!).searchParams.get("q")?.includes("Region__c"),
+  );
+  assert.ok(
+    writes.some((sql) => sql.values?.includes('{"Region__c":"South"}')),
+  );
   await runContactMirrorStep();
   assert.equal(sync.phase, "changes");
   assert.equal(sync.scanId, null);
@@ -146,6 +155,7 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
   assert.ok(
     writes.some((sql) => sqlText(sql).includes('"normalizedEmail" = NULL')),
   );
+  assert.ok(writes.some((sql) => sqlText(sql).includes('"extraFields" =')));
   const status = await contactMirrorState();
   assert.equal(status.phase, "idle");
   assert.equal(JSON.stringify(status).includes("example.org"), false);
@@ -203,4 +213,119 @@ test("Contact mirror refuses malformed identity and opt-out values", () => {
   );
   assert.equal(contact.email, "Mixed.Case@Example.org");
   assert.equal(contact.normalizedEmail, "mixed.case@example.org");
+  assert.deepEqual(contact.extraFields, {});
+  assert.deepEqual(
+    mirrorContactRow(
+      {
+        Id: "003000000000000001",
+        HasOptedOutOfEmail: false,
+        SystemModstamp: new Date().toISOString(),
+        Region__c: null,
+      },
+      "org-1",
+      ["Region__c"],
+    ).extraFields,
+    { Region__c: null },
+  );
+  assert.throws(() =>
+    mirrorContactRow(
+      {
+        Id: "003000000000000001",
+        HasOptedOutOfEmail: false,
+        SystemModstamp: new Date().toISOString(),
+      },
+      "org-1",
+      ["Region__c"],
+    ),
+  );
+});
+
+test("Contact mirror field changes require a paused, same-org mirror and clear old values", async (t) => {
+  const oldKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
+  t.after(() => {
+    process.env.APP_ENCRYPTION_KEY = oldKey;
+  });
+  const sync: any = {
+    id: "salesforce",
+    enabled: false,
+    orgId: "org-1",
+    fields: ["Old__c"],
+    phase: "idle",
+    cursor: new Date(),
+    deletedThrough: new Date(),
+    lastFullCount: 10,
+    lastCompletedAt: new Date(),
+  };
+  let cleared = 0;
+  let connectedOrg = "org-1";
+  mock(t, db.connection, "findUnique", async () => ({
+    provider: "salesforce",
+    externalId: connectedOrg,
+    version: 1,
+    instanceUrl: "https://org.my.salesforce.com",
+    tokens: encrypt(
+      JSON.stringify({ accessToken: "test", refreshToken: "test" }),
+    ),
+    expiresAt: new Date(Date.now() + 3600_000),
+  }));
+  mock(t, db.contactMirrorSync, "findUnique", async () => ({ ...sync }));
+  mock(t, db.contactMirrorSync, "updateMany", async ({ where, data }: any) => {
+    if (where.enabled === false && sync.enabled) return { count: 0 };
+    Object.assign(sync, data);
+    return { count: 1 };
+  });
+  mock(t, db, "$transaction", async (fn: any) => fn(db));
+  mock(t, db, "$executeRaw", async () => {
+    cleared++;
+    return 10;
+  });
+  mock(t, globalThis, "fetch", async (url: string) => {
+    assert.match(url, /\/sobjects\/Contact\/describe$/);
+    return new Response(
+      JSON.stringify({
+        name: "Contact",
+        fields: [
+          { name: "Region__c", type: "string", calculated: false },
+          { name: "Formula__c", type: "string", calculated: true },
+          { name: "Sensitive__c", type: "encryptedstring", calculated: false },
+        ],
+      }),
+      { status: 200 },
+    );
+  });
+  await assert.rejects(
+    setContactMirrorFields(["Account.Name"]),
+    /distinct Contact fields/,
+  );
+  await assert.rejects(
+    setContactMirrorFields(["Region__c", "Region__c"]),
+    /distinct Contact fields/,
+  );
+  await assert.rejects(
+    setContactMirrorFields(["Formula__c"]),
+    /cannot be mirrored/,
+  );
+  await assert.rejects(
+    setContactMirrorFields(["Sensitive__c"]),
+    /cannot be mirrored/,
+  );
+  sync.enabled = true;
+  await assert.rejects(
+    setContactMirrorFields(["Region__c"]),
+    /Pause the mirror/,
+  );
+  assert.deepEqual(sync.fields, ["Old__c"]);
+  sync.enabled = false;
+  const state = await setContactMirrorFields(["Region__c"]);
+  assert.deepEqual(state.fields, ["Region__c"]);
+  assert.equal(sync.phase, "bootstrap");
+  assert.equal(sync.cursor, null);
+  assert.equal(sync.lastFullCount, null);
+  assert.equal(cleared, 1);
+  await setContactMirrorFields(["Region__c"]);
+  assert.equal(cleared, 1);
+  connectedOrg = "different-org";
+  await assert.rejects(setContactMirrorFields([]), /Salesforce org changed/);
+  assert.deepEqual(sync.fields, ["Region__c"]);
 });

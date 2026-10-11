@@ -14,6 +14,7 @@ import {
   rebuildContactMirror,
   runContactMirrorStep,
   setContactMirrorEnabled,
+  setContactMirrorFields,
 } from "@/lib/contact-mirror";
 import { AppError, publicError } from "@/lib/errors";
 import { login, logout, requireSession } from "@/lib/auth";
@@ -682,6 +683,12 @@ async function handle(
         .parse(await body(request));
       return json(await setContactMirrorEnabled(enabled, user.id));
     }
+    if (key === "contact-mirror/fields" && method === "PUT") {
+      const { fields } = z
+        .object({ fields: z.array(z.string().max(100)).max(30) })
+        .parse(await body(request));
+      return json(await setContactMirrorFields(fields));
+    }
     if (key === "contact-mirror/rebuild" && method === "POST")
       return json(await rebuildContactMirror());
     if (key === "contact-mirror/step" && method === "POST")
@@ -800,6 +807,7 @@ async function handle(
           name: f.name,
           label: f.label,
           type: f.type,
+          calculated: f.calculated,
           relationshipName: f.relationshipName,
           referenceTo: f.referenceTo,
           filterable: f.filterable,

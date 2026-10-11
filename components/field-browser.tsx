@@ -2,12 +2,15 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Check, ChevronRight, Search, X } from "lucide-react";
 import { api, Button, Loading, Notice } from "./common";
+import { mirrorFieldAllowed } from "@/lib/contact-mirror-fields";
 export function FieldBrowser({
   selected,
   onChange,
+  contactOnly = false,
 }: {
   selected: string[];
   onChange: (fields: string[]) => void;
+  contactOnly?: boolean;
 }) {
   const [trail, setTrail] = useState([
       { object: "Contact", prefix: "", label: "Contact" },
@@ -34,29 +37,34 @@ export function FieldBrowser({
   return (
     <div className="field-browser">
       <div className="field-browser-heading">
-        <h3>Explore Salesforce fields</h3>
+        <h3>
+          {contactOnly ? "Choose Contact fields" : "Explore Salesforce fields"}
+        </h3>
         <span className="muted">{selected.length}/30 selected</span>
       </div>
       <p>
-        Follow a related object to pick its custom fields. These values will be
-        included in your pulled contacts.
+        {contactOnly
+          ? "Choose direct Contact fields to copy for every mirrored Contact. Related and calculated fields stay in Salesforce queries."
+          : "Follow a related object to pick its custom fields. These values will be included in your pulled contacts."}
       </p>
-      <div className="breadcrumbs">
-        {trail.map((step, i) => (
-          <span key={i}>
-            <button
-              type="button"
-              onClick={() => {
-                setTrail(trail.slice(0, i + 1));
-                setSearch("");
-              }}
-            >
-              {step.label}
-            </button>
-            {i < trail.length - 1 && <ChevronRight size={13} />}
-          </span>
-        ))}
-      </div>
+      {!contactOnly && (
+        <div className="breadcrumbs">
+          {trail.map((step, i) => (
+            <span key={i}>
+              <button
+                type="button"
+                onClick={() => {
+                  setTrail(trail.slice(0, i + 1));
+                  setSearch("");
+                }}
+              >
+                {step.label}
+              </button>
+              {i < trail.length - 1 && <ChevronRight size={13} />}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="search-box">
         <Search size={16} />
         <input
@@ -72,6 +80,7 @@ export function FieldBrowser({
       ) : (
         <div className="field-list">
           {data?.fields
+            .filter((f: any) => !contactOnly || mirrorFieldAllowed(f))
             .filter((f: any) =>
               (f.label + " " + f.name)
                 .toLowerCase()
@@ -105,7 +114,7 @@ export function FieldBrowser({
                       <small>{path}</small>
                     </span>
                   </button>
-                  {f.relationshipName && (
+                  {!contactOnly && f.relationshipName && (
                     <button
                       type="button"
                       className="relationship-button"
@@ -153,9 +162,11 @@ export function FieldBrowser({
         ))}
       </div>
       <small className="muted">
-        Contact ID, name, email and email opt-out are always included. Child
-        collections and polymorphic lookups need a dedicated extraction rule and
-        are not selectable yet.
+        Contact ID, first and last name, email, email opt-out and modification
+        time are always included.
+        {contactOnly
+          ? " Long text, encrypted, calculated and related fields are unavailable here."
+          : " Child collections and polymorphic lookups need a dedicated extraction rule and are not selectable yet."}
       </small>
     </div>
   );

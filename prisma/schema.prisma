@@ -631,6 +631,7 @@ model ContactMirror {
   normalizedEmail String?
   firstName       String?
   lastName        String?
+  extraFields     Json     @default("{}")
   optedOut        Boolean
   systemModstamp  DateTime
   observedAt      DateTime @default(now())
@@ -646,6 +647,7 @@ model ContactMirrorSync {
   id              String    @id @default("salesforce")
   enabled         Boolean   @default(false)
   orgId           String?
+  fields          Json      @default("[]")
   phase           String    @default("bootstrap")
   cursor          DateTime?
   deletedThrough  DateTime?

@@ -20,6 +20,7 @@ import {
   Loading,
   Notice,
 } from "./common";
+import { FieldBrowser } from "./field-browser";
 type Connection = {
   provider: string;
   clientId: string;
@@ -57,6 +58,7 @@ type ResendStatus = {
 };
 type MirrorStatus = {
   enabled: boolean;
+  fields: string[];
   phase: string;
   orgId?: string | null;
   processed?: number;
@@ -117,10 +119,13 @@ export function Connections() {
 }
 function ContactMirrorCard() {
   const [status, setStatus] = useState<MirrorStatus | null>(null);
+  const [fields, setFields] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function load() {
-    setStatus(await api("contact-mirror"));
+    const next = await api("contact-mirror");
+    setStatus(next);
+    setFields(next.fields);
   }
   useEffect(() => {
     void load().catch((e) => setError(e.message));
@@ -147,8 +152,8 @@ function ContactMirrorCard() {
       </div>
       <h2>Salesforce Contact mirror</h2>
       <p className="card-description">
-        Private, read-only copy of Contact identity and opt-out fields. This
-        first stage does not change audiences or sending.
+        Private, read-only copy of Contact identity, opt-out and selected
+        fields. This stage does not change audiences or sending.
       </p>
       <Notice message={error || status?.error || ""} />
       {status ? (
@@ -172,10 +177,49 @@ function ContactMirrorCard() {
           {!status.schedulerReady && (
             <p>Set CRON_SECRET to allow scheduled mirror steps.</p>
           )}
+          <p>
+            Always copied: Contact ID, email, first and last name, email
+            opt-out, modification time.
+          </p>
+          {status.enabled ? (
+            <p>
+              Additional fields:{" "}
+              {status.fields.length ? status.fields.join(", ") : "None"}. Pause
+              the mirror to edit them.
+            </p>
+          ) : (
+            <>
+              <FieldBrowser
+                selected={fields}
+                onChange={setFields}
+                contactOnly
+              />
+              <p>
+                Saving a changed selection clears old optional values and starts
+                a full Contact rescan when enabled.
+              </p>
+              <Button
+                variant="secondary"
+                busy={busy}
+                disabled={
+                  JSON.stringify(fields) === JSON.stringify(status.fields)
+                }
+                onClick={() =>
+                  void action("PUT", "contact-mirror/fields", { fields })
+                }
+              >
+                Save selected fields
+              </Button>
+            </>
+          )}
           <div className="button-row">
             <Button
               variant="secondary"
               busy={busy}
+              disabled={
+                !status.enabled &&
+                JSON.stringify(fields) !== JSON.stringify(status.fields)
+              }
               onClick={() =>
                 void action("PUT", "contact-mirror", {
                   enabled: !status.enabled,
