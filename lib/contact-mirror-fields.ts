@@ -27,14 +27,25 @@ const SCALAR_TYPES = new Set([
   "reference",
 ]);
 
-export function mirrorFieldAllowed(field: {
+type ContactField = {
   name: string;
   type: string;
   calculated?: boolean;
-}) {
-  return (
-    !CORE_CONTACT_FIELDS.includes(field.name) &&
-    !field.calculated &&
-    SCALAR_TYPES.has(field.type)
-  );
+};
+
+export function mirrorFieldReason(field: ContactField): string | null {
+  if (CORE_CONTACT_FIELDS.includes(field.name)) return "Always included";
+  if (field.calculated)
+    return "Calculated field: can change without a Contact update";
+  if (field.type === "textarea") return "Long text is not mirrored";
+  if (field.type === "encryptedstring")
+    return "Encrypted fields are not mirrored";
+  if (["address", "location"].includes(field.type))
+    return "Choose individual component fields";
+  if (!SCALAR_TYPES.has(field.type)) return "This field type is not mirrored";
+  return null;
+}
+
+export function mirrorFieldAllowed(field: ContactField) {
+  return mirrorFieldReason(field) === null;
 }

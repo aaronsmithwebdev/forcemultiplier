@@ -3,6 +3,10 @@ import test, { type TestContext } from "node:test";
 import { db } from "../lib/db";
 import { encrypt } from "../lib/security";
 import {
+  mirrorFieldAllowed,
+  mirrorFieldReason,
+} from "../lib/contact-mirror-fields";
+import {
   contactMirrorState,
   mirrorContactRow,
   runContactMirrorStep,
@@ -237,6 +241,28 @@ test("Contact mirror refuses malformed identity and opt-out values", () => {
       "org-1",
       ["Region__c"],
     ),
+  );
+});
+
+test("Contact field catalog explains unavailable fields without making them selectable", () => {
+  const formula = {
+    name: "All_Mito_Connections__c",
+    type: "string",
+    calculated: true,
+  };
+  assert.match(mirrorFieldReason(formula)!, /Calculated field/);
+  assert.equal(mirrorFieldAllowed(formula), false);
+  assert.equal(
+    mirrorFieldReason({ name: "Email", type: "email" }),
+    "Always included",
+  );
+  assert.match(
+    mirrorFieldReason({ name: "Notes__c", type: "textarea" })!,
+    /Long text/,
+  );
+  assert.equal(
+    mirrorFieldReason({ name: "Connection_to_Mito__c", type: "string" }),
+    null,
   );
 });
 
