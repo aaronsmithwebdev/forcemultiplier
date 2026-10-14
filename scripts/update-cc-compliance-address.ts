@@ -294,7 +294,7 @@ async function main() {
       );
       if (counts.scanned % 50 === 0) console.log(JSON.stringify(counts));
     };
-    const batchSize = max === Infinity ? 16 : 1;
+    const batchSize = max === Infinity ? 4 : 1;
     for (let i = 0; i < campaigns.length; i += batchSize) {
       if ((mode === "apply" ? counts.changed : counts.scanned) >= max) break;
       const results = await Promise.allSettled(
