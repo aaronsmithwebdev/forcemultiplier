@@ -49,6 +49,15 @@ export function editable(activity: any) {
   );
 }
 
+export function hasRequiredHeaders(activity: any) {
+  return [
+    activity.from_name,
+    activity.from_email,
+    activity.reply_to_email,
+    activity.subject,
+  ].every((value) => typeof value === "string" && value.trim());
+}
+
 async function main() {
   const [mode, arg, extra] = process.argv.slice(2);
   const backupPath = mode === "apply" ? arg : undefined;
@@ -133,7 +142,13 @@ async function main() {
   const activityIds = new Map(
     archived.map((row) => [row.campaignId, row.activityId]),
   );
-  const counts = { scanned: 0, changed: 0, alreadyCurrent: 0, unsupported: 0 };
+  const counts = {
+    scanned: 0,
+    changed: 0,
+    alreadyCurrent: 0,
+    unsupported: 0,
+    failed: 0,
+  };
   const addresses = new Map<string, number>();
   const seen = new Set<string>();
   let path: string | null = "/v3/emails?limit=500";
@@ -162,6 +177,12 @@ async function main() {
         )
       ) {
         counts.unsupported++;
+        console.log(
+          JSON.stringify({
+            skipped: campaign.name,
+            reason: "Campaign status is not draft or done",
+          }),
+        );
         return;
       }
       let activityId = activityIds.get(campaign.campaign_id);
@@ -179,6 +200,12 @@ async function main() {
       }
       if (!activityId) {
         counts.unsupported++;
+        console.log(
+          JSON.stringify({
+            skipped: campaign.name,
+            reason: "No primary email activity",
+          }),
+        );
         return;
       }
       const activityPath = `/v3/emails/activities/${encodeURIComponent(activityId)}`;
@@ -187,6 +214,12 @@ async function main() {
       );
       if (!editable(activity)) {
         counts.unsupported++;
+        console.log(
+          JSON.stringify({
+            skipped: campaign.name,
+            reason: "Activity status or format cannot be updated",
+          }),
+        );
         return;
       }
       const current = activity.physical_address_in_footer || {};
@@ -204,6 +237,16 @@ async function main() {
         counts.alreadyCurrent++;
         return;
       }
+      if (!hasRequiredHeaders(activity)) {
+        counts.unsupported++;
+        console.log(
+          JSON.stringify({
+            skipped: campaign.name,
+            reason: "Activity is missing required email headers",
+          }),
+        );
+        return;
+      }
       if (mode === "plan") {
         counts.changed++;
         return;
@@ -213,13 +256,28 @@ async function main() {
         JSON.stringify({ campaign: campaign.name, activity }) + "\n",
       );
       fsyncSync(backup!);
-      const result = await call(activityPath, {
-        method: "PUT",
-        body: JSON.stringify({
-          ...activity,
-          physical_address_in_footer: replacement,
-        }),
-      });
+      let result;
+      try {
+        result = await call(activityPath, {
+          method: "PUT",
+          body: JSON.stringify({
+            ...activity,
+            physical_address_in_footer: replacement,
+          }),
+        });
+      } catch (error) {
+        if (!String(error).includes("Provider request failed (400"))
+          throw error;
+        counts.failed++;
+        console.log(
+          JSON.stringify({
+            failed: campaign.name,
+            activityId,
+            error: String(error),
+          }),
+        );
+        return;
+      }
       const verified = result.physical_address_in_footer
         ? result
         : await call(activityPath + "?include=physical_address_in_footer");
@@ -236,7 +294,7 @@ async function main() {
       );
       if (counts.scanned % 50 === 0) console.log(JSON.stringify(counts));
     };
-    const batchSize = max === Infinity ? 4 : 1;
+    const batchSize = max === Infinity ? 16 : 1;
     for (let i = 0; i < campaigns.length; i += batchSize) {
       if ((mode === "apply" ? counts.changed : counts.scanned) >= max) break;
       const results = await Promise.allSettled(

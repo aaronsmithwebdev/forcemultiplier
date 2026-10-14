@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   editable,
+  hasRequiredHeaders,
   sameAddress,
   updatedAddress,
 } from "../scripts/update-cc-compliance-address";
@@ -64,6 +65,23 @@ test("only draft or supported sent primary activities are changed", () => {
       role: "primary_email",
       current_status: "SCHEDULED",
       format_type: 4,
+    }),
+    false,
+  );
+  assert.equal(
+    hasRequiredHeaders({
+      from_name: "Mito",
+      from_email: "a@example.com",
+      reply_to_email: "a@example.com",
+      subject: "News",
+    }),
+    true,
+  );
+  assert.equal(
+    hasRequiredHeaders({
+      from_name: "Mito",
+      reply_to_email: "a@example.com",
+      subject: "News",
     }),
     false,
   );
