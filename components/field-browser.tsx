@@ -118,6 +118,9 @@ export function FieldBrowser({
                     {f.label}
                     <small>{path}</small>
                     {reason && <small>{reason}</small>}
+                    {contactOnly && f.calculated && !reason && (
+                      <small>Salesforce formula</small>
+                    )}
                   </span>
                 </button>
                 {!contactOnly && f.relationshipName && (

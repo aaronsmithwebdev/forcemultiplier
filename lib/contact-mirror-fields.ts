@@ -27,6 +27,13 @@ const SCALAR_TYPES = new Set([
   "reference",
 ]);
 
+// shortcut: Formula edits need a reviewed mirror rebuild; add definition checks if edits become routine.
+const CONTACT_ONLY_FORMULAS = new Set([
+  "Donor_Type__c",
+  "mito_Registry__c",
+  "All_Mito_Connections__c",
+]);
+
 type ContactField = {
   name: string;
   type: string;
@@ -35,7 +42,7 @@ type ContactField = {
 
 export function mirrorFieldReason(field: ContactField): string | null {
   if (CORE_CONTACT_FIELDS.includes(field.name)) return "Always included";
-  if (field.calculated)
+  if (field.calculated && !CONTACT_ONLY_FORMULAS.has(field.name))
     return "Calculated field: can change without a Contact update";
   if (field.type === "textarea") return "Long text is not mirrored";
   if (field.type === "encryptedstring")

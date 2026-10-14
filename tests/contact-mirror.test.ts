@@ -225,11 +225,24 @@ test("Contact mirror refuses malformed identity and opt-out values", () => {
         HasOptedOutOfEmail: false,
         SystemModstamp: new Date().toISOString(),
         Region__c: null,
+        Donor_Type__c: "Major Donor - Tier 1",
+        mito_Registry__c: true,
+        All_Mito_Connections__c: "Self; ",
       },
       "org-1",
-      ["Region__c"],
+      [
+        "Region__c",
+        "Donor_Type__c",
+        "mito_Registry__c",
+        "All_Mito_Connections__c",
+      ],
     ).extraFields,
-    { Region__c: null },
+    {
+      Region__c: null,
+      Donor_Type__c: "Major Donor - Tier 1",
+      mito_Registry__c: true,
+      All_Mito_Connections__c: "Self; ",
+    },
   );
   assert.throws(() =>
     mirrorContactRow(
@@ -246,12 +259,21 @@ test("Contact mirror refuses malformed identity and opt-out values", () => {
 
 test("Contact field catalog explains unavailable fields without making them selectable", () => {
   const formula = {
-    name: "All_Mito_Connections__c",
+    name: "Other_Formula__c",
     type: "string",
     calculated: true,
   };
   assert.match(mirrorFieldReason(formula)!, /Calculated field/);
   assert.equal(mirrorFieldAllowed(formula), false);
+  for (const name of [
+    "Donor_Type__c",
+    "mito_Registry__c",
+    "All_Mito_Connections__c",
+  ])
+    assert.equal(
+      mirrorFieldAllowed({ name, type: "string", calculated: true }),
+      true,
+    );
   assert.equal(
     mirrorFieldReason({ name: "Email", type: "email" }),
     "Always included",
@@ -314,6 +336,7 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
         fields: [
           { name: "Region__c", type: "string", calculated: false },
           { name: "Formula__c", type: "string", calculated: true },
+          { name: "Donor_Type__c", type: "string", calculated: true },
           { name: "Sensitive__c", type: "encryptedstring", calculated: false },
         ],
       }),
@@ -332,6 +355,12 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
     setContactMirrorFields(["Formula__c"]),
     /cannot be mirrored/,
   );
+  sync.enabled = true;
+  await assert.rejects(
+    setContactMirrorFields(["Donor_Type__c"]),
+    /Pause the mirror/,
+  );
+  sync.enabled = false;
   await assert.rejects(
     setContactMirrorFields(["Sensitive__c"]),
     /cannot be mirrored/,
@@ -343,15 +372,15 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
   );
   assert.deepEqual(sync.fields, ["Old__c"]);
   sync.enabled = false;
-  const state = await setContactMirrorFields(["Region__c"]);
-  assert.deepEqual(state.fields, ["Region__c"]);
+  const state = await setContactMirrorFields(["Region__c", "Donor_Type__c"]);
+  assert.deepEqual(state.fields, ["Region__c", "Donor_Type__c"]);
   assert.equal(sync.phase, "bootstrap");
   assert.equal(sync.cursor, null);
   assert.equal(sync.lastFullCount, null);
   assert.equal(cleared, 1);
-  await setContactMirrorFields(["Region__c"]);
+  await setContactMirrorFields(["Region__c", "Donor_Type__c"]);
   assert.equal(cleared, 1);
   connectedOrg = "different-org";
   await assert.rejects(setContactMirrorFields([]), /Salesforce org changed/);
-  assert.deepEqual(sync.fields, ["Region__c"]);
+  assert.deepEqual(sync.fields, ["Region__c", "Donor_Type__c"]);
 });

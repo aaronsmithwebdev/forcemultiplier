@@ -151,7 +151,7 @@ export async function setContactMirrorFields(fields: string[]) {
     const field = metadata.fields.find((item) => item.name === name);
     if (!field || !mirrorFieldAllowed(field))
       throw new AppError(
-        `Contact field ${name} cannot be mirrored. Choose a direct, non-calculated scalar field.`,
+        `Contact field ${name} cannot be mirrored. Choose a supported Contact field.`,
       );
   }
   const current = await db.contactMirrorSync.findUnique({
