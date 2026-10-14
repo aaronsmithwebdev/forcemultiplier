@@ -1,15 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type ContactMirrorSync } from "@prisma/client";
+import { z } from "zod";
 import { db } from "./db";
 import { normalizedEmail } from "./email";
 import { AppError, publicError } from "./errors";
 import { connection, providerRequest, SF_VERSION } from "./providers";
 import {
   CORE_CONTACT_FIELDS,
+  mirrorExclusionFieldAllowed,
   mirrorFieldAllowed,
 } from "./contact-mirror-fields";
+import {
+  buildContactCondition,
+  buildContactQuery,
+  type QueryGroup,
+} from "./query-builder";
 import { describe } from "./salesforce";
-import { sfId } from "./soql";
+import { sfId, validateQuery } from "./soql";
 
 const SYNC_ID = "salesforce";
 const DAY = 86_400_000;
@@ -17,6 +24,20 @@ const MINUTE = 60_000;
 const LEASE = 90_000;
 // ponytail: Bulk delete days above this limit require a full rebuild; add adaptive time windows if this occurs.
 const MAX_DELETIONS = 2000;
+const EMPTY_EXCLUSIONS: QueryGroup = { conjunction: "AND", items: [] };
+const filterSchema = z.object({
+  field: z.string().max(100),
+  type: z.string().max(40),
+  operator: z.string().max(40),
+  value: z.string().max(200),
+  conjunction: z.enum(["AND", "OR"]),
+});
+const groupSchema: z.ZodType<QueryGroup> = z.lazy(() =>
+  z.object({
+    conjunction: z.enum(["AND", "OR"]),
+    items: z.array(z.union([filterSchema, groupSchema])).max(20),
+  }),
+);
 
 type SalesforceContact = {
   Id: unknown;
@@ -45,6 +66,24 @@ function selectedFields(value: Prisma.JsonValue): string[] {
       409,
     );
   return value as string[];
+}
+
+function selectedExclusions(value: Prisma.JsonValue): QueryGroup {
+  const rules = groupSchema.safeParse(value);
+  if (!rules.success)
+    throw new AppError(
+      "The Contact mirror exclusions are invalid. Pause and review them.",
+      409,
+    );
+  try {
+    buildContactQuery(rules.data);
+  } catch {
+    throw new AppError(
+      "The Contact mirror exclusions are invalid. Pause and review them.",
+      409,
+    );
+  }
+  return rules.data;
 }
 
 export function mirrorContactRow(
@@ -116,9 +155,11 @@ export async function contactMirrorState() {
         orgId: row.orgId,
         phase: row.phase,
         fields: selectedFields(row.fields),
+        exclusions: selectedExclusions(row.exclusions),
         processed: row.processed,
         total: row.total,
-        lastFullCount: row.lastFullCount,
+        lastFullCount:
+          row.phase === "excluded" && row.scanId ? null : row.lastFullCount,
         coveredThrough: row.cursor,
         deletedThrough: row.deletedThrough,
         lastCompletedAt: row.lastCompletedAt,
@@ -129,8 +170,107 @@ export async function contactMirrorState() {
         enabled: false,
         phase: "not_started",
         fields: [],
+        exclusions: EMPTY_EXCLUSIONS,
         schedulerReady: Boolean(process.env.CRON_SECRET),
       };
+}
+
+export async function setContactMirrorExclusions(value: unknown) {
+  const parsed = groupSchema.safeParse(value);
+  if (!parsed.success)
+    throw new AppError("Choose valid exclusion groups and conditions.");
+  const rules = parsed.data;
+  try {
+    validateQuery(buildContactQuery(rules));
+  } catch (error) {
+    throw new AppError(
+      error instanceof Error ? error.message : "Invalid exclusions.",
+    );
+  }
+  const account = await connection("salesforce");
+  if (!account.tokens || !account.externalId)
+    throw new AppError(
+      "Connect Salesforce before setting mirror exclusions.",
+      409,
+    );
+  const current = await db.contactMirrorSync.findUnique({
+    where: { id: SYNC_ID },
+  });
+  if (current?.orgId && current.orgId !== account.externalId)
+    throw new AppError(
+      "The Salesforce org changed. Review the existing mirror first.",
+      409,
+    );
+  if (
+    current &&
+    JSON.stringify(selectedExclusions(current.exclusions)) ===
+      JSON.stringify(rules)
+  )
+    return contactMirrorState();
+  const metadata = await describe("Contact", account.externalId);
+  function check(group: QueryGroup) {
+    for (const item of group.items) {
+      if ("items" in item) check(item);
+      else {
+        const field = metadata.fields.find(
+          (candidate) => candidate.name === item.field,
+        );
+        if (
+          !field ||
+          !mirrorExclusionFieldAllowed(field) ||
+          field.type !== item.type
+        )
+          throw new AppError(
+            `Contact field ${item.field} cannot be used for mirror exclusions.`,
+          );
+      }
+    }
+  }
+  check(rules);
+  const condition = buildContactCondition(rules);
+  if (condition)
+    await Promise.all(
+      [`(${condition})`, `(NOT (${condition}))`].map((where) =>
+        providerRequest(
+          "salesforce",
+          `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(`SELECT Id FROM Contact WHERE ${where} LIMIT 1`)}`,
+          {},
+          { externalId: account.externalId! },
+        ),
+      ),
+    );
+  if (!current) {
+    await db.contactMirrorSync.create({
+      data: {
+        id: SYNC_ID,
+        orgId: account.externalId,
+        exclusions: rules as Prisma.InputJsonValue,
+      },
+    });
+  } else {
+    const updated = await db.contactMirrorSync.updateMany({
+      where: { id: SYNC_ID, orgId: account.externalId, enabled: false },
+      data: {
+        exclusions: rules as Prisma.InputJsonValue,
+        phase: "bootstrap",
+        cursor: null,
+        deletedThrough: null,
+        scanUntil: null,
+        queryCursor: null,
+        scanId: null,
+        processed: 0,
+        total: 0,
+        lastFullCount: null,
+        lastCompletedAt: null,
+        dueAt: new Date(),
+        error: null,
+        leaseUntil: null,
+      },
+    });
+    if (!updated.count)
+      throw new AppError("Pause the mirror before changing exclusions.", 409);
+  }
+  return contactMirrorState();
 }
 
 export async function setContactMirrorFields(fields: string[]) {
@@ -310,12 +450,14 @@ function contactQuery(
   cursor: Date | null,
   boundary: Date,
   fields: string[],
+  exclusions: QueryGroup,
 ) {
   const lower =
     phase === "changes" && cursor
       ? ` AND SystemModstamp >= ${new Date(cursor.getTime() - 2 * MINUTE).toISOString()}`
       : "";
-  return `SELECT ${[...CORE_CONTACT_FIELDS, ...fields].join(", ")} FROM Contact WHERE SystemModstamp <= ${boundary.toISOString()}${lower} ORDER BY SystemModstamp, Id`;
+  const excluded = buildContactCondition(exclusions);
+  return `SELECT ${[...CORE_CONTACT_FIELDS, ...fields].join(", ")} FROM Contact WHERE SystemModstamp <= ${boundary.toISOString()}${lower}${excluded ? ` AND (NOT (${excluded}))` : ""} ORDER BY SystemModstamp, Id`;
 }
 
 function rowValues(
@@ -340,9 +482,10 @@ async function saveContactPage(
   const scanId =
     sync.phase === "bootstrap" ? (sync.scanId ?? randomUUID()) : null;
   const fields = selectedFields(sync.fields);
+  const exclusions = selectedExclusions(sync.exclusions);
   const path =
     sync.queryCursor ||
-    `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(contactQuery(sync.phase, sync.cursor, boundary, fields))}`;
+    `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(contactQuery(sync.phase, sync.cursor, boundary, fields, exclusions))}`;
   const page = await providerRequest(
     "salesforce",
     path,
@@ -393,30 +536,43 @@ async function saveContactPage(
         leaseUntil: lease,
       },
       data: page.done
-        ? sync.phase === "bootstrap"
+        ? buildContactCondition(exclusions)
           ? {
-              phase: "changes",
-              cursor: boundary,
-              deletedThrough: boundary,
-              scanUntil: null,
-              queryCursor: null,
-              scanId: null,
-              processed: 0,
-              total: 0,
-              lastFullCount: processed,
-              error: null,
-              leaseUntil: null,
-            }
-          : {
-              phase: "deletions",
-              cursor: boundary,
+              phase: "excluded",
               scanUntil: boundary,
               queryCursor: null,
+              scanId,
               processed: 0,
               total: 0,
+              lastFullCount:
+                sync.phase === "bootstrap" ? processed : sync.lastFullCount,
               error: null,
               leaseUntil: null,
             }
+          : sync.phase === "bootstrap"
+            ? {
+                phase: "changes",
+                cursor: boundary,
+                deletedThrough: boundary,
+                scanUntil: null,
+                queryCursor: null,
+                scanId: null,
+                processed: 0,
+                total: 0,
+                lastFullCount: processed,
+                error: null,
+                leaseUntil: null,
+              }
+            : {
+                phase: "deletions",
+                cursor: boundary,
+                scanUntil: boundary,
+                queryCursor: null,
+                processed: 0,
+                total: 0,
+                error: null,
+                leaseUntil: null,
+              }
         : {
             scanUntil: boundary,
             queryCursor: page.nextRecordsUrl,
@@ -460,6 +616,118 @@ async function saveContactPage(
   });
   return {
     phase: sync.phase,
+    processed,
+    total: page.totalSize,
+    done: page.done,
+  };
+}
+
+async function saveExcludedPage(sync: ContactMirrorSync, lease: Date) {
+  const boundary = sync.scanUntil!;
+  const excluded = buildContactCondition(selectedExclusions(sync.exclusions));
+  if (!excluded)
+    throw new AppError(
+      "The mirror exclusion rules changed. Rebuild the mirror.",
+      409,
+    );
+  const lower =
+    sync.scanId || !sync.cursor
+      ? ""
+      : ` AND SystemModstamp >= ${new Date(sync.cursor.getTime() - 2 * MINUTE).toISOString()}`;
+  const path =
+    sync.queryCursor ||
+    `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(`SELECT Id FROM Contact WHERE SystemModstamp <= ${boundary.toISOString()}${lower} AND (${excluded}) ORDER BY SystemModstamp, Id`)}`;
+  const page = await providerRequest(
+    "salesforce",
+    path,
+    { headers: { "Sforce-Query-Options": "batchSize=2000" } },
+    { externalId: sync.orgId!, timeoutMs: 25000 },
+  );
+  if (
+    !Array.isArray(page?.records) ||
+    typeof page.done !== "boolean" ||
+    (!page.done &&
+      (typeof page.nextRecordsUrl !== "string" ||
+        !page.nextRecordsUrl.startsWith(
+          `/services/data/${SF_VERSION}/query/`,
+        ) ||
+        page.nextRecordsUrl === path)) ||
+    !Number.isSafeInteger(page.totalSize) ||
+    page.totalSize < 0
+  )
+    throw new AppError(
+      "Salesforce returned an incomplete exclusion page. The mirror did not advance.",
+      502,
+    );
+  const ids = page.records.map((record: { Id?: unknown }) => record?.Id);
+  if (
+    ids.some((id: unknown) => typeof id !== "string" || !sfId(id)) ||
+    new Set(ids).size !== ids.length
+  )
+    throw new AppError(
+      "Salesforce returned invalid exclusion IDs. The mirror did not advance.",
+      502,
+    );
+  const processed = sync.processed + ids.length;
+  if (processed > page.totalSize || (page.done && processed !== page.totalSize))
+    throw new AppError(
+      "The exclusion count changed during extraction. Restart the mirror scan.",
+      409,
+    );
+  await db.$transaction(async (tx) => {
+    const owner = await tx.contactMirrorSync.updateMany({
+      where: {
+        id: SYNC_ID,
+        enabled: true,
+        orgId: sync.orgId,
+        leaseUntil: lease,
+      },
+      data: page.done
+        ? sync.scanId
+          ? {
+              phase: "changes",
+              cursor: boundary,
+              deletedThrough: boundary,
+              scanUntil: null,
+              queryCursor: null,
+              scanId: null,
+              processed: 0,
+              total: 0,
+              error: null,
+              leaseUntil: null,
+            }
+          : {
+              phase: "deletions",
+              cursor: boundary,
+              scanUntil: boundary,
+              queryCursor: null,
+              processed: 0,
+              total: 0,
+              error: null,
+              leaseUntil: null,
+            }
+        : {
+            queryCursor: page.nextRecordsUrl,
+            processed,
+            total: page.totalSize,
+            error: null,
+            leaseUntil: null,
+          },
+    });
+    if (!owner.count || lease.getTime() <= Date.now())
+      throw new AppError(
+        "The mirror lease expired. Retry this exclusion page.",
+        409,
+      );
+    if (ids.length)
+      await tx.$executeRaw(Prisma.sql`
+        DELETE FROM "forcemultiplier"."ContactMirror"
+        WHERE "orgId" = ${sync.orgId} AND "salesforceId" IN (${Prisma.join(ids as string[])})
+          AND "systemModstamp" <= ${boundary}
+      `);
+  });
+  return {
+    phase: "excluded",
     processed,
     total: page.totalSize,
     done: page.done,
@@ -645,6 +913,7 @@ export async function runContactMirrorStep() {
       const result = await saveContactPage(sync, lease, boundary);
       return result;
     }
+    if (sync.phase === "excluded") return await saveExcludedPage(sync, lease);
     if (sync.phase === "deletions") return await saveDeletedWindow(sync, lease);
     throw new AppError(
       "Unknown Contact mirror phase. The mirror is paused.",

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildContactQuery, QueryFilter } from "../lib/query-builder";
+import {
+  buildContactQuery,
+  contactOperators,
+  QueryFilter,
+} from "../lib/query-builder";
 import { validateQuery } from "../lib/soql";
 
 test("query builder creates grouped AND and OR filters safely", () => {
@@ -62,6 +66,40 @@ test("query builder supports multi-select picklists", () => {
       },
     ]),
     "SELECT Id FROM Contact\nWHERE Email != null\nAND (Interests__c INCLUDES ('Research'))",
+  );
+});
+
+test("query builder supports typed comparisons and literal text matching", () => {
+  const filter = (
+    field: string,
+    type: string,
+    operator: string,
+    value: string,
+  ) => ({
+    field,
+    type,
+    operator,
+    value,
+    conjunction: "AND" as const,
+  });
+  assert.ok(contactOperators("double").includes("gte"));
+  assert.ok(contactOperators("string").includes("contains"));
+  assert.ok(contactOperators("string").includes("ends"));
+  assert.ok(!contactOperators("boolean").includes("contains"));
+  assert.match(
+    buildContactQuery([
+      filter("Total_Donations__c", "double", "gte", "1000"),
+      filter("MailingState", "string", "contains", "New"),
+      filter("LastName", "string", "not_contains", "O'Neil%_"),
+    ]),
+    /Total_Donations__c >= 1000.*MailingState LIKE '%New%'.*\(NOT \(LastName LIKE '%O\\'Neil\\%\\_%'\)\)/s,
+  );
+  assert.throws(
+    () =>
+      buildContactQuery([
+        filter("HasOptedOutOfEmail", "boolean", "contains", "true"),
+      ]),
+    /operator available/,
   );
 });
 

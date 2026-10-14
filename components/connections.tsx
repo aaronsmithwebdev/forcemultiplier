@@ -21,6 +21,8 @@ import {
   Notice,
 } from "./common";
 import { FieldBrowser } from "./field-browser";
+import { ContactQueryBuilder } from "./query-builder";
+import type { QueryGroup } from "@/lib/query-builder";
 type Connection = {
   provider: string;
   clientId: string;
@@ -59,6 +61,7 @@ type ResendStatus = {
 type MirrorStatus = {
   enabled: boolean;
   fields: string[];
+  exclusions: QueryGroup;
   phase: string;
   orgId?: string | null;
   processed?: number;
@@ -120,12 +123,18 @@ export function Connections() {
 function ContactMirrorCard() {
   const [status, setStatus] = useState<MirrorStatus | null>(null);
   const [fields, setFields] = useState<string[]>([]);
+  const [exclusions, setExclusions] = useState<QueryGroup>({
+    conjunction: "AND",
+    items: [],
+  });
+  const [exclusionsValid, setExclusionsValid] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function load() {
     const next = await api("contact-mirror");
     setStatus(next);
     setFields(next.fields);
+    setExclusions(next.exclusions);
   }
   useEffect(() => {
     void load().catch((e) => setError(e.message));
@@ -134,8 +143,13 @@ function ContactMirrorCard() {
     setBusy(true);
     setError("");
     try {
-      await api(path, method, data);
-      await load();
+      const next = await api(path, method, data);
+      if (path.endsWith("/step")) await load();
+      else {
+        setStatus(next);
+        if (path.endsWith("/fields")) setFields(next.fields);
+        if (path.endsWith("/exclusions")) setExclusions(next.exclusions);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -182,11 +196,17 @@ function ContactMirrorCard() {
             opt-out, modification time.
           </p>
           {status.enabled ? (
-            <p>
-              Additional fields:{" "}
-              {status.fields.length ? status.fields.join(", ") : "None"}. Pause
-              the mirror to edit them.
-            </p>
+            <>
+              <p>
+                Additional fields:{" "}
+                {status.fields.length ? status.fields.join(", ") : "None"}.
+              </p>
+              <p>
+                Mirror exclusions:{" "}
+                {status.exclusions.items.length ? "Configured" : "None"}. Pause
+                the mirror to edit them.
+              </p>
+            </>
           ) : (
             <>
               <FieldBrowser
@@ -210,6 +230,34 @@ function ContactMirrorCard() {
               >
                 Save selected fields
               </Button>
+              <ContactQueryBuilder
+                initialRules={status.exclusions}
+                onRulesChange={setExclusions}
+                onValidityChange={setExclusionsValid}
+                mirrorOnly
+                title="Mirror exclusions"
+                description="Contacts matching these AND/OR conditions are removed from the private mirror. No conditions means no exclusions."
+              />
+              <p>
+                Saving exclusions starts a full Contact rescan. Existing matches
+                are removed as the scan completes.
+              </p>
+              <Button
+                variant="secondary"
+                busy={busy}
+                disabled={
+                  !exclusionsValid ||
+                  JSON.stringify(exclusions) ===
+                    JSON.stringify(status.exclusions)
+                }
+                onClick={() =>
+                  void action("PUT", "contact-mirror/exclusions", {
+                    rules: exclusions,
+                  })
+                }
+              >
+                Save exclusions
+              </Button>
             </>
           )}
           <div className="button-row">
@@ -218,7 +266,10 @@ function ContactMirrorCard() {
               busy={busy}
               disabled={
                 !status.enabled &&
-                JSON.stringify(fields) !== JSON.stringify(status.fields)
+                (JSON.stringify(fields) !== JSON.stringify(status.fields) ||
+                  JSON.stringify(exclusions) !==
+                    JSON.stringify(status.exclusions) ||
+                  !exclusionsValid)
               }
               onClick={() =>
                 void action("PUT", "contact-mirror", {

@@ -2,8 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FolderPlus, Plus, Search, X } from "lucide-react";
 import { api, Button, Loading, Notice } from "./common";
+import { mirrorExclusionFieldAllowed } from "@/lib/contact-mirror-fields";
 import {
   buildContactQuery,
+  contactOperators,
   QueryFilter,
   QueryGroup,
 } from "../lib/query-builder";
@@ -14,6 +16,7 @@ type Field = {
   type: string;
   filterable?: boolean;
   picklistValues?: { label: string; value: string; active: boolean }[];
+  calculated?: boolean;
 };
 type Filter = QueryFilter & {
   id: number;
@@ -27,42 +30,32 @@ type Group = Omit<QueryGroup, "items"> & {
 
 const unsupported = new Set(["address", "base64", "location"]);
 const numeric = new Set(["currency", "double", "int", "long", "percent"]);
-const ordered = new Set([...numeric, "date", "datetime"]);
-const searchable = new Set([
-  "email",
-  "encryptedstring",
-  "phone",
-  "string",
-  "textarea",
-  "url",
-]);
+const operatorLabels: Record<string, string> = {
+  eq: "equals",
+  neq: "does not equal",
+  gt: "is greater than",
+  gte: "is greater than or equal to",
+  lt: "is less than",
+  lte: "is less than or equal to",
+  contains: "contains",
+  not_contains: "does not contain",
+  starts: "starts with",
+  not_starts: "does not start with",
+  ends: "ends with",
+  not_ends: "does not end with",
+  includes: "includes",
+  excludes: "excludes",
+  is_null: "is blank",
+  not_null: "is not blank",
+};
 function isGroup(item: Filter | Group): item is Group {
   return "items" in item;
 }
 function operators(field: Filter) {
-  if (field.type === "boolean") return [["eq", "is"]];
-  if (field.type === "multipicklist")
-    return [
-      ["includes", "includes"],
-      ["excludes", "excludes"],
-      ["is_null", "is blank"],
-      ["not_null", "is not blank"],
-    ];
-  const result = [
-    ["eq", "equals"],
-    ["neq", "does not equal"],
-  ];
-  if (ordered.has(field.type))
-    result.push(
-      ["gt", "is greater than"],
-      ["gte", "is at least"],
-      ["lt", "is less than"],
-      ["lte", "is at most"],
-    );
-  else if (searchable.has(field.type))
-    result.push(["contains", "contains"], ["starts", "starts with"]);
-  result.push(["is_null", "is blank"], ["not_null", "is not blank"]);
-  return result;
+  return contactOperators(field.type).map((operator) => [
+    operator,
+    operatorLabels[operator],
+  ]);
 }
 function changeGroup(
   group: Group,
@@ -104,6 +97,7 @@ export function ContactQueryBuilder({
   onValidityChange,
   initialRules,
   allowedFields,
+  mirrorOnly = false,
   title = "Audience filters",
   description = "Only contacts with an email address are included.",
 }: {
@@ -112,6 +106,7 @@ export function ContactQueryBuilder({
   onValidityChange?: (valid: boolean) => void;
   initialRules?: QueryGroup;
   allowedFields?: string[];
+  mirrorOnly?: boolean;
   title?: string;
   description?: string;
 }) {
@@ -216,6 +211,7 @@ export function ContactQueryBuilder({
       (field) =>
         field.filterable !== false &&
         !unsupported.has(field.type) &&
+        (!mirrorOnly || mirrorExclusionFieldAllowed(field)) &&
         (!allowedFields || allowedFields.includes(field.name)) &&
         `${field.label} ${field.name}`
           .toLowerCase()
@@ -337,6 +333,8 @@ export function ContactQueryBuilder({
                       ? "datetime-local"
                       : "text"
               }
+              step={numeric.has(filter.type) ? "any" : undefined}
+              maxLength={mirrorOnly ? 200 : undefined}
               value={filter.value}
               onChange={(event) =>
                 updateFilter(filter.id, { value: event.target.value })
@@ -361,7 +359,7 @@ export function ContactQueryBuilder({
         className="query-group"
         role="group"
         aria-label={
-          group.id === 0 ? "Audience conditions" : `Condition group ${group.id}`
+          group.id === 0 ? `${title} conditions` : `Condition group ${group.id}`
         }
         key={group.id}
       >
@@ -370,7 +368,7 @@ export function ContactQueryBuilder({
             className="query-logic-switch"
             aria-label={
               group.id === 0
-                ? "Audience match logic"
+                ? `${title} match logic`
                 : `Group ${group.id} match logic`
             }
           >
@@ -414,7 +412,9 @@ export function ContactQueryBuilder({
           {group.items.length === 0 && (
             <p className="query-empty">
               {group.id === 0
-                ? "Start with a condition to narrow your audience."
+                ? mirrorOnly
+                  ? "Add conditions to keep matching Contacts out of the mirror."
+                  : "Start with a condition to narrow your audience."
                 : "Add a condition to this group."}
             </p>
           )}

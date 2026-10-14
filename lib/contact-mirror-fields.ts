@@ -38,6 +38,7 @@ type ContactField = {
   name: string;
   type: string;
   calculated?: boolean;
+  filterable?: boolean;
 };
 
 export function mirrorFieldReason(field: ContactField): string | null {
@@ -55,4 +56,11 @@ export function mirrorFieldReason(field: ContactField): string | null {
 
 export function mirrorFieldAllowed(field: ContactField) {
   return mirrorFieldReason(field) === null;
+}
+
+export function mirrorExclusionFieldAllowed(field: ContactField) {
+  return (
+    field.filterable !== false &&
+    (CORE_CONTACT_FIELDS.includes(field.name) || mirrorFieldAllowed(field))
+  );
 }

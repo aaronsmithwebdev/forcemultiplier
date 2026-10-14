@@ -14,6 +14,7 @@ import {
   rebuildContactMirror,
   runContactMirrorStep,
   setContactMirrorEnabled,
+  setContactMirrorExclusions,
   setContactMirrorFields,
 } from "@/lib/contact-mirror";
 import { AppError, publicError } from "@/lib/errors";
@@ -688,6 +689,12 @@ async function handle(
         .object({ fields: z.array(z.string().max(100)).max(30) })
         .parse(await body(request));
       return json(await setContactMirrorFields(fields));
+    }
+    if (key === "contact-mirror/exclusions" && method === "PUT") {
+      const { rules } = z
+        .object({ rules: z.unknown() })
+        .parse(await body(request));
+      return json(await setContactMirrorExclusions(rules));
     }
     if (key === "contact-mirror/rebuild" && method === "POST")
       return json(await rebuildContactMirror());

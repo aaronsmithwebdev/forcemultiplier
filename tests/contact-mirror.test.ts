@@ -10,6 +10,7 @@ import {
   contactMirrorState,
   mirrorContactRow,
   runContactMirrorStep,
+  setContactMirrorExclusions,
   setContactMirrorFields,
 } from "../lib/contact-mirror";
 
@@ -46,6 +47,7 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
     enabled: true,
     orgId: "org-1",
     fields: ["Region__c"],
+    exclusions: { conjunction: "AND", items: [] },
     phase: "bootstrap",
     cursor: null,
     deletedThrough: null,
@@ -61,6 +63,7 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
   const queries: string[] = [];
   const writes: any[] = [];
   let failPage = true;
+  let failExclusionPage = false;
   let connectedOrg = "org-1";
   mock(t, db.connection, "findUnique", async () => ({
     provider: "salesforce",
@@ -114,16 +117,26 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
       data = { done: true, totalSize: 2, records: [record(id2)] };
     } else if (url.includes("/query?q=")) {
       const soql = new URL(url).searchParams.get("q")!;
-      data = soql.includes("SystemModstamp >=")
-        ? { done: true, totalSize: 0, records: [] }
-        : failPage
-          ? { done: false, totalSize: 2, records: [record(id1)] }
-          : {
-              done: false,
-              totalSize: 2,
-              records: [record(id1)],
-              nextRecordsUrl: "/services/data/v66.0/query/locator",
-            };
+      data = soql.includes("Opt_out_ALL_Comms__c")
+        ? soql.includes("NOT (")
+          ? {
+              done: true,
+              totalSize: soql.includes("SystemModstamp >=") ? 0 : 1,
+              records: soql.includes("SystemModstamp >=") ? [] : [record(id1)],
+            }
+          : failExclusionPage
+            ? { done: false, totalSize: 1, records: [{ Id: id2 }] }
+            : { done: true, totalSize: 1, records: [{ Id: id2 }] }
+        : soql.includes("SystemModstamp >=")
+          ? { done: true, totalSize: 0, records: [] }
+          : failPage
+            ? { done: false, totalSize: 2, records: [record(id1)] }
+            : {
+                done: false,
+                totalSize: 2,
+                records: [record(id1)],
+                nextRecordsUrl: "/services/data/v66.0/query/locator",
+              };
     } else throw new Error(`Unexpected URL ${url}`);
     return new Response(JSON.stringify(data), { status: 200 });
   });
@@ -183,6 +196,70 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
   assert.deepEqual(await runContactMirrorStep(), { paused: true });
   assert.equal(sync.enabled, false);
   assert.equal(sync.deletedThrough, staleCursor);
+  connectedOrg = "org-1";
+  Object.assign(sync, {
+    enabled: true,
+    exclusions: {
+      conjunction: "AND",
+      items: [
+        {
+          field: "Opt_out_ALL_Comms__c",
+          type: "boolean",
+          operator: "eq",
+          value: "true",
+          conjunction: "AND",
+        },
+      ],
+    },
+    phase: "bootstrap",
+    cursor: null,
+    deletedThrough: null,
+    scanUntil: null,
+    queryCursor: null,
+    scanId: null,
+    processed: 0,
+    total: 0,
+    leaseUntil: null,
+    dueAt: new Date(0),
+  });
+  await runContactMirrorStep();
+  assert.equal(sync.phase, "excluded");
+  assert.ok(
+    new URL(queries.at(-1)!).searchParams
+      .get("q")
+      ?.includes("NOT (Opt_out_ALL_Comms__c = true)"),
+  );
+  failExclusionPage = true;
+  await assert.rejects(runContactMirrorStep(), /incomplete exclusion page/);
+  assert.equal(sync.phase, "excluded");
+  assert.equal(
+    writes.some((sql) =>
+      sqlText(sql).includes('DELETE FROM "forcemultiplier"."ContactMirror"'),
+    ),
+    false,
+  );
+  failExclusionPage = false;
+  await runContactMirrorStep();
+  assert.equal(sync.phase, "changes");
+  assert.equal(sync.lastFullCount, 1);
+  assert.ok(
+    writes.some(
+      (sql) =>
+        sqlText(sql).includes(
+          'DELETE FROM "forcemultiplier"."ContactMirror"',
+        ) && sql.values?.includes(id2),
+    ),
+  );
+  clock += 60_000;
+  await runContactMirrorStep();
+  assert.equal(sync.phase, "excluded");
+  await runContactMirrorStep();
+  assert.equal(sync.phase, "deletions");
+  assert.ok(
+    new URL(queries.at(-1)!).searchParams
+      .get("q")
+      ?.includes("SystemModstamp >="),
+  );
 });
 
 test("Contact mirror refuses malformed identity and opt-out values", () => {
@@ -299,6 +376,7 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
     enabled: false,
     orgId: "org-1",
     fields: ["Old__c"],
+    exclusions: { conjunction: "AND", items: [] },
     phase: "idle",
     cursor: new Date(),
     deletedThrough: new Date(),
@@ -329,6 +407,18 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
     return 10;
   });
   mock(t, globalThis, "fetch", async (url: string) => {
+    if (url.includes("/query?q=")) {
+      const query = new URL(url).searchParams.get("q")!;
+      assert.match(
+        query,
+        /Opt_out_ALL_Comms__c = true|Contact_Type__c = 'Child'/,
+      );
+      assert.match(query, /LIMIT 1$/);
+      return new Response(
+        JSON.stringify({ done: true, totalSize: 0, records: [] }),
+        { status: 200 },
+      );
+    }
     assert.match(url, /\/sobjects\/Contact\/describe$/);
     return new Response(
       JSON.stringify({
@@ -338,6 +428,24 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
           { name: "Formula__c", type: "string", calculated: true },
           { name: "Donor_Type__c", type: "string", calculated: true },
           { name: "Sensitive__c", type: "encryptedstring", calculated: false },
+          {
+            name: "Opt_out_ALL_Comms__c",
+            type: "boolean",
+            calculated: false,
+            filterable: true,
+          },
+          {
+            name: "Contact_Type__c",
+            type: "picklist",
+            calculated: false,
+            filterable: true,
+          },
+          {
+            name: "Contact_Type_Age__c",
+            type: "string",
+            calculated: true,
+            filterable: true,
+          },
         ],
       }),
       { status: 200 },
@@ -380,6 +488,49 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
   assert.equal(cleared, 1);
   await setContactMirrorFields(["Region__c", "Donor_Type__c"]);
   assert.equal(cleared, 1);
+  const exclusions = {
+    conjunction: "OR" as const,
+    items: [
+      {
+        field: "Opt_out_ALL_Comms__c",
+        type: "boolean",
+        operator: "eq",
+        value: "true",
+        conjunction: "AND" as const,
+      },
+      {
+        field: "Contact_Type__c",
+        type: "picklist",
+        operator: "eq",
+        value: "Child",
+        conjunction: "AND" as const,
+      },
+    ],
+  };
+  await assert.rejects(
+    setContactMirrorExclusions({
+      conjunction: "AND",
+      items: [
+        {
+          field: "Contact_Type_Age__c",
+          type: "string",
+          operator: "eq",
+          value: "CHILD",
+          conjunction: "AND",
+        },
+      ],
+    }),
+    /cannot be used/,
+  );
+  await setContactMirrorExclusions(exclusions);
+  assert.deepEqual(sync.exclusions, exclusions);
+  assert.equal(sync.phase, "bootstrap");
+  sync.enabled = true;
+  await assert.rejects(
+    setContactMirrorExclusions({ conjunction: "AND", items: [] }),
+    /Pause the mirror/,
+  );
+  sync.enabled = false;
   connectedOrg = "different-org";
   await assert.rejects(setContactMirrorFields([]), /Salesforce org changed/);
   assert.deepEqual(sync.fields, ["Region__c", "Donor_Type__c"]);

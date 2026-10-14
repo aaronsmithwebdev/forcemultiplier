@@ -648,6 +648,7 @@ model ContactMirrorSync {
   enabled         Boolean   @default(false)
   orgId           String?
   fields          Json      @default("[]")
+  exclusions      Json      @default("{\"conjunction\":\"AND\",\"items\":[]}")
   phase           String    @default("bootstrap")
   cursor          DateTime?
   deletedThrough  DateTime?

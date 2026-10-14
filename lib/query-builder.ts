@@ -20,9 +20,39 @@ const comparisonOperators: Record<string, string> = {
   lt: "<",
   lte: "<=",
 };
+const searchableTypes = new Set([
+  "email",
+  "encryptedstring",
+  "phone",
+  "string",
+  "textarea",
+  "url",
+]);
+
+export function contactOperators(type: string) {
+  if (type === "boolean") return ["eq", "neq"];
+  if (type === "multipicklist")
+    return ["includes", "excludes", "is_null", "not_null"];
+  return [
+    "eq",
+    "neq",
+    ...(numericTypes.has(type) || ["date", "datetime"].includes(type)
+      ? ["gt", "gte", "lt", "lte"]
+      : []),
+    ...(searchableTypes.has(type)
+      ? ["contains", "not_contains", "starts", "not_starts", "ends", "not_ends"]
+      : []),
+    "is_null",
+    "not_null",
+  ];
+}
 
 function quoted(value: string) {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+function likeValue(value: string, before: string, after: string) {
+  return `'${before}${value.replace(/[\\'%_]/g, (character) => `\\${character}`)}${after}'`;
 }
 
 function formattedValue(filter: QueryFilter) {
@@ -54,13 +84,36 @@ function formattedValue(filter: QueryFilter) {
 
 function filterExpression(filter: QueryFilter) {
   if (!fieldName.test(filter.field)) throw new Error("Choose a valid field.");
+  if (!contactOperators(filter.type).includes(filter.operator))
+    throw new Error("Choose an operator available for this field type.");
   if (filter.operator === "is_null") return `${filter.field} = null`;
   if (filter.operator === "not_null") return `${filter.field} != null`;
   const value = formattedValue(filter);
-  if (filter.operator === "contains")
-    return `${filter.field} LIKE ${quoted(`%${filter.value.trim()}%`)}`;
-  if (filter.operator === "starts")
-    return `${filter.field} LIKE ${quoted(`${filter.value.trim()}%`)}`;
+  if (
+    [
+      "contains",
+      "not_contains",
+      "starts",
+      "not_starts",
+      "ends",
+      "not_ends",
+    ].includes(filter.operator)
+  ) {
+    const before = ["contains", "not_contains", "ends", "not_ends"].includes(
+      filter.operator,
+    )
+      ? "%"
+      : "";
+    const after = ["contains", "not_contains", "starts", "not_starts"].includes(
+      filter.operator,
+    )
+      ? "%"
+      : "";
+    const expression = `${filter.field} LIKE ${likeValue(filter.value.trim(), before, after)}`;
+    return filter.operator.startsWith("not_")
+      ? `(NOT (${expression}))`
+      : expression;
+  }
   if (["includes", "excludes"].includes(filter.operator))
     return `${filter.field} ${filter.operator.toUpperCase()} (${value})`;
   const operator = comparisonOperators[filter.operator];
@@ -88,6 +141,10 @@ function groupedExpression(group: QueryGroup, depth = 0, root = false): string {
   return root ? expression : `(${expression})`;
 }
 
+export function buildContactCondition(group: QueryGroup) {
+  return groupedExpression(group, 0, true);
+}
+
 export function buildContactQuery(filters: QueryFilter[] | QueryGroup) {
   let filterCount = 0,
     groupCount = 0;
@@ -102,7 +159,7 @@ export function buildContactQuery(filters: QueryFilter[] | QueryGroup) {
   if (filterCount > 20) throw new Error("Add up to 20 filters.");
   if (groupCount > 10) throw new Error("Add up to 10 groups.");
   if (!Array.isArray(filters)) {
-    const logic = groupedExpression(filters, 0, true);
+    const logic = buildContactCondition(filters);
     const grouped = logic.startsWith("(") ? logic : `(${logic})`;
     return `SELECT Id FROM Contact\nWHERE Email != null${logic ? `\nAND ${grouped}` : ""}`;
   }
