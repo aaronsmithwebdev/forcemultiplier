@@ -7,6 +7,7 @@ import type { TemplateContent } from "@templatical/types";
 import "@templatical/editor/style.css";
 import { api, Badge, Button, Loading, Notice } from "./common";
 import { templateMediaProvider } from "./template-editor";
+import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
 
 export function FooterEditor({ id }: { id: string }) {
   const container = useRef<HTMLDivElement>(null);
@@ -20,6 +21,7 @@ export function FooterEditor({ id }: { id: string }) {
     if (!container.current) return;
     let cancelled = false;
     let editor: TemplaticalEditor | null = null;
+    let stopIssueTooltips = () => {};
 
     async function mount() {
       try {
@@ -50,6 +52,10 @@ export function FooterEditor({ id }: { id: string }) {
           return;
         }
         editor = instance;
+        stopIssueTooltips = showTemplaticalIssueTooltips(
+          container.current!,
+          instance,
+        );
         await editor.load(id);
         if (!cancelled) setLoading(false);
       } catch (cause) {
@@ -63,6 +69,7 @@ export function FooterEditor({ id }: { id: string }) {
     void mount();
     return () => {
       cancelled = true;
+      stopIssueTooltips();
       editor?.unmount();
     };
   }, [id]);

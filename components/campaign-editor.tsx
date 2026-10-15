@@ -11,6 +11,7 @@ import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
 import { footerLayout } from "@/lib/email-layout";
+import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
 
 export function CampaignEditor({
   id,
@@ -36,6 +37,7 @@ export function CampaignEditor({
     if (!container.current) return;
     let cancelled = false;
     let editor: TemplaticalEditor | null = null;
+    let stopIssueTooltips = () => {};
     async function mount() {
       try {
         const [tags, campaign]: [
@@ -93,6 +95,10 @@ export function CampaignEditor({
         }
         editor = instance;
         editorRef.current = instance;
+        stopIssueTooltips = showTemplaticalIssueTooltips(
+          container.current!,
+          instance,
+        );
         await editor.load(id);
         if (!cancelled) setLoading(false);
       } catch (cause) {
@@ -106,6 +112,7 @@ export function CampaignEditor({
     return () => {
       cancelled = true;
       editorRef.current = null;
+      stopIssueTooltips();
       editor?.unmount();
     };
   }, [email, id]);

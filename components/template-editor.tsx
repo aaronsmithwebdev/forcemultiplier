@@ -12,6 +12,7 @@ import type {
 } from "@templatical/types";
 import "@templatical/editor/style.css";
 import { api, Loading, Notice } from "./common";
+import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
 
 const assetBucket = "email-template-assets";
 const assetTypes: Record<string, string> = {
@@ -96,6 +97,7 @@ export function TemplateEditor({ id }: { id: string }) {
     if (!container.current) return;
     let cancelled = false;
     let editor: TemplaticalEditor | null = null;
+    let stopIssueTooltips = () => {};
 
     async function mount() {
       try {
@@ -137,6 +139,10 @@ export function TemplateEditor({ id }: { id: string }) {
           return;
         }
         editor = instance;
+        stopIssueTooltips = showTemplaticalIssueTooltips(
+          container.current!,
+          instance,
+        );
         await editor.load(id);
         if (!cancelled) setLoading(false);
       } catch (cause) {
@@ -150,6 +156,7 @@ export function TemplateEditor({ id }: { id: string }) {
     void mount();
     return () => {
       cancelled = true;
+      stopIssueTooltips();
       editor?.unmount();
     };
   }, [id]);
