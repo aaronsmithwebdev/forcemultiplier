@@ -5,6 +5,9 @@ import { AppError } from "./errors";
 import { connection, providerRequest } from "./providers";
 import { archiveImageUrl } from "./archive-image-import";
 import { rewriteArchiveImages } from "./archive-images";
+import { prepareArchiveForConversion } from "./archive-conversion";
+import { convertHtmlTemplate } from "@templatical/import-html";
+import { getDefaultFooter } from "./email-footers";
 
 const pageSize = 1;
 const selected = {
@@ -367,4 +370,71 @@ export async function archivePreview(id: string) {
     html: rewriteArchiveImages(html, mapped, true).html,
     unresolved: found.size - mapped.size,
   };
+}
+
+export async function createCampaignFromArchive(id: string, userId: string) {
+  const [item, importJob, footer] = await Promise.all([
+    db.archivedEmail.findUnique({ where: { id } }),
+    db.archiveImport.findUnique({ where: { id: "constant-contact" } }),
+    getDefaultFooter(),
+  ]);
+  if (!item || item.accountId !== importJob?.accountId)
+    throw new AppError("Archived email not found.", 404);
+  const html = item.sourceHtml || item.previewHtml;
+  if (!html)
+    throw new AppError("This archived email has no HTML to convert.", 409);
+  const found = rewriteArchiveImages(html).urls;
+  const images = found.size
+    ? await db.archivedImage.findMany({
+        where: {
+          accountId: item.accountId,
+          url: { in: [...found] },
+          status: "copied",
+        },
+        select: { url: true, storagePath: true },
+      })
+    : [];
+  const mapped = new Map(
+    images
+      .filter((image) => image.storagePath)
+      .map((image) => [image.url, archiveImageUrl(image.storagePath!)]),
+  );
+  const prepared = prepareArchiveForConversion(html, mapped);
+  const { content, report } = convertHtmlTemplate(prepared.html);
+  if (!content.blocks.length)
+    throw new AppError(
+      "This email has no content Templatical can convert.",
+      409,
+    );
+  if (prepared.removedImages || found.size > mapped.size)
+    report.warnings.push(
+      "Images without a workspace backup, including backgrounds, were omitted. Replace any needed images before sending.",
+    );
+  report.warnings.push(
+    "Review and replace old Constant Contact tracking, unsubscribe, and footer content before sending.",
+  );
+  report.entries = report.entries.filter(
+    (entry) => entry.status !== "converted",
+  );
+  content.settings.preheaderText =
+    item.preheader || content.settings.preheaderText;
+  if (JSON.stringify(content).length > 2_000_000)
+    throw new AppError(
+      "The converted email exceeds the editor size limit.",
+      413,
+    );
+  return db.campaign.create({
+    data: {
+      name: item.campaignName.slice(0, 120),
+      content: content as unknown as Prisma.InputJsonValue,
+      subject: item.subject,
+      preheader: item.preheader || "",
+      fromName: item.fromName || "",
+      sourceArchiveId: item.id,
+      conversionReport: report as unknown as Prisma.InputJsonValue,
+      footerId: footer.id,
+      createdBy: userId,
+    },
+    select: { id: true },
+  });
 }

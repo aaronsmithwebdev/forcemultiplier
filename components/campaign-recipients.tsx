@@ -40,6 +40,7 @@ type SendState = {
   finishedAt: string | null;
 };
 type Review = {
+  sourceArchiveId: string | null;
   consent: { ready: boolean; reason: string | null } | null;
   serviceNotice: boolean;
   audienceIds: string[];
@@ -188,6 +189,7 @@ export function CampaignRecipients({ id }: { id: string }) {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [counting, setCounting] = useState(false);
   const [sending, setSending] = useState(false);
+  const [archiveReviewed, setArchiveReviewed] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -325,7 +327,13 @@ export function CampaignRecipients({ id }: { id: string }) {
   }
 
   async function send() {
-    if (!review || !counts?.recipients || parsed.invalid.length || !rulesValid)
+    if (
+      !review ||
+      !counts?.recipients ||
+      parsed.invalid.length ||
+      !rulesValid ||
+      (review.sourceArchiveId && !archiveReviewed)
+    )
       return;
     if (
       !window.confirm(
@@ -343,6 +351,7 @@ export function CampaignRecipients({ id }: { id: string }) {
         exclusionAudienceIds: excluded,
         manualExclusions: parsed.emails,
         exclusionRules: rules,
+        archiveReviewed,
       });
       await load();
     } catch (cause) {
@@ -392,6 +401,18 @@ export function CampaignRecipients({ id }: { id: string }) {
             again when you send.
           </p>
         )}
+      {review.sourceArchiveId && !sendState && (
+        <label className="archive-review-check">
+          <input
+            type="checkbox"
+            checked={archiveReviewed}
+            onChange={(event) => setArchiveReviewed(event.target.checked)}
+          />
+          I compared the converted email with the archived original at desktop
+          and mobile widths, checked its links, images, merge tags, footer and
+          text, and sent myself a test.
+        </label>
+      )}
       {sendState ? (
         <div
           className={`send-result ${["failed", "review"].includes(sendState.status) ? "failed" : ""}`}
@@ -527,7 +548,8 @@ export function CampaignRecipients({ id }: { id: string }) {
                 !counts?.recipients ||
                 counting ||
                 !!parsed.invalid.length ||
-                !rulesValid
+                !rulesValid ||
+                (!!review.sourceArchiveId && !archiveReviewed)
               }
               onClick={() => void send()}
             >

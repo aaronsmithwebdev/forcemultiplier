@@ -21,6 +21,11 @@ const campaignSelect = {
   id: true,
   name: true,
   content: true,
+  sourceArchiveId: true,
+  conversionReport: true,
+  sourceArchive: {
+    select: { campaignName: true },
+  },
   status: true,
   subject: true,
   preheader: true,

@@ -23,6 +23,7 @@
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
     "@templatical/editor": "0.43.0",
+    "@templatical/import-html": "0.43.0",
     "@templatical/quality": "0.43.0",
     "@templatical/renderer": "0.43.0",
     "@templatical/types": "0.43.0",

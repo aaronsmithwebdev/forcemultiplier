@@ -357,6 +357,7 @@ export async function campaignAudienceOptions(campaignId: string) {
       where: { id: campaignId },
       select: {
         audienceIds: true,
+        sourceArchiveId: true,
         serviceNotice: true,
         exclusionAudienceIds: true,
         manualExclusions: true,
@@ -437,13 +438,22 @@ export async function saveAndPreviewCampaignAudience(
   return summary(rows, campaign.serviceNotice);
 }
 
-export async function startCampaignSend(campaignId: string, userId: string) {
+export async function startCampaignSend(
+  campaignId: string,
+  userId: string,
+  archiveReviewed = false,
+) {
   const campaign = await db.campaign.findUnique({
     where: { id: campaignId },
     include: { send: true, footer: true },
   });
   if (!campaign) throw new AppError("Campaign not found.", 404);
   if (campaign.send) return campaign.send;
+  if (campaign.sourceArchiveId && !archiveReviewed)
+    throw new AppError(
+      "Review the converted email against its archived original before sending.",
+      409,
+    );
   if (!campaign.audienceIds.length)
     throw new AppError("Choose at least one audience.");
   if (

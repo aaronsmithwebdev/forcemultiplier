@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Eye, Send } from "lucide-react";
 import { init, type TemplaticalEditor } from "@templatical/editor";
 import type { MergeTag, TemplateContent } from "@templatical/types";
+import type { ImportReport } from "@templatical/import-html";
 import "@templatical/editor/style.css";
 import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
@@ -25,6 +26,15 @@ export function CampaignEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [archive, setArchive] = useState<{
+    id: string;
+    name: string;
+    report: ImportReport;
+  } | null>(null);
+  const [originalWidth, setOriginalWidth] = useState<"desktop" | "mobile">(
+    "desktop",
+  );
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
     if (!container.current) return;
@@ -39,12 +49,21 @@ export function CampaignEditor({
             name: string;
             content: TemplateContent;
             footer: { content: TemplateContent };
+            sourceArchiveId: string | null;
+            sourceArchive: { campaignName: string } | null;
+            conversionReport: ImportReport | null;
           },
         ] = await Promise.all([
           api("templates/merge-tags"),
           api(`campaigns/${id}`),
         ]);
         if (cancelled || !container.current) return;
+        if (campaign.sourceArchiveId && campaign.conversionReport)
+          setArchive({
+            id: campaign.sourceArchiveId,
+            name: campaign.sourceArchive?.campaignName || campaign.name,
+            report: campaign.conversionReport,
+          });
         const instance = await init({
           container: container.current,
           layout: footerLayout(campaign.content, campaign.footer.content),
@@ -109,6 +128,33 @@ export function CampaignEditor({
     }
   }
 
+  async function saveAsTemplate() {
+    if (!editorRef.current) return;
+    setSavingTemplate(true);
+    setError("");
+    try {
+      await editorRef.current.save();
+      const campaign = await api(`campaigns/${id}`);
+      const template = await api("templates", "POST", {
+        name: campaign.name,
+        content: campaign.content,
+      });
+      window.location.assign(`/templates/${template.id}`);
+    } catch (cause) {
+      setError((cause as Error).message);
+      setSavingTemplate(false);
+    }
+  }
+
+  const conversionWarnings = archive
+    ? [
+        ...archive.report.warnings,
+        ...archive.report.entries
+          .filter((entry) => entry.note)
+          .map((entry) => `${entry.sourceTag}: ${entry.note}`),
+      ]
+    : [];
+
   return (
     <div className="template-editor-page campaign-editor-page">
       <div className="template-editor-toolbar">
@@ -140,11 +186,71 @@ export function CampaignEditor({
         </div>
       )}
       <Notice message={error} />
-      <div className="template-editor-frame">
-        {loading && <Loading />}
-        <div ref={container} className="templatical-container" />
+      {archive && (
+        <section className="card archive-conversion-report">
+          <h2>Converted from {archive.name}</h2>
+          <p>
+            {archive.report.summary.converted} converted ·{" "}
+            {archive.report.summary.approximated} approximated ·{" "}
+            {archive.report.summary.htmlFallback} HTML fallback ·{" "}
+            {archive.report.summary.skipped} skipped. Compare both sizes and
+            review links, images, merge tags, footer, and text before sending.
+          </p>
+          {conversionWarnings.length > 0 && (
+            <details>
+              <summary>Conversion warnings</summary>
+              <ul>
+                {conversionWarnings.map((warning, index) => (
+                  <li key={index}>{warning}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+      <div className={archive ? "archive-conversion-compare" : ""}>
+        <div className="template-editor-frame">
+          {loading && <Loading />}
+          <div ref={container} className="templatical-container" />
+        </div>
+        {archive && (
+          <section className="card archive-original">
+            <div className="archive-original-heading">
+              <h2>Archived original</h2>
+              <label>
+                Width
+                <select
+                  value={originalWidth}
+                  onChange={(event) =>
+                    setOriginalWidth(event.target.value as "desktop" | "mobile")
+                  }
+                >
+                  <option value="desktop">Desktop</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </label>
+            </div>
+            <div className="archive-original-viewport">
+              <iframe
+                title={`Archived original: ${archive.name}`}
+                src={`/api/archive/${encodeURIComponent(archive.id)}/preview`}
+                className={originalWidth}
+                sandbox=""
+              />
+            </div>
+          </section>
+        )}
       </div>
       <div className="campaign-next-actions">
+        {archive && (
+          <Button
+            variant="secondary"
+            busy={savingTemplate}
+            onClick={() => void saveAsTemplate()}
+          >
+            Save as template
+          </Button>
+        )}
         <Button
           busy={saving}
           variant={preview ? "secondary" : ""}

@@ -57,6 +57,7 @@ import {
   archivePreview,
   archiveState,
   archiveStep,
+  createCampaignFromArchive,
   startArchiveImport,
 } from "@/lib/archive";
 import { archivePreviewPolicy } from "@/lib/archive-preview";
@@ -354,9 +355,14 @@ async function handle(
         return json(await saveAndPreviewCampaignAudience(id, data));
       }
       if (p[2] === "send" && p.length === 3 && method === "POST") {
-        const data = audienceSelection.parse(await body(request, 1_500_000));
+        const data = audienceSelection
+          .extend({ archiveReviewed: z.boolean().optional() })
+          .parse(await body(request, 1_500_000));
         await saveAndPreviewCampaignAudience(id, data);
-        return json(await startCampaignSend(id, user.id), 201);
+        return json(
+          await startCampaignSend(id, user.id, data.archiveReviewed),
+          201,
+        );
       }
       if (
         p[2] === "send" &&
@@ -511,6 +517,17 @@ async function handle(
       return json(await startImageBackup());
     if (key === "archive/images/step" && method === "POST")
       return json(await imageBackupStep());
+    if (
+      p[0] === "archive" &&
+      p[1] &&
+      p[2] === "campaign" &&
+      p.length === 3 &&
+      method === "POST"
+    )
+      return json(
+        await createCampaignFromArchive(templateId.parse(p[1]), user.id),
+        201,
+      );
     if (p[0] === "archive" && p[1] && p[2] === "preview" && method === "GET") {
       const preview = await archivePreview(z.string().max(100).parse(p[1]));
       return new NextResponse(preview.html, {

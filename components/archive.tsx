@@ -46,6 +46,7 @@ export function Archive() {
   const [previewError, setPreviewError] = useState("");
   const [unresolvedImages, setUnresolvedImages] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [converting, setConverting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -198,6 +199,19 @@ export function Archive() {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function useInCampaign() {
+    if (!selected) return;
+    setConverting(true);
+    setError("");
+    try {
+      const campaign = await api(`archive/${selected.id}/campaign`, "POST");
+      window.location.assign(`/campaigns/${campaign.id}/design`);
+    } catch (cause) {
+      setError((cause as Error).message);
+      setConverting(false);
     }
   }
 
@@ -384,9 +398,17 @@ export function Archive() {
                     recipients
                   </small>
                 </div>
-                <Button variant="secondary" onClick={() => setSelected(null)}>
-                  Close preview
-                </Button>
+                <div className="button-row">
+                  <Button
+                    busy={converting}
+                    onClick={() => void useInCampaign()}
+                  >
+                    Use in new campaign
+                  </Button>
+                  <Button variant="secondary" onClick={() => setSelected(null)}>
+                    Close preview
+                  </Button>
+                </div>
               </div>
               <Notice message={selected.warning || ""} />
               <p>

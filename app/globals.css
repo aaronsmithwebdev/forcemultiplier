@@ -390,6 +390,67 @@ summary {
 .campaign-editor-page .templatical-container {
   height: calc(100vh - 260px);
 }
+.archive-conversion-report {
+  margin-bottom: 16px;
+  padding: 16px 20px;
+}
+.archive-conversion-report p {
+  margin: 8px 0;
+}
+.archive-conversion-report ul {
+  max-height: 180px;
+  overflow: auto;
+}
+.archive-conversion-compare {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(320px, 2fr) minmax(520px, 3fr);
+}
+.archive-conversion-compare .template-editor-frame {
+  min-width: 0;
+}
+.archive-original {
+  min-width: 0;
+  order: -1;
+  padding: 14px;
+}
+.archive-original-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.archive-original-heading label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.archive-original-viewport {
+  overflow: auto;
+  margin-top: 12px;
+}
+.archive-original iframe {
+  background: white;
+  border: 1px solid var(--line);
+  display: block;
+  height: calc(100vh - 260px);
+  min-height: 680px;
+  width: 100%;
+}
+.archive-original iframe.mobile {
+  width: 375px;
+}
+.archive-review-check {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  margin: 16px 26px;
+}
+@media (max-width: 1100px) {
+  .archive-conversion-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .campaign-create-card {
   margin-bottom: 24px;
   padding: 24px 26px;

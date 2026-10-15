@@ -426,6 +426,7 @@ model ArchivedEmail {
   sourceHash   String?
   warning      String?
   createdAt    DateTime @default(now())
+  campaigns    Campaign[]
 
   @@unique([accountId, activityId])
   @@index([accountId, sentAt])
@@ -509,6 +510,9 @@ model Campaign {
   id                   String        @id @default(cuid())
   name                 String
   content              Json
+  sourceArchiveId      String?
+  sourceArchive        ArchivedEmail? @relation(fields: [sourceArchiveId], references: [id], onDelete: Restrict)
+  conversionReport     Json?
   status               String        @default("draft")
   subject              String        @default("")
   preheader            String        @default("")
@@ -528,6 +532,7 @@ model Campaign {
   send                 CampaignSend?
 
   @@index([footerId])
+  @@index([sourceArchiveId])
   @@index([updatedAt])
   @@schema("forcemultiplier")
 }
