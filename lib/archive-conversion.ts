@@ -1,5 +1,5 @@
 import { parse, serialize } from "parse5";
-import type { TemplateContent } from "@templatical/types";
+import type { Block, TemplateContent } from "@templatical/types";
 import { rewriteArchiveImages } from "./archive-images";
 
 type Node = {
@@ -126,5 +126,65 @@ export function combineImportedParagraphs(content: TemplateContent) {
       }
     }
   }
+  return content;
+}
+
+export function normalizeImportedTitleColors(
+  content: TemplateContent,
+  freshImport = false,
+) {
+  const visit = (block: Block) => {
+    if (block.type === "section") {
+      for (const column of block.children)
+        for (const child of column) visit(child);
+    } else if (block.type === "wrapper") {
+      for (const child of block.children) visit(child);
+    } else if (block.type === "title") {
+      // shortcut: Single-span plain-text headings cover this import; parse rich markup if needed.
+      const match = /^<p><span style="([^"]+)">([^<]*)<\/span><\/p>$/.exec(
+        block.content,
+      );
+      if (!match) return;
+      const styles = match[1]
+        .split(";")
+        .map((style) => style.trim())
+        .filter(Boolean);
+      const colorStyle = styles
+        .filter((style) => /^color\s*:/i.test(style))
+        .at(-1);
+      if (!colorStyle) return;
+      const rawColor = colorStyle.replace(/^color\s*:\s*/i, "");
+      const rgb =
+        /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i.exec(
+          rawColor,
+        );
+      const color =
+        rgb && rgb.slice(1).every((value) => Number(value) <= 255)
+          ? `#${rgb
+              .slice(1)
+              .map((value) => Number(value).toString(16).padStart(2, "0"))
+              .join("")}`
+          : /^#[\da-f]{6}$/i.test(rawColor)
+            ? rawColor.toLowerCase()
+            : /^#[\da-f]{3}$/i.test(rawColor)
+              ? `#${[...rawColor.slice(1)]
+                  .map((value) => value + value)
+                  .join("")
+                  .toLowerCase()}`
+              : null;
+      if (!color) return;
+      if (
+        freshImport ||
+        !block.color ||
+        block.color.toLowerCase() === "#1a1a1a"
+      )
+        block.color = color;
+      const remaining = styles.filter((style) => !/^color\s*:/i.test(style));
+      block.content = remaining.length
+        ? `<p><span style="${remaining.join("; ")};">${match[2]}</span></p>`
+        : `<p>${match[2]}</p>`;
+    }
+  };
+  for (const block of content.blocks) visit(block);
   return content;
 }

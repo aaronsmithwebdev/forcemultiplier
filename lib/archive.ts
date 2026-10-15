@@ -7,6 +7,7 @@ import { archiveImageUrl } from "./archive-image-import";
 import { rewriteArchiveImages } from "./archive-images";
 import {
   combineImportedParagraphs,
+  normalizeImportedTitleColors,
   prepareArchiveForConversion,
 } from "./archive-conversion";
 import { convertHtmlTemplate } from "@templatical/import-html";
@@ -405,6 +406,7 @@ export async function createCampaignFromArchive(id: string, userId: string) {
   const prepared = prepareArchiveForConversion(html, mapped);
   const { content, report } = convertHtmlTemplate(prepared.html);
   combineImportedParagraphs(content);
+  normalizeImportedTitleColors(content, true);
   if (!content.blocks.length)
     throw new AppError(
       "This email has no content Templatical can convert.",

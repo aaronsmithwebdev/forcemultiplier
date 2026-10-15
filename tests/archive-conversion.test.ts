@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { convertHtmlTemplate } from "@templatical/import-html";
 import {
   combineImportedParagraphs,
+  normalizeImportedTitleColors,
   prepareArchiveForConversion,
 } from "../lib/archive-conversion";
+import { lintTemplate } from "@templatical/quality";
 
 test("an archived email becomes editable without unbacked images or active content", () => {
   const source = `<html><head><style>@import "https://other.example/style.css"; .hero{background:url(https://other.example/hero.png)}</style></head><body><table><tr><td><h1>Old newsletter</h1><p><a href="https://example.org/story">Read more</a></p><img src="https://files.constantcontact.com/account/kept.png"><img src="https://other.example/missing.png"><script>alert(1)</script><iframe src="https://other.example"></iframe><a href="javascript:alert(1)" onclick="alert(1)">Unsafe</a></td></tr></table></body></html>`;
@@ -27,6 +29,47 @@ test("an archived email becomes editable without unbacked images or active conte
   assert.ok(content.blocks.length > 0);
   assert.ok(report.summary.converted > 0);
   assert.match(JSON.stringify(content), /Old newsletter/);
+});
+
+test("imported heading color matches its visible text and remains editable", () => {
+  const { content } = convertHtmlTemplate(
+    '<table><tr><td bgcolor="#272523"><h1><span style="color: rgb(255, 255, 255); font-size: 26px;">Your impact</span></h1></td></tr></table>',
+  );
+  const section = content.blocks[0];
+  if (section.type !== "section") throw new Error("Expected a section");
+  const title = section.children[0][0];
+  if (title.type !== "title") throw new Error("Expected a title");
+  const importedHtml = title.content;
+  assert.equal(title.color, "#1a1a1a");
+  assert.ok(
+    lintTemplate(content).some(
+      (issue) => issue.ruleId === "a11y.text-low-contrast",
+    ),
+  );
+
+  normalizeImportedTitleColors(content, true);
+  assert.equal(title.color, "#ffffff");
+  assert.equal(
+    title.content,
+    '<p><span style="font-size: 26px;">Your impact</span></p>',
+  );
+  assert.ok(
+    !lintTemplate(content).some(
+      (issue) => issue.ruleId === "a11y.text-low-contrast",
+    ),
+  );
+
+  title.content = importedHtml;
+  title.color = "#ed0d0d";
+  normalizeImportedTitleColors(content);
+  assert.equal(title.color, "#ed0d0d");
+  assert.doesNotMatch(title.content, /color:/);
+
+  title.content =
+    '<p><span style="color: #ffffff">White</span> <span style="color: #00ff00">Green</span></p>';
+  normalizeImportedTitleColors(content);
+  assert.match(title.content, /color: #ffffff/);
+  assert.match(title.content, /color: #00ff00/);
 });
 
 test("adjacent imported paragraphs become one editable block without crossing buttons or columns", () => {

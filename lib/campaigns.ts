@@ -4,6 +4,7 @@ import type { TemplateContent } from "@templatical/types";
 import { db } from "./db";
 import { getDefaultFooter } from "./email-footers";
 import { AppError } from "./errors";
+import { normalizeImportedTitleColors } from "./archive-conversion";
 
 export type CampaignPatch = Partial<{
   name: string;
@@ -64,6 +65,10 @@ export async function getCampaign(id: string) {
     select: campaignSelect,
   });
   if (!campaign) throw new AppError("Campaign not found.", 404);
+  if (campaign.sourceArchiveId)
+    normalizeImportedTitleColors(
+      campaign.content as unknown as TemplateContent,
+    );
   return campaign;
 }
 
@@ -105,6 +110,7 @@ export async function saveCampaign(id: string, patch: CampaignPatch) {
   }
   let content = (patch.content ||
     current.content) as unknown as TemplateContent;
+  if (current.sourceArchiveId) normalizeImportedTitleColors(content);
   if (patch.preheader !== undefined) {
     const settings = {
       ...content.settings,
