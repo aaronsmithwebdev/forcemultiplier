@@ -27,13 +27,9 @@ export function CampaignEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [archive, setArchive] = useState<{
-    id: string;
     name: string;
     report: ImportReport;
   } | null>(null);
-  const [originalWidth, setOriginalWidth] = useState<"desktop" | "mobile">(
-    "desktop",
-  );
   const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
@@ -60,7 +56,6 @@ export function CampaignEditor({
         if (cancelled || !container.current) return;
         if (campaign.sourceArchiveId && campaign.conversionReport)
           setArchive({
-            id: campaign.sourceArchiveId,
             name: campaign.sourceArchive?.campaignName || campaign.name,
             report: campaign.conversionReport,
           });
@@ -193,8 +188,9 @@ export function CampaignEditor({
             {archive.report.summary.converted} converted ·{" "}
             {archive.report.summary.approximated} approximated ·{" "}
             {archive.report.summary.htmlFallback} HTML fallback ·{" "}
-            {archive.report.summary.skipped} skipped. Compare both sizes and
-            review links, images, merge tags, footer, and text before sending.
+            {archive.report.summary.skipped} skipped. Preview desktop and
+            mobile, then review links, images, merge tags, footer, and text
+            before sending.
           </p>
           {conversionWarnings.length > 0 && (
             <details>
@@ -208,38 +204,9 @@ export function CampaignEditor({
           )}
         </section>
       )}
-      <div className={archive ? "archive-conversion-compare" : ""}>
-        <div className="template-editor-frame">
-          {loading && <Loading />}
-          <div ref={container} className="templatical-container" />
-        </div>
-        {archive && (
-          <section className="card archive-original">
-            <div className="archive-original-heading">
-              <h2>Archived original</h2>
-              <label>
-                Width
-                <select
-                  value={originalWidth}
-                  onChange={(event) =>
-                    setOriginalWidth(event.target.value as "desktop" | "mobile")
-                  }
-                >
-                  <option value="desktop">Desktop</option>
-                  <option value="mobile">Mobile</option>
-                </select>
-              </label>
-            </div>
-            <div className="archive-original-viewport">
-              <iframe
-                title={`Archived original: ${archive.name}`}
-                src={`/api/archive/${encodeURIComponent(archive.id)}/preview`}
-                className={originalWidth}
-                sandbox=""
-              />
-            </div>
-          </section>
-        )}
+      <div className="template-editor-frame">
+        {loading && <Loading />}
+        <div ref={container} className="templatical-container" />
       </div>
       <div className="campaign-next-actions">
         {archive && (

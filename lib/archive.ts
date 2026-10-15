@@ -5,7 +5,10 @@ import { AppError } from "./errors";
 import { connection, providerRequest } from "./providers";
 import { archiveImageUrl } from "./archive-image-import";
 import { rewriteArchiveImages } from "./archive-images";
-import { prepareArchiveForConversion } from "./archive-conversion";
+import {
+  combineImportedParagraphs,
+  prepareArchiveForConversion,
+} from "./archive-conversion";
 import { convertHtmlTemplate } from "@templatical/import-html";
 import { getDefaultFooter } from "./email-footers";
 
@@ -401,6 +404,7 @@ export async function createCampaignFromArchive(id: string, userId: string) {
   );
   const prepared = prepareArchiveForConversion(html, mapped);
   const { content, report } = convertHtmlTemplate(prepared.html);
+  combineImportedParagraphs(content);
   if (!content.blocks.length)
     throw new AppError(
       "This email has no content Templatical can convert.",

@@ -408,9 +408,9 @@ export function CampaignRecipients({ id }: { id: string }) {
             checked={archiveReviewed}
             onChange={(event) => setArchiveReviewed(event.target.checked)}
           />
-          I compared the converted email with the archived original at desktop
-          and mobile widths, checked its links, images, merge tags, footer and
-          text, and sent myself a test.
+          I reviewed the converted email at desktop and mobile widths, checked
+          its links, images, merge tags, footer and text, and sent myself a
+          test.
         </label>
       )}
       {sendState ? (

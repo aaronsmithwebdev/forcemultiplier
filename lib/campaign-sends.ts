@@ -450,10 +450,7 @@ export async function startCampaignSend(
   if (!campaign) throw new AppError("Campaign not found.", 404);
   if (campaign.send) return campaign.send;
   if (campaign.sourceArchiveId && !archiveReviewed)
-    throw new AppError(
-      "Review the converted email against its archived original before sending.",
-      409,
-    );
+    throw new AppError("Review the converted email before sending.", 409);
   if (!campaign.audienceIds.length)
     throw new AppError("Choose at least one audience.");
   if (
