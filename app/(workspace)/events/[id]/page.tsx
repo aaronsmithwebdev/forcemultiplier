@@ -10,6 +10,7 @@ type Person = {
   email: string | null;
   activity: bigint;
   current: bigint;
+  paid: boolean;
 };
 const PAGE_SIZE = 50;
 
@@ -48,7 +49,8 @@ export default async function Page({
       ? Prisma.sql`
           SELECT p."salesforceId", MAX(p.name) AS name, MAX(p.email) AS email,
             COUNT(*) AS activity,
-            COUNT(*) FILTER (WHERE r.complete AND NOT r.archived) AS current
+            COUNT(*) FILTER (WHERE r.complete AND NOT r.archived) AS current,
+            BOOL_OR(r."isPaid") AS paid
           FROM "forcemultiplier"."FunraisinRegistration" r
           JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
           WHERE r."eventId" = ${id}
@@ -57,7 +59,8 @@ export default async function Page({
       : Prisma.sql`
           SELECT d."salesforceId", MAX(d.name) AS name, MAX(d.email) AS email,
             COUNT(*) AS activity,
-            COUNT(*) FILTER (WHERE d.status = 'paid') AS current
+            COUNT(*) FILTER (WHERE d.status = 'paid') AS current,
+            FALSE AS paid
           FROM "forcemultiplier"."FunraisinDonation" d
           WHERE d."eventId" = ${id}
           GROUP BY d."salesforceId"
@@ -70,7 +73,7 @@ export default async function Page({
       SELECT source."salesforceId",
         COALESCE(NULLIF(CONCAT_WS(' ', mirror."firstName", mirror."lastName"), ''), source.name, 'Unnamed contact') AS name,
         COALESCE(mirror.email, source.email) AS email,
-        source.activity, source.current
+        source.activity, source.current, source.paid
       FROM (${source}) source
       LEFT JOIN "forcemultiplier"."ContactMirror" mirror
         ON mirror."orgId" = ${sync.orgId}
@@ -123,6 +126,8 @@ export default async function Page({
             <p>
               {total.toLocaleString()} unique Salesforce Contacts. Activity
               counts include every stored registration or donation record.
+              {view === "participants" &&
+                " Is paid follows Funraisin's event registration flag."}
             </p>
           </div>
           <div className="button-row">
@@ -151,6 +156,7 @@ export default async function Page({
                     {view === "participants" ? "Registrations" : "Donations"}
                   </th>
                   <th>{view === "participants" ? "Completed" : "Paid"}</th>
+                  {view === "participants" && <th>Is paid</th>}
                   <th>Salesforce ID</th>
                 </tr>
               </thead>
@@ -173,6 +179,9 @@ export default async function Page({
                     <td>{person.email ?? "—"}</td>
                     <td>{Number(person.activity).toLocaleString()}</td>
                     <td>{Number(person.current).toLocaleString()}</td>
+                    {view === "participants" && (
+                      <td>{person.paid ? "Yes" : "No"}</td>
+                    )}
                     <td>{person.salesforceId}</td>
                   </tr>
                 ))}

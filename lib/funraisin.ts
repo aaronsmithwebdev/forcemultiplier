@@ -86,9 +86,10 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
       email: normalizedEmail(shortText(row.m_email, 254)),
     };
   if (phase === "registrations") {
+    // Legacy registrations can contain a blank status; only Y is affirmative.
     if (
-      [row.is_active, row.is_complete, row.is_archived].some(
-        (value) => value !== "Y" && value !== "N",
+      [row.is_active, row.is_complete, row.is_paid, row.is_archived].some(
+        (value) => value !== "Y" && value !== "N" && value !== "",
       )
     )
       throw new AppError(
@@ -101,6 +102,7 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
       eventId: funraisinId(row.event_id),
       active: row.is_active === "Y",
       complete: row.is_complete === "Y",
+      isPaid: row.is_paid === "Y",
       archived: row.is_archived === "Y",
     };
   }
@@ -330,11 +332,11 @@ async function savePage(
         `);
         if (phase === "registrations")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinRegistration" ("historyId", "memberId", "eventId", active, complete, archived, "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.memberId}, ${row.eventId}, ${row.active}, ${row.complete}, ${row.archived}, ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinRegistration" ("historyId", "memberId", "eventId", active, complete, "isPaid", archived, "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.memberId}, ${row.eventId}, ${row.active}, ${row.complete}, ${row.isPaid}, ${row.archived}, ${seen})`))}
           ON CONFLICT ("historyId") DO UPDATE SET "memberId" = EXCLUDED."memberId",
             "eventId" = EXCLUDED."eventId", active = EXCLUDED.active,
-            complete = EXCLUDED.complete, archived = EXCLUDED.archived,
+            complete = EXCLUDED.complete, "isPaid" = EXCLUDED."isPaid", archived = EXCLUDED.archived,
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinRegistration"."lastSeenScan")
         `);
         if (phase === "donations")

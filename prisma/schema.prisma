@@ -704,6 +704,7 @@ model FunraisinRegistration {
   event          FunraisinEvent       @relation(fields: [eventId], references: [id], onDelete: Cascade)
   active         Boolean
   complete       Boolean
+  isPaid         Boolean              @default(false)
   archived       Boolean
   lastSeenScan   String?
 

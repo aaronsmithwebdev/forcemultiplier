@@ -45,6 +45,7 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       event_id: "42",
       is_active: "Y",
       is_complete: "Y",
+      is_paid: "Y",
       is_archived: "N",
       crm_history_id: "00vABCDEFGHIJKL",
     }),
@@ -54,8 +55,30 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       eventId: "42",
       active: true,
       complete: true,
+      isPaid: true,
       archived: false,
     },
+  );
+  assert.equal(
+    funraisinRow("registrations", {
+      history_id: "10",
+      member_id: "7",
+      event_id: "42",
+      is_active: "N",
+      is_complete: "",
+      is_paid: "N",
+      is_archived: "Y",
+    }).complete,
+    false,
+  );
+  assert.throws(() =>
+    funraisinRow("registrations", {
+      history_id: "11",
+      is_active: "N",
+      is_complete: "Y",
+      is_paid: "maybe",
+      is_archived: "N",
+    }),
   );
   assert.deepEqual(
     funraisinRow("donations", {
