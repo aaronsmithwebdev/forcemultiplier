@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { TemplateContent } from "@templatical/types";
 import { db } from "@/lib/db";
+import { runFunraisinSyncStep } from "@/lib/funraisin";
 import {
   contactMirrorState,
   rebuildContactMirror,
@@ -234,6 +235,15 @@ async function handle(
       )
         throw new AppError("Cron authorization failed.", 401);
       return json(await runContactMirrorStep());
+    }
+    if (key === "cron/funraisin" && method === "GET") {
+      const secret = process.env.CRON_SECRET;
+      if (
+        !secret ||
+        request.headers.get("authorization") !== `Bearer ${secret}`
+      )
+        throw new AppError("Cron authorization failed.", 401);
+      return json(await runFunraisinSyncStep());
     }
     if (method !== "GET") checkOrigin(request);
     if (key === "auth/login" && method === "POST") {

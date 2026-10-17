@@ -29,6 +29,10 @@
     {
       "path": "/api/cron/contact-mirror",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/funraisin",
+      "schedule": "* * * * *"
     }
   ]
 }

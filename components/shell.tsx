@@ -15,10 +15,12 @@ import {
   ShieldCheck,
   Settings,
   PanelBottom,
+  CalendarDays,
 } from "lucide-react";
 import { api } from "./common";
 const links = [
   ["/audiences", "Audiences", UsersRound],
+  ["/events", "Funraisin events", CalendarDays],
   ["/campaigns", "Campaigns", Send],
   ["/templates", "Email templates", FilePenLine],
   ["/footers", "Email footers", PanelBottom],

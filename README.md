@@ -8,6 +8,7 @@ A private workspace growing into a complete Constant Contact replacement: Salesf
 - Separate Salesforce and Constant Contact connection settings, OAuth callbacks, encrypted credentials, automatic token refresh, connection testing, and disconnect/reconnect.
 - Audiences from Contact SOQL queries, Contact list views, Salesforce Campaign members, and supported standard Contacts report filters.
 - An optional, private Salesforce Contact mirror that incrementally copies core identity and opt-out fields plus selected Contact fields, with field-based exclusions and removal of newly excluded rows. It does not affect current audiences or sends. See [the mirror runbook](docs/salesforce-contact-mirror.md).
+- A private Funraisin event catalog with event-specific participant and donor lists, grouped by Salesforce Contact ID. A scheduled worker backfills and refreshes events, participants, registrations, and donations.
 - The staged [Salesforce Contact and audience cutover plan](docs/salesforce-contact-cutover-plan.md) records the next validation, parity, migration, and cleanup gates.
 - A metadata field explorer for Contact custom fields and parent relationships, including custom lookups. Selected fields are fetched separately from audience membership.
 - A 25-contact preview and resumable, paginated full pulls, including audiences larger than 2,000 records. Completed snapshots are saved in Supabase and remain visible during subsequent pulls.
@@ -76,6 +77,12 @@ Use `https://test.salesforce.com` or the sandbox My Domain for a sandbox. A refr
 The new app does not deploy Salesforce objects or Apex. A package is unnecessary for this milestone. ECA metadata and permission sets can be versioned/deployed later if you need installation across multiple orgs.
 
 [Salesforce External Client Apps](https://developer.salesforce.com/docs/platform/external-client-apps/guide/eca-intro.html)
+
+## Sync Funraisin events
+
+Set `FUNRAISIN_BASE_URL` and `FUNRAISIN_API_KEY` in the server environment, including Vercel, and connect the intended Salesforce org. The secured `/api/cron/funraisin` worker starts automatically, imports the complete event, participant, registration, and donation feeds, then polls changes hourly and reconciles the full feeds weekly. It processes five pages of at most 1,000 records per cron run and resumes after an interruption. **Funraisin events** shows progress, errors, and skipped records. A source URL or Salesforce org change pauses the worker for review.
+
+Event names come from Funraisin's `events` endpoint. Participants join through `participantsevents.event_id` and `member_id` to the participant's `crm_member_id`; donors join through `donations.event_id` and `crm_donor_id`. Only valid Salesforce Contact IDs are stored as people links. The event views group repeated activity by Contact ID and show total registrations or donations alongside completed or paid counts. Records without a valid Contact or event link appear by source ID in the **Unlinked Funraisin records** table for review. Funraisin names and email addresses are display fallbacks when the Salesforce Contact mirror has no row. The import does not change Salesforce Contacts or marketing consent, and Funraisin lists are not yet campaign audiences.
 
 ## Connect Constant Contact
 

@@ -672,3 +672,87 @@ model ContactMirrorSync {
 
   @@schema("forcemultiplier")
 }
+
+model FunraisinEvent {
+  id             String                  @id
+  name           String
+  eventDate      DateTime?
+  lastSeenScan   String?
+  registrations  FunraisinRegistration[]
+  donations      FunraisinDonation[]
+
+  @@schema("forcemultiplier")
+}
+
+model FunraisinParticipant {
+  memberId       String                  @id
+  salesforceId   String
+  name           String?
+  email          String?
+  lastSeenScan   String?
+  registrations  FunraisinRegistration[]
+
+  @@index([salesforceId])
+  @@schema("forcemultiplier")
+}
+
+model FunraisinRegistration {
+  historyId      String               @id
+  memberId       String
+  participant    FunraisinParticipant @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+  eventId        String
+  event          FunraisinEvent       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  active         Boolean
+  complete       Boolean
+  archived       Boolean
+  lastSeenScan   String?
+
+  @@index([eventId, memberId])
+  @@schema("forcemultiplier")
+}
+
+model FunraisinDonation {
+  donationId     String          @id
+  eventId        String?
+  event          FunraisinEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  salesforceId   String
+  name           String?
+  email          String?
+  status         String?
+  lastSeenScan   String?
+
+  @@index([eventId, salesforceId])
+  @@schema("forcemultiplier")
+}
+
+model FunraisinSync {
+  id              String    @id @default("default")
+  orgId           String?
+  baseUrl         String?
+  mode            String    @default("full")
+  phase           String    @default("events")
+  offset          Int       @default(0)
+  total           Int       @default(0)
+  processed       Int       @default(0)
+  skipped         Int       @default(0)
+  scanId          String?
+  scanUntil       DateTime?
+  lastFullAt      DateTime?
+  lastCompletedAt DateTime?
+  dueAt           DateTime  @default(now())
+  leaseUntil      DateTime?
+  error           String?
+  updatedAt       DateTime  @updatedAt
+
+  @@schema("forcemultiplier")
+}
+
+model FunraisinIssue {
+  phase        String
+  sourceId     String
+  reason       String
+  lastSeenScan String?
+
+  @@id([phase, sourceId])
+  @@schema("forcemultiplier")
+}
