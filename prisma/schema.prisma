@@ -720,6 +720,8 @@ model FunraisinDonation {
   name           String?
   email          String?
   status         String?
+  amount         Decimal?        @db.Decimal(15, 2)
+  refundAmount   Decimal?        @db.Decimal(15, 2)
   lastSeenScan   String?
 
   @@index([eventId, salesforceId])

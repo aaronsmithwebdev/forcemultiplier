@@ -11,8 +11,13 @@ type Person = {
   activity: bigint;
   current: bigint;
   paid: boolean;
+  netAmount: Prisma.Decimal | null;
 };
 const PAGE_SIZE = 50;
+const money = new Intl.NumberFormat("en-AU", {
+  style: "currency",
+  currency: "AUD",
+});
 
 export default async function Page({
   params,
@@ -50,7 +55,8 @@ export default async function Page({
           SELECT p."salesforceId", MAX(p.name) AS name, MAX(p.email) AS email,
             COUNT(*) AS activity,
             COUNT(*) FILTER (WHERE r.complete AND NOT r.archived) AS current,
-            BOOL_OR(r."isPaid") AS paid
+            BOOL_OR(r."isPaid") AS paid,
+            NULL::numeric AS "netAmount"
           FROM "forcemultiplier"."FunraisinRegistration" r
           JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
           WHERE r."eventId" = ${id}
@@ -60,7 +66,12 @@ export default async function Page({
           SELECT d."salesforceId", MAX(d.name) AS name, MAX(d.email) AS email,
             COUNT(*) AS activity,
             COUNT(*) FILTER (WHERE d.status = 'paid') AS current,
-            FALSE AS paid
+            FALSE AS paid,
+            CASE
+              WHEN COUNT(*) FILTER (WHERE d.status = 'paid' AND
+                (d.amount IS NULL OR d."refundAmount" IS NULL)) > 0 THEN NULL
+              ELSE COALESCE(SUM(d.amount - d."refundAmount") FILTER (WHERE d.status = 'paid'), 0)
+            END AS "netAmount"
           FROM "forcemultiplier"."FunraisinDonation" d
           WHERE d."eventId" = ${id}
           GROUP BY d."salesforceId"
@@ -73,7 +84,7 @@ export default async function Page({
       SELECT source."salesforceId",
         COALESCE(NULLIF(CONCAT_WS(' ', mirror."firstName", mirror."lastName"), ''), source.name, 'Unnamed contact') AS name,
         COALESCE(mirror.email, source.email) AS email,
-        source.activity, source.current, source.paid
+        source.activity, source.current, source.paid, source."netAmount"
       FROM (${source}) source
       LEFT JOIN "forcemultiplier"."ContactMirror" mirror
         ON mirror."orgId" = ${sync.orgId}
@@ -124,10 +135,10 @@ export default async function Page({
           <div>
             <h2>{view === "participants" ? "Participants" : "Donors"}</h2>
             <p>
-              {total.toLocaleString()} unique Salesforce Contacts. Activity
-              counts include every stored registration or donation record.
-              {view === "participants" &&
-                " Is paid follows Funraisin's event registration flag."}
+              {total.toLocaleString()} unique Salesforce Contacts.{" "}
+              {view === "participants"
+                ? "Registration counts include every stored record. Is paid follows Funraisin's event registration flag."
+                : "Donation records and paid gifts are linked to this event only. Net paid total subtracts recorded refunds."}
             </p>
           </div>
           <div className="button-row">
@@ -153,10 +164,15 @@ export default async function Page({
                   <th>Contact</th>
                   <th>Email</th>
                   <th>
-                    {view === "participants" ? "Registrations" : "Donations"}
+                    {view === "participants"
+                      ? "Registrations"
+                      : "Donation records"}
                   </th>
-                  <th>{view === "participants" ? "Completed" : "Paid"}</th>
+                  <th>
+                    {view === "participants" ? "Completed" : "Paid gifts"}
+                  </th>
                   {view === "participants" && <th>Is paid</th>}
+                  {view === "donors" && <th>Net paid (AUD)</th>}
                   <th>Salesforce ID</th>
                 </tr>
               </thead>
@@ -181,6 +197,15 @@ export default async function Page({
                     <td>{Number(person.current).toLocaleString()}</td>
                     {view === "participants" && (
                       <td>{person.paid ? "Yes" : "No"}</td>
+                    )}
+                    {view === "donors" && (
+                      <td>
+                        {person.netAmount === null
+                          ? sync.scanUntil
+                            ? "Syncing"
+                            : "Unavailable"
+                          : money.format(Number(person.netAmount))}
+                      </td>
                     )}
                     <td>{person.salesforceId}</td>
                   </tr>

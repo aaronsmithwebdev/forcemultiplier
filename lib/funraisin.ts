@@ -53,6 +53,12 @@ const name = (first: unknown, last: unknown) =>
   [shortText(first, 150), shortText(last, 150)].filter(Boolean).join(" ") ||
   null;
 
+const money = (value: unknown) => {
+  if (typeof value !== "string" || !/^-?\d+(?:\.\d{1,2})?$/.test(value))
+    throw new AppError("Funraisin returned an invalid donation amount.", 502);
+  return value;
+};
+
 const date = (value: unknown) => {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
     return null;
@@ -113,6 +119,8 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
     name: name(row.d_fname, row.d_lname),
     email: normalizedEmail(shortText(row.d_email, 254)),
     status: shortText(row.d_status, 20),
+    amount: money(row.d_amount),
+    refundAmount: money(row.d_refund_amount),
   };
 }
 
@@ -341,11 +349,12 @@ async function savePage(
         `);
         if (phase === "donations")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", name, email, status, "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${row.name}, ${row.email}, ${row.status}, ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", name, email, status, amount, "refundAmount", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${row.name}, ${row.email}, ${row.status}, CAST(${row.amount} AS numeric), CAST(${row.refundAmount} AS numeric), ${seen})`))}
           ON CONFLICT ("donationId") DO UPDATE SET "eventId" = EXCLUDED."eventId",
             "salesforceId" = EXCLUDED."salesforceId", name = EXCLUDED.name,
             email = EXCLUDED.email, status = EXCLUDED.status,
+            amount = EXCLUDED.amount, "refundAmount" = EXCLUDED."refundAmount",
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinDonation"."lastSeenScan")
         `);
       }

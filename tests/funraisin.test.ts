@@ -90,6 +90,8 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       d_lname: "Donor",
       d_email: "PAT@example.com",
       d_status: "paid",
+      d_amount: "75.50",
+      d_refund_amount: "10.00",
     }),
     {
       id: "11",
@@ -98,6 +100,15 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       name: "Pat Donor",
       email: "pat@example.com",
       status: "paid",
+      amount: "75.50",
+      refundAmount: "10.00",
     },
+  );
+  assert.throws(() =>
+    funraisinRow("donations", {
+      donation_id: "12",
+      d_amount: "not money",
+      d_refund_amount: "0.00",
+    }),
   );
 });
