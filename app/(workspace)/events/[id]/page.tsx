@@ -83,6 +83,18 @@ export default async function Page({
   const total = Number(count[0]?.total ?? 0);
   const href = (nextPage: number) =>
     `/events/${id}?view=${view}&page=${nextPage}`;
+  const waitingForRecords =
+    !!sync.scanUntil &&
+    (view === "participants"
+      ? sync.phase === "events" || sync.phase === "participants"
+      : sync.phase !== "donations");
+  const emptyDescription = waitingForRecords
+    ? view === "participants"
+      ? "Participant profiles are importing first. Event registrations come next, so this list will fill as registrations arrive."
+      : "The import has not reached donations yet. This list will fill as donation records arrive."
+    : sync.scanUntil
+      ? "The import is still running. More people may appear as records arrive."
+      : "No Funraisin records with a valid Salesforce Contact ID are linked to this event.";
 
   return (
     <>
@@ -95,6 +107,15 @@ export default async function Page({
           "Date not set"}{" "}
         · Funraisin event {event.id}
       </p>
+      {sync.scanUntil && (
+        <p className="page-intro">
+          Syncing {sync.phase}: {sync.processed.toLocaleString()}
+          {sync.total ? ` of ${sync.total.toLocaleString()}` : ""} records
+          processed in this stage.
+          {sync.error &&
+            ` Last attempt failed: ${sync.error} Next retry: ${sync.dueAt.toLocaleString()}.`}
+        </p>
+      )}
       <section className="card">
         <div className="section-toolbar">
           <div>
@@ -160,8 +181,12 @@ export default async function Page({
           </div>
         ) : (
           <Empty
-            title={`No ${view} on this page`}
-            description="This view updates as the Funraisin import progresses."
+            title={
+              waitingForRecords
+                ? `${view === "participants" ? "Participants" : "Donors"} are still syncing`
+                : `No ${view} on this page`
+            }
+            description={emptyDescription}
           />
         )}
       </section>
