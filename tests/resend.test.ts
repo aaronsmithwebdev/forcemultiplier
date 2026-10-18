@@ -121,3 +121,23 @@ test("Resend imports map Salesforce Contact IDs to a contact property", async ()
     "import_123",
   );
 });
+
+test("Resend imports map used Funraisin properties without changing subscription status", async () => {
+  const request = (async (_url: unknown, options: RequestInit) => {
+    const form = options.body as FormData;
+    const map = JSON.parse(String(form.get("column_map")));
+    assert.equal(map.unsubscribed, undefined);
+    assert.deepEqual(map.properties.FunraisinEventName, {
+      column: "FunraisinEventName",
+      type: "string",
+    });
+    assert.equal(map.properties.FunraisinDonationCount, undefined);
+    return Response.json({ id: "import-1" });
+  }) as typeof fetch;
+  assert.equal(
+    await createResendContactImport("segment-1", "csv", "test-key", request, [
+      "FunraisinEventName",
+    ]),
+    "import-1",
+  );
+});

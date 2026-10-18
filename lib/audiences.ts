@@ -1,3 +1,9 @@
+import {
+  FUNRAISIN_FIELDS,
+  parseFunraisinAudience,
+  funraisinAudienceConnection,
+  funraisinAudiencePage,
+} from "./funraisin-audiences";
 import { db } from "./db";
 import { AppError, publicError, transientError } from "./errors";
 import { connection, sfQuery } from "./providers";
@@ -15,6 +21,19 @@ export async function createAudience(input: {
   const config = await connection("salesforce");
   if (!config.tokens || !config.externalId)
     throw new AppError("Connect Salesforce first.", 409);
+  if (input.sourceType === "funraisin") {
+    const sync = await funraisinAudienceConnection();
+    const filters = parseFunraisinAudience(input.query);
+    return db.audience.create({
+      data: {
+        name: input.name,
+        sourceType: "funraisin",
+        query: JSON.stringify(filters),
+        orgId: sync.orgId,
+        fields: [...FUNRAISIN_FIELDS],
+      },
+    });
+  }
   let query = input.query;
   if (input.sourceType !== "soql") {
     const resolved = await sourceQuery(input.sourceType, input.sourceId ?? "");
@@ -37,6 +56,11 @@ export async function updateAudienceQuery(id: string, query: string) {
   validateQuery(query);
   const audience = await db.audience.findUnique({ where: { id } });
   if (!audience) throw new AppError("Audience not found.", 404);
+  if (audience.sourceType === "funraisin")
+    throw new AppError(
+      "Funraisin audiences use filters. Create a new audience to change them.",
+      409,
+    );
   const config = await connection("salesforce");
   if (!config.tokens || config.externalId !== audience.orgId)
     throw new AppError(
@@ -62,13 +86,18 @@ export async function startPull(id: string) {
   });
   if (existing) return existing;
   let query = audience.query;
-  if (audience.sourceType !== "soql") {
+  if (audience.sourceType === "funraisin") {
+    parseFunraisinAudience(query);
+    await funraisinAudienceConnection(audience.orgId);
+  } else if (audience.sourceType !== "soql") {
     const resolved = await sourceQuery(audience.sourceType, audience.sourceId!);
     if (!resolved.query) throw new AppError(resolved.notes.join(" "), 422);
     query = resolved.query;
   }
-  validateQuery(query);
-  await validatePaths(audience.fields as string[]);
+  if (audience.sourceType !== "funraisin") {
+    validateQuery(query);
+    await validatePaths(audience.fields as string[]);
+  }
   try {
     return await db.pullRun.create({
       data: {
@@ -164,8 +193,11 @@ export async function pullStep(id: string) {
         "The Salesforce connection changed. Reconnect the original org.",
         409,
       );
+    const funraisin = run.query.startsWith("{");
     const page = await pullStage(id, "fetch Salesforce page", () =>
-      sfQuery(run.query, run.cursor),
+      funraisin
+        ? funraisinAudiencePage(run.query, run.cursor, 500, run.orgId)
+        : sfQuery(run.query, run.cursor),
     );
     if (
       !Array.isArray(page.records) ||
@@ -182,8 +214,13 @@ export async function pullStep(id: string) {
         "This audience exceeds the 150,000-record manual pull limit. Narrow the query; Bulk extraction is a later milestone.",
         422,
       );
-    const records = await pullStage(id, "enrich Salesforce contacts", () =>
-      enrich(page.records, run.fields as string[]),
+    const records: Record<string, any>[] = await pullStage(
+      id,
+      "enrich Salesforce contacts",
+      () =>
+        funraisin
+          ? Promise.resolve(page.records)
+          : enrich(page.records, run.fields as string[]),
     );
     if (records.length !== page.records.length)
       throw new AppError(

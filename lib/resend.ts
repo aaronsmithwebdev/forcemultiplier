@@ -122,6 +122,7 @@ export async function createResendContactImport(
   csv: string,
   key = process.env.RESEND_API_KEY,
   request: typeof fetch = fetch,
+  fields: readonly string[] = [],
 ) {
   if (Buffer.byteLength(csv) > 200_000_000)
     throw new AppError("This recipient import exceeds Resend's 200 MB limit.");
@@ -134,6 +135,9 @@ export async function createResendContactImport(
       first_name: "First Name",
       last_name: "Last Name",
       properties: {
+        ...Object.fromEntries(
+          fields.map((field) => [field, { column: field, type: "string" }]),
+        ),
         salesforce_contact_id: {
           column: "Salesforce Contact ID",
           type: "string",

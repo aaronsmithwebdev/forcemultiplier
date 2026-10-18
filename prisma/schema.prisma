@@ -573,6 +573,7 @@ model CampaignSend {
 }
 
 model CampaignRecipient {
+  data                     Json         @default("{}")
   sendId                   String
   send                     CampaignSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
   email                    String
@@ -738,6 +739,7 @@ model FunraisinDonation {
   lastSeenScan   String?
 
   @@index([eventId, salesforceId])
+  @@index([salesforceId])
   @@schema("forcemultiplier")
 }
 

@@ -1,3 +1,4 @@
+import { FUNRAISIN_FIELDS } from "./template-merge-tags";
 import { Prisma } from "@prisma/client";
 import type { TemplateContent } from "@templatical/types";
 import type { QueryFilter, QueryGroup } from "./query-builder";
@@ -28,6 +29,7 @@ type RecipientRow = {
   email: string;
   name: string | null;
   salesforceId: string | null;
+  data: Record<string, unknown>;
   sourceRows: bigint;
   optedOut: boolean;
   audienceExcluded: boolean;
@@ -54,6 +56,12 @@ export function prepareBroadcastHtml(html: string) {
     .replace(/\{\{\s*contact\.LastName\s*\}\}/g, "{{{contact.last_name}}}")
     .replace(/\{\{\s*contact\.Email\s*\}\}/g, "{{{contact.email}}}")
     .replace(/\{\{\s*unsubscribe_url\s*\}\}/g, "{{{RESEND_UNSUBSCRIBE_URL}}}");
+  for (const field of FUNRAISIN_FIELDS) {
+    prepared = prepared.replace(
+      new RegExp(`\\{\\{\\s*contact\\.${field}\\s*\\}\\}`, "g"),
+      `{{{contact.${field}}}}`,
+    );
+  }
   const unsupported = [
     ...prepared.matchAll(
       /(?<!\{)\{\{(?!\{)\s*contact\.([A-Za-z0-9_.]+)\s*\}\}(?!\})/g,
@@ -90,7 +98,7 @@ function escapeHtml(value: string) {
 
 export function prepareServiceNoticeHtml(
   html: string,
-  recipient: { email: string; name: string | null },
+  recipient: { email: string; name: string | null; data?: unknown },
 ) {
   if (/\{\{\s*unsubscribe_url\s*\}\}/.test(html))
     throw new AppError(
@@ -103,10 +111,20 @@ export function prepareServiceNoticeHtml(
     LastName: parts.slice(1).join(" "),
     Email: recipient.email,
   };
-  const prepared = html.replace(
+  let prepared = html.replace(
     /\{\{\s*contact\.(FirstName|LastName|Email)\s*\}\}/g,
     (_match, field: keyof typeof values) => escapeHtml(values[field]),
   );
+  const data =
+    recipient.data && typeof recipient.data === "object"
+      ? (recipient.data as Record<string, unknown>)
+      : {};
+  for (const field of FUNRAISIN_FIELDS) {
+    prepared = prepared.replace(
+      new RegExp(`\\{\\{\\s*contact\\.${field}\\s*\\}\\}`, "g"),
+      () => escapeHtml(String(data[field] ?? "")),
+    );
+  }
   const unsupported = [
     ...prepared.matchAll(
       /(?<!\{)\{\{(?!\{)\s*contact\.([A-Za-z0-9_.]+)\s*\}\}(?!\})/g,
@@ -188,6 +206,8 @@ async function recipientRows(
     WITH included AS (
       SELECT m."normalizedEmail" AS email,
         MIN(m.name) AS name,
+        (ARRAY_AGG(m.data ORDER BY (m.data ? 'FunraisinEventName') DESC,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS data,
         MIN(m."salesforceId") AS "salesforceId",
         COUNT(*) AS "sourceRows",
         BOOL_OR(m."optedOut") AS "optedOut",
@@ -524,6 +544,10 @@ export async function startCampaignSend(
         where: { campaignId },
       });
       if (existing) return existing;
+      throw new AppError(
+        "Another campaign using Funraisin personalisation is preparing. Finish it before starting this campaign.",
+        409,
+      );
     }
     throw error;
   }
@@ -538,10 +562,18 @@ export function resendContactImportCsv(
     email: string;
     name: string | null;
     salesforceId: string | null;
+    data?: unknown;
   }[],
+  fields: readonly string[] = [],
 ) {
   return [
-    "Email,First Name,Last Name,Salesforce Contact ID",
+    [
+      "Email",
+      "First Name",
+      "Last Name",
+      "Salesforce Contact ID",
+      ...fields,
+    ].join(","),
     ...recipients.map((recipient) => {
       const parts = (recipient.name || "").trim().split(/\s+/).filter(Boolean);
       return [
@@ -549,6 +581,15 @@ export function resendContactImportCsv(
         parts[0] || "",
         parts.slice(1).join(" "),
         recipient.salesforceId || "",
+        ...fields.map((field) =>
+          escapeHtml(
+            String(
+              (recipient.data as Record<string, unknown> | undefined)?.[
+                field
+              ] ?? "",
+            ) || " ",
+          ),
+        ),
       ]
         .map(csvCell)
         .join(",");
@@ -656,6 +697,7 @@ export async function campaignSendStep(id?: string) {
             email: row.email,
             name: row.name,
             salesforceId: row.salesforceId,
+            data: (row.data ?? {}) as Prisma.InputJsonValue,
           })),
           skipDuplicates: true,
         });
@@ -689,8 +731,19 @@ export async function campaignSendStep(id?: string) {
         where: { sendId: send.id },
         orderBy: { email: "asc" },
       });
-      const csv = resendContactImportCsv(recipients);
-      const importId = await createResendContactImport(segmentId, csv);
+      const fields = FUNRAISIN_FIELDS.filter((field) =>
+        new RegExp(`contact\\.${field}\\s*\\}\\}`).test(
+          JSON.stringify([send.content, send.footerContent]),
+        ),
+      );
+      const csv = resendContactImportCsv(recipients, fields);
+      const importId = await createResendContactImport(
+        segmentId,
+        csv,
+        undefined,
+        undefined,
+        fields,
+      );
       return db.campaignSend.update({
         where: { id: send.id },
         data: {

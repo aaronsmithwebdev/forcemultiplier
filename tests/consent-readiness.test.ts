@@ -84,7 +84,7 @@ test("readiness blocks incomplete, unhealthy or unverified consent sources", asy
     [process.env, "RESEND_WEBHOOK_SECRET", "whsec_bad", /webhook/],
     [runs[0], "orgId", "other-org", /Selected snapshots/],
     [runs[0], "status", "running", /Selected snapshots/],
-    [runs[0].audience, "sourceType", "funraisin", /Other sources/],
+    [runs[0].audience, "sourceType", "unknown-source", /Other sources/],
   ] as const;
   for (const [target, key, value, expected] of cases) {
     const object = target as any;
@@ -330,5 +330,14 @@ test("baseline confirmation records the actor and is bound to the connected org"
   await assert.rejects(
     confirmConsentBaseline(true, "user-1"),
     /Enable opt-out sync/,
+  );
+});
+
+test("Salesforce-linked Funraisin snapshots use the verified org consent baseline", async (t) => {
+  const { runs } = setup(t);
+  runs[0]!.audience.sourceType = "funraisin";
+  assert.equal(
+    (await marketingConsentReadiness(["funraisin-run"])).ready,
+    true,
   );
 });

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { FUNRAISIN_FIELDS } from "@/lib/template-merge-tags";
 import { useCallback, useState } from "react";
 import {
   Code2,
@@ -17,6 +18,7 @@ import { api, Badge, Button, Heading, Notice, valueAt } from "./common";
 import { FieldBrowser } from "./field-browser";
 import { ContactQueryBuilder } from "./query-builder";
 const types = [
+  ["funraisin", "Funraisin", "Filter event entrants and donors.", Flag],
   ["soql", "SOQL query", "Write exactly who you need.", Code2],
   [
     "builder",
@@ -69,10 +71,22 @@ export function AudienceBuilder() {
     setNotes([]);
     setRecords(null);
     setCursor("");
+    setFields(value === "funraisin" ? [...FUNRAISIN_FIELDS] : []);
+    if (value === "funraisin")
+      void work("sources", async () =>
+        setSources(await api("funraisin/events")),
+      );
     setQuery(
-      ["soql", "builder"].includes(value)
-        ? "SELECT Id FROM Contact\nWHERE Email != null"
-        : "",
+      value === "funraisin"
+        ? JSON.stringify({
+            type: "funraisin",
+            people: "entrants",
+            paidOnly: true,
+            minDonations: 1,
+          })
+        : ["soql", "builder"].includes(value)
+          ? "SELECT Id FROM Contact\nWHERE Email != null"
+          : "",
     );
   }
   async function loadSources(more = false) {
@@ -106,6 +120,11 @@ export function AudienceBuilder() {
       setQuery(data.query || "");
       setNotes(data.notes || []);
     });
+  }
+  const funFilters = type === "funraisin" ? JSON.parse(query) : null;
+  function updateFunFilters(patch: Record<string, unknown>) {
+    setQuery(JSON.stringify({ ...funFilters, ...patch }));
+    setRecords(null);
   }
   const queryEditor = (
     <>
@@ -183,7 +202,7 @@ export function AudienceBuilder() {
               maxLength={120}
             />
           </label>
-          {!["soql", "builder"].includes(type) && (
+          {!["soql", "builder", "funraisin"].includes(type) && (
             <div className="source-picker">
               <label>
                 Find a Salesforce{" "}
@@ -256,8 +275,89 @@ export function AudienceBuilder() {
               </div>
             </div>
           )}
+          {funFilters && (
+            <div className="source-picker">
+              <label>
+                People
+                <select
+                  value={funFilters.people}
+                  onChange={(e) => updateFunFilters({ people: e.target.value })}
+                >
+                  <option value="entrants">Event entrants</option>
+                  <option value="donors">Donors</option>
+                </select>
+              </label>
+              <label>
+                Event
+                <select
+                  value={funFilters.eventId || ""}
+                  onChange={(e) =>
+                    updateFunFilters({ eventId: e.target.value || undefined })
+                  }
+                >
+                  <option value="">All events</option>
+                  {sources.map((event) => (
+                    <option key={event.id} value={event.id}>
+                      {event.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {funFilters.people === "entrants" ? (
+                <label className="consent-check">
+                  <input
+                    type="checkbox"
+                    checked={funFilters.paidOnly}
+                    onChange={(e) =>
+                      updateFunFilters({ paidOnly: e.target.checked })
+                    }
+                  />
+                  Paid entrants only
+                </label>
+              ) : (
+                <>
+                  <label>
+                    Minimum donations
+                    <input
+                      type="number"
+                      min="1"
+                      max="150000"
+                      value={funFilters.minDonations}
+                      onChange={(e) =>
+                        updateFunFilters({
+                          minDonations: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Maximum donations (optional)
+                    <input
+                      type="number"
+                      min="1"
+                      max="150000"
+                      value={funFilters.maxDonations ?? ""}
+                      onChange={(e) =>
+                        updateFunFilters({
+                          maxDonations: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                    />
+                  </label>
+                </>
+              )}
+              <p className="muted">
+                Entrants must have active, complete, unarchived registrations.
+                Donation counts include paid donations with a positive amount
+                after refunds, within the selected event or across all events.
+                Only contacts linked to Salesforce are included.
+              </p>
+            </div>
+          )}
           {type === "builder" && <ContactQueryBuilder onChange={updateQuery} />}
-          {type === "builder" ? (
+          {type === "funraisin" ? null : type === "builder" ? (
             <details className="builder-query-details">
               <summary>
                 <Code2 size={15} /> View generated SOQL
@@ -269,25 +369,31 @@ export function AudienceBuilder() {
           )}
           <div className="section-title second">
             <span className="step-number">2</span>
-            <h2>Choose additional fields</h2>
+            <h2>
+              {type === "funraisin"
+                ? "Personalisation fields"
+                : "Choose additional fields"}
+            </h2>
           </div>
           <p className="muted">
             Names, email addresses and opt-outs are included automatically.
           </p>
-          <Button
-            variant="secondary"
-            disabled={!!busy}
-            onClick={() => setShowFields(!showFields)}
-          >
-            {showFields
-              ? "Close field explorer"
-              : "Explore related objects & custom fields"}
-            <ArrowRight size={16} />
-          </Button>
-          {showFields && (
+          {type !== "funraisin" && (
+            <Button
+              variant="secondary"
+              disabled={!!busy}
+              onClick={() => setShowFields(!showFields)}
+            >
+              {showFields
+                ? "Close field explorer"
+                : "Explore related objects & custom fields"}
+              <ArrowRight size={16} />
+            </Button>
+          )}
+          {type !== "funraisin" && showFields && (
             <FieldBrowser selected={fields} onChange={setFields} />
           )}{" "}
-          {!showFields && fields.length > 0 && (
+          {(type === "funraisin" || !showFields) && fields.length > 0 && (
             <div className="selected-fields">
               {fields.map((f) => (
                 <Badge key={f}>{f}</Badge>
@@ -301,10 +407,16 @@ export function AudienceBuilder() {
               disabled={!query || !!busy}
               onClick={() =>
                 work("preview", async () => {
-                  const data = await api("salesforce/preview", "POST", {
-                    query,
-                    fields,
-                  });
+                  const data = await api(
+                    type === "funraisin"
+                      ? "funraisin/preview"
+                      : "salesforce/preview",
+                    "POST",
+                    {
+                      query,
+                      fields,
+                    },
+                  );
                   setRecords(data.records);
                 })
               }
@@ -339,7 +451,10 @@ export function AudienceBuilder() {
             <ol className="how-list">
               <li>
                 <strong>Choose who belongs</strong>
-                <p>Use Salesforce criteria to find matching Contact records.</p>
+                <p>
+                  Use Salesforce criteria or Funraisin event and donation
+                  filters.
+                </p>
               </li>
               <li>
                 <strong>Bring the useful details</strong>
@@ -355,9 +470,9 @@ export function AudienceBuilder() {
             </ol>
           </div>
           <div className="aside-note">
-            Report and list-view sources follow their saved Salesforce
-            definitions on each new pull. Unsupported report rules are flagged
-            for review.
+            {type === "funraisin"
+              ? "Funraisin audiences use the latest completed sync. Event and donation fields are included automatically and can be inserted into email content. If you include multiple event audiences, personalisation uses the first matching Funraisin snapshot."
+              : "Report and list-view sources follow their saved Salesforce definitions on each new pull. Unsupported report rules are flagged for review."}
           </div>
         </aside>
       </div>

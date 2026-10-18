@@ -1,5 +1,13 @@
 import type { MergeTag } from "@templatical/types";
 
+export const FUNRAISIN_FIELDS = [
+  "FunraisinEventName",
+  "FunraisinDonationCount",
+  "FunraisinDonationTotal",
+  "FunraisinLastDonatedAt",
+  "FunraisinLastDonatedToName",
+] as const;
+
 export function mergeTagCatalog(fields: unknown[]): MergeTag[] {
   const paths = [
     ...new Set(
@@ -26,10 +34,12 @@ export function mergeTagCatalog(fields: unknown[]): MergeTag[] {
         )
         .join(" › "),
       value: `{{contact.${path}}}`,
-      group: path.includes(".")
-        ? "Related Salesforce fields"
-        : "Contact fields",
-      description: `Salesforce ${path}`,
+      group: (FUNRAISIN_FIELDS as readonly string[]).includes(path)
+        ? "Funraisin fields"
+        : path.includes(".")
+          ? "Related Salesforce fields"
+          : "Contact fields",
+      description: `${path.startsWith("Funraisin") ? "Funraisin" : "Salesforce"} ${path}`,
       ...(samples[path] ? { sample: samples[path] } : {}),
     })),
     {

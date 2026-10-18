@@ -1,4 +1,8 @@
 import {
+  funraisinAudiencePage,
+  funraisinAudienceConnection,
+} from "@/lib/funraisin-audiences";
+import {
   marketingResubscriptionInput,
   marketingResubscriptionState,
   createMarketingResubscription,
@@ -850,6 +854,21 @@ async function handle(
         childRelationships: info.childRelationships,
       });
     }
+    if (key === "funraisin/events" && method === "GET") {
+      await funraisinAudienceConnection();
+      return json(
+        await db.funraisinEvent.findMany({
+          orderBy: [{ eventDate: "desc" }, { name: "asc" }],
+          select: { id: true, name: true },
+        }),
+      );
+    }
+    if (key === "funraisin/preview" && method === "POST") {
+      const data = z
+        .object({ query: z.string().max(20000) })
+        .parse(await body(request));
+      return json(await funraisinAudiencePage(data.query, null, 25));
+    }
     if (key === "salesforce/preview" && method === "POST") {
       const data = queryBody.parse(await body(request));
       await validatePaths(data.fields);
@@ -884,7 +903,13 @@ async function handle(
       const data = queryBody
         .extend({
           name: z.string().trim().min(1).max(120),
-          sourceType: z.enum(["soql", "report", "listview", "campaign"]),
+          sourceType: z.enum([
+            "soql",
+            "report",
+            "listview",
+            "campaign",
+            "funraisin",
+          ]),
           sourceId: z.string().optional(),
         })
         .parse(await body(request));

@@ -1,7 +1,13 @@
 import { db } from "./db";
 
 const MAX_CONSENT_AGE_MS = 15 * 60 * 1000;
-const SALESFORCE_SOURCES = new Set(["soql", "report", "listview", "campaign"]);
+const SALESFORCE_SOURCES = new Set([
+  "soql",
+  "report",
+  "listview",
+  "campaign",
+  "funraisin",
+]);
 
 // Check small metadata records only; audience age and recipient count do not
 // determine consent freshness. New sources must establish their own baseline.

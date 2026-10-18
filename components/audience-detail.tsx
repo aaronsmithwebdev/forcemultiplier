@@ -557,7 +557,11 @@ export function AudienceDetail({ id }: { id: string }) {
         )}
       </section>
       <details className="card query-details">
-        <summary>Audience SOQL and selected fields</summary>
+        <summary>
+          {data.sourceType === "funraisin"
+            ? "Funraisin filters and personalisation fields"
+            : "Audience SOQL and selected fields"}
+        </summary>
         {editingQuery ? (
           <>
             <label>
@@ -600,17 +604,28 @@ export function AudienceDetail({ id }: { id: string }) {
           </>
         ) : (
           <>
-            <pre>{data.query}</pre>
-            <Button
-              variant="secondary"
-              disabled={busy || sending}
-              onClick={() => {
-                setQueryDraft(data.query);
-                setEditingQuery(true);
-              }}
-            >
-              <Pencil size={15} /> Edit SOQL
-            </Button>
+            {data.sourceType === "funraisin" ? (
+              <p>
+                {(() => {
+                  const filters = JSON.parse(data.query);
+                  return `${filters.people === "entrants" ? (filters.paidOnly ? "Paid event entrants" : "Event entrants") : `Donors with ${filters.minDonations}${filters.maxDonations ? `–${filters.maxDonations}` : "+"} donations`} · ${filters.eventId ? `Event ${filters.eventId}` : "All events"}`;
+                })()}
+              </p>
+            ) : (
+              <pre>{data.query}</pre>
+            )}
+            {data.sourceType !== "funraisin" && (
+              <Button
+                variant="secondary"
+                disabled={busy || sending}
+                onClick={() => {
+                  setQueryDraft(data.query);
+                  setEditingQuery(true);
+                }}
+              >
+                <Pencil size={15} /> Edit SOQL
+              </Button>
+            )}
           </>
         )}
         <div className="selected-fields">
@@ -618,11 +633,19 @@ export function AudienceDetail({ id }: { id: string }) {
             <Badge key={f}>{f}</Badge>
           ))}
         </div>
-        {data.sourceType !== "soql" && (
+        {data.sourceType === "funraisin" ? (
           <p className="muted">
-            Saved criteria shown above. A new pull reads the current Salesforce
-            definition and records its executed query in pull history.
+            Each pull uses these filters against the latest completed Funraisin
+            sync. Create a new audience to use different filters.
           </p>
+        ) : (
+          data.sourceType !== "soql" && (
+            <p className="muted">
+              Saved criteria shown above. A new pull reads the current
+              Salesforce definition and records its executed query in pull
+              history.
+            </p>
+          )
         )}
       </details>
       <section className="card">

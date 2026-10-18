@@ -144,3 +144,45 @@ test("campaign field exclusions preserve nested AND and OR logic", () => {
     "%@example.org%",
   ]);
 });
+
+test("Funraisin merge fields reach broadcasts, service notices and recipient imports", () => {
+  const tag = "{{ contact.FunraisinLastDonatedToName }}";
+  assert.match(
+    prepareBroadcastHtml(`<p>${tag}</p>`),
+    /\{\{\{contact\.FunraisinLastDonatedToName\}\}\}/,
+  );
+  assert.equal(
+    prepareServiceNoticeHtml(`<p>${tag}</p>`, {
+      email: "sam@example.org",
+      name: "Sam",
+      data: { FunraisinLastDonatedToName: "Alex <Jones> $&" },
+    }),
+    "<p>Alex &lt;Jones&gt; $&amp;</p>",
+  );
+  assert.equal(
+    prepareServiceNoticeHtml(`<p>${tag}</p>`, {
+      email: "sam@example.org",
+      name: "Sam",
+    }),
+    "<p></p>",
+  );
+  const csv = resendContactImportCsv(
+    [
+      {
+        email: "sam@example.org",
+        name: "Sam Smith",
+        salesforceId: "003000000000000001",
+        data: {
+          FunraisinEventName: 'Walk, "Together"',
+          FunraisinDonationCount: 3,
+        },
+      },
+    ],
+    ["FunraisinEventName", "FunraisinDonationCount"],
+  );
+  assert.match(
+    csv,
+    /Salesforce Contact ID,FunraisinEventName,FunraisinDonationCount/,
+  );
+  assert.match(csv, /"Walk, &quot;Together&quot;","3"$/);
+});
