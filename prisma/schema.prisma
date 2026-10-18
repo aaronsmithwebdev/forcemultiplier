@@ -687,12 +687,22 @@ model FunraisinEvent {
 model FunraisinParticipant {
   memberId       String                  @id
   salesforceId   String
+  firstName      String?
   name           String?
   email          String?
   lastSeenScan   String?
   registrations  FunraisinRegistration[]
 
   @@index([salesforceId])
+  @@schema("forcemultiplier")
+}
+
+model FunraisinTeam {
+  teamId       String @id
+  eventId      String?
+  name         String
+  lastSeenScan String?
+
   @@schema("forcemultiplier")
 }
 
@@ -717,6 +727,9 @@ model FunraisinDonation {
   eventId        String?
   event          FunraisinEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
   salesforceId   String
+  memberId       String?
+  teamId         String?
+  donatedAt      DateTime?
   name           String?
   email          String?
   status         String?

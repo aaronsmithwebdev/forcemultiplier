@@ -9,6 +9,7 @@ const PHASES = [
   "events",
   "participants",
   "registrations",
+  "teams",
   "donations",
 ] as const;
 type Phase = (typeof PHASES)[number];
@@ -16,6 +17,7 @@ const ENDPOINT: Record<Phase, string> = {
   events: "events",
   participants: "participants",
   registrations: "participantsevents",
+  teams: "teams",
   donations: "donations",
 };
 const PAGE_SIZE = 1000;
@@ -69,11 +71,25 @@ const date = (value: unknown) => {
     : null;
 };
 
+const dateTime = (value: unknown) => {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+  )
+    return null;
+  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().replace("T", " ").slice(0, 19) === value
+    ? parsed
+    : null;
+};
+
 export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
   const key = {
     events: "event_id",
     participants: "member_id",
     registrations: "history_id",
+    teams: "team_id",
     donations: "donation_id",
   }[phase];
   const id = funraisinId(row[key]);
@@ -88,6 +104,7 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
     return {
       id,
       salesforceId: funraisinContactId(row.crm_member_id),
+      firstName: shortText(row.m_fname, 150),
       name: name(row.m_fname, row.m_lname),
       email: normalizedEmail(shortText(row.m_email, 254)),
     };
@@ -112,10 +129,19 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
       archived: row.is_archived === "Y",
     };
   }
+  if (phase === "teams") {
+    const teamName = shortText(row.t_name, 150);
+    if (!teamName)
+      throw new AppError("Funraisin returned a team without a name.", 502);
+    return { id, eventId: funraisinId(row.event_id), name: teamName };
+  }
   return {
     id,
     eventId: funraisinId(row.event_id),
     salesforceId: funraisinContactId(row.crm_donor_id),
+    memberId: funraisinId(row.member_id),
+    teamId: funraisinId(row.team_id),
+    donatedAt: dateTime(row.date_paid) ?? dateTime(row.date_created),
     name: name(row.d_fname, row.d_lname),
     email: normalizedEmail(shortText(row.d_email, 254)),
     status: shortText(row.d_status, 20),
@@ -332,10 +358,10 @@ async function savePage(
         `);
         if (phase === "participants")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", name, email, "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.name}, ${row.email}, ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${seen})`))}
           ON CONFLICT ("memberId") DO UPDATE SET "salesforceId" = EXCLUDED."salesforceId",
-            name = EXCLUDED.name, email = EXCLUDED.email,
+            "firstName" = EXCLUDED."firstName", name = EXCLUDED.name, email = EXCLUDED.email,
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinParticipant"."lastSeenScan")
         `);
         if (phase === "registrations")
@@ -349,13 +375,22 @@ async function savePage(
         `);
         if (phase === "donations")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", name, email, status, amount, "refundAmount", "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${row.name}, ${row.email}, ${row.status}, CAST(${row.amount} AS numeric), CAST(${row.refundAmount} AS numeric), ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", "memberId", "teamId", "donatedAt", name, email, status, amount, "refundAmount", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${row.memberId}, ${row.teamId}, ${row.donatedAt}, ${row.name}, ${row.email}, ${row.status}, CAST(${row.amount} AS numeric), CAST(${row.refundAmount} AS numeric), ${seen})`))}
           ON CONFLICT ("donationId") DO UPDATE SET "eventId" = EXCLUDED."eventId",
-            "salesforceId" = EXCLUDED."salesforceId", name = EXCLUDED.name,
+            "salesforceId" = EXCLUDED."salesforceId", "memberId" = EXCLUDED."memberId",
+            "teamId" = EXCLUDED."teamId", "donatedAt" = EXCLUDED."donatedAt", name = EXCLUDED.name,
             email = EXCLUDED.email, status = EXCLUDED.status,
             amount = EXCLUDED.amount, "refundAmount" = EXCLUDED."refundAmount",
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinDonation"."lastSeenScan")
+        `);
+        if (phase === "teams")
+          await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "forcemultiplier"."FunraisinTeam" ("teamId", "eventId", name, "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.name}, ${seen})`))}
+          ON CONFLICT ("teamId") DO UPDATE SET "eventId" = EXCLUDED."eventId",
+            name = EXCLUDED.name,
+            "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinTeam"."lastSeenScan")
         `);
       }
       if (finished && sync.mode === "full") {
@@ -363,6 +398,7 @@ async function savePage(
           events: "FunraisinEvent",
           participants: "FunraisinParticipant",
           registrations: "FunraisinRegistration",
+          teams: "FunraisinTeam",
           donations: "FunraisinDonation",
         }[phase];
         const previous = await tx.$queryRawUnsafe<[{ count: bigint }]>(

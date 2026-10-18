@@ -12,6 +12,7 @@ type Person = {
   current: bigint;
   paid: boolean;
   netAmount: Prisma.Decimal | null;
+  lastDonatedTo: string | null;
 };
 const PAGE_SIZE = 50;
 const money = new Intl.NumberFormat("en-AU", {
@@ -81,17 +82,38 @@ export default async function Page({
       SELECT COUNT(*) AS total FROM (${source}) source
     `),
     db.$queryRaw<Person[]>(Prisma.sql`
-      SELECT source."salesforceId",
-        COALESCE(NULLIF(CONCAT_WS(' ', mirror."firstName", mirror."lastName"), ''), source.name, 'Unnamed contact') AS name,
-        COALESCE(mirror.email, source.email) AS email,
-        source.activity, source.current, source.paid, source."netAmount"
-      FROM (${source}) source
-      LEFT JOIN "forcemultiplier"."ContactMirror" mirror
-        ON mirror."orgId" = ${sync.orgId}
-        AND mirror."salesforceId" = source."salesforceId"
-        AND mirror."deletedAt" IS NULL
-      ORDER BY name, source."salesforceId"
-      LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}
+      SELECT page.*,
+        ${view === "donors" ? Prisma.sql`target.name` : Prisma.sql`NULL::text`} AS "lastDonatedTo"
+      FROM (
+        SELECT source."salesforceId",
+          COALESCE(NULLIF(CONCAT_WS(' ', mirror."firstName", mirror."lastName"), ''), source.name, 'Unnamed contact') AS name,
+          COALESCE(mirror.email, source.email) AS email,
+          source.activity, source.current, source.paid, source."netAmount"
+        FROM (${source}) source
+        LEFT JOIN "forcemultiplier"."ContactMirror" mirror
+          ON mirror."orgId" = ${sync.orgId}
+          AND mirror."salesforceId" = source."salesforceId"
+          AND mirror."deletedAt" IS NULL
+        ORDER BY name, source."salesforceId"
+        LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}
+      ) page
+      ${
+        view === "donors"
+          ? Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT CASE WHEN d."memberId" IS NOT NULL THEN p."firstName" ELSE t.name END AS name
+          FROM "forcemultiplier"."FunraisinDonation" d
+          LEFT JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = d."memberId"
+          LEFT JOIN "forcemultiplier"."FunraisinTeam" t ON t."teamId" = d."teamId" AND t."eventId" = d."eventId"
+          WHERE d."eventId" = ${id} AND d."salesforceId" = page."salesforceId"
+            AND d.status = 'paid' AND (d."memberId" IS NOT NULL OR d."teamId" IS NOT NULL)
+          ORDER BY d."donatedAt" DESC NULLS LAST, d."donationId"::numeric DESC
+          LIMIT 1
+        ) target ON TRUE
+      `
+          : Prisma.empty
+      }
+      ORDER BY page.name, page."salesforceId"
     `),
   ]);
   const total = Number(count[0]?.total ?? 0);
@@ -138,7 +160,7 @@ export default async function Page({
               {total.toLocaleString()} unique Salesforce Contacts.{" "}
               {view === "participants"
                 ? "Registration counts include every stored record. Is paid follows Funraisin's event registration flag."
-                : "Donation records and paid gifts are linked to this event only. Net paid total subtracts recorded refunds."}
+                : "Donation records and paid gifts are linked to this event only. Net paid total subtracts recorded refunds. Last donated to uses the most recent paid sponsored gift."}
             </p>
           </div>
           <div className="button-row">
@@ -173,6 +195,7 @@ export default async function Page({
                   </th>
                   {view === "participants" && <th>Is paid</th>}
                   {view === "donors" && <th>Net paid (AUD)</th>}
+                  {view === "donors" && <th>Last donated to</th>}
                   <th>Salesforce ID</th>
                 </tr>
               </thead>
@@ -206,6 +229,9 @@ export default async function Page({
                             : "Unavailable"
                           : money.format(Number(person.netAmount))}
                       </td>
+                    )}
+                    {view === "donors" && (
+                      <td>{person.lastDonatedTo ?? "—"}</td>
                     )}
                     <td>{person.salesforceId}</td>
                   </tr>

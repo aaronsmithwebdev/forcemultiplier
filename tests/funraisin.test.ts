@@ -81,10 +81,35 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
     }),
   );
   assert.deepEqual(
+    funraisinRow("participants", {
+      member_id: "7",
+      crm_member_id: contact,
+      m_fname: " Mary Jane ",
+      m_lname: "Smith",
+    }),
+    {
+      id: "7",
+      salesforceId: linked,
+      firstName: "Mary Jane",
+      name: "Mary Jane Smith",
+      email: null,
+    },
+  );
+  assert.deepEqual(
+    funraisinRow("teams", {
+      team_id: "8",
+      event_id: "42",
+      t_name: " The Walkers ",
+    }),
+    { id: "8", eventId: "42", name: "The Walkers" },
+  );
+  assert.deepEqual(
     funraisinRow("donations", {
       donation_id: "11",
       event_id: "42",
       member_id: "7",
+      team_id: "8",
+      date_paid: "2026-10-17 09:04:03",
       crm_donor_id: contact,
       d_fname: "Pat",
       d_lname: "Donor",
@@ -97,12 +122,25 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       id: "11",
       eventId: "42",
       salesforceId: linked,
+      memberId: "7",
+      teamId: "8",
+      donatedAt: new Date("2026-10-17T09:04:03.000Z"),
       name: "Pat Donor",
       email: "pat@example.com",
       status: "paid",
       amount: "75.50",
       refundAmount: "10.00",
     },
+  );
+  assert.equal(
+    funraisinRow("donations", {
+      donation_id: "13",
+      date_paid: "0000-00-00 00:00:00",
+      date_created: "2026-10-17 10:00:00",
+      d_amount: "10.00",
+      d_refund_amount: "0.00",
+    }).donatedAt?.toISOString(),
+    "2026-10-17T10:00:00.000Z",
   );
   assert.throws(() =>
     funraisinRow("donations", {
