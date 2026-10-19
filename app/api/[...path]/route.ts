@@ -126,9 +126,10 @@ import {
   listCampaigns,
   saveCampaign,
 } from "@/lib/campaigns";
-import { sendResendTest } from "@/lib/campaign-email";
+import { sendResendTest, sendResendTestHtml } from "@/lib/campaign-email";
 import {
   campaignAudienceOptions,
+  previewCampaignRecipients,
   campaignSendStep,
   saveAndPreviewCampaignAudience,
   startCampaignSend,
@@ -389,9 +390,33 @@ async function handle(
           throw new AppError("This campaign has not been sent.", 404);
         return json(await campaignSendStep(review.send.id));
       }
+      if (
+        p[2] === "personalisation-preview" &&
+        p.length === 3 &&
+        method === "POST"
+      ) {
+        const data = audienceSelection
+          .extend({
+            search: z.string().max(200).optional(),
+            emails: z.array(email).min(1).max(2).optional(),
+            content: campaignContent.optional(),
+          })
+          .parse(await body(request, 2_000_000));
+        return json(
+          await previewCampaignRecipients(id, data, {
+            search: data.search,
+            emails: data.emails,
+            content: data.content as unknown as TemplateContent | undefined,
+          }),
+        );
+      }
       if (p[2] === "test" && p.length === 3 && method === "POST") {
         const data = z
-          .object({ recipient: email, content: campaignContent })
+          .object({
+            recipient: email,
+            content: campaignContent,
+            sample: audienceSelection.extend({ email }).optional(),
+          })
           .parse(await body(request, 2_000_000));
         if (!user.email || data.recipient !== user.email.toLowerCase())
           throw new AppError(
@@ -422,16 +447,23 @@ async function handle(
             "The From email must use a verified Resend sending domain.",
             409,
           );
+        const settings = {
+          ...campaign,
+          footerContent: campaign.footer.content as unknown as TemplateContent,
+        };
+        const content = data.content as unknown as TemplateContent;
+        if (data.sample) {
+          const [sample] = await previewCampaignRecipients(id, data.sample, {
+            emails: [data.sample.email],
+            content,
+          });
+          return json(
+            await sendResendTestHtml(settings, data.recipient, sample!.html!),
+            201,
+          );
+        }
         return json(
-          await sendResendTest(
-            {
-              ...campaign,
-              footerContent: campaign.footer
-                .content as unknown as TemplateContent,
-            },
-            data.recipient,
-            data.content as unknown as TemplateContent,
-          ),
+          await sendResendTest(settings, data.recipient, content),
           201,
         );
       }

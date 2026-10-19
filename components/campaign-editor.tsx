@@ -117,13 +117,13 @@ export function CampaignEditor({
     };
   }, [email, id]);
 
-  async function goToSettings() {
+  async function saveAndGoTo(destination = "settings") {
     if (!editorRef.current) return;
     setSaving(true);
     setError("");
     try {
       await editorRef.current.save();
-      window.location.assign(`/campaigns/${id}/settings`);
+      window.location.assign(`/campaigns/${id}/${destination}`);
     } catch (cause) {
       setError((cause as Error).message);
       setSaving(false);
@@ -182,7 +182,8 @@ export function CampaignEditor({
             <p>
               Select <b>Preview</b> in the editor header and switch between
               Desktop and Mobile. Select <b>Test</b> to send the current design
-              to {email} through Resend.
+              to {email} through Resend. To check real merge values, choose your
+              send audiences below and use Preview as recipients.
             </p>
           </div>
         </div>
@@ -216,6 +217,16 @@ export function CampaignEditor({
         <div ref={container} className="templatical-container" />
       </div>
       <div className="campaign-next-actions">
+        {!preview && (
+          <Button
+            variant="secondary"
+            busy={saving}
+            disabled={loading}
+            onClick={() => void saveAndGoTo("preview")}
+          >
+            <Eye size={16} /> Preview as recipients
+          </Button>
+        )}
         {archive && (
           <Button
             variant="secondary"
@@ -228,7 +239,7 @@ export function CampaignEditor({
         <Button
           busy={saving}
           variant={preview ? "secondary" : ""}
-          onClick={() => void goToSettings()}
+          onClick={() => void saveAndGoTo()}
         >
           {preview ? (
             <>
@@ -247,7 +258,22 @@ export function CampaignEditor({
           </span>
         )}
       </div>
-      {preview && <CampaignRecipients id={id} />}
+      {preview && (
+        <CampaignRecipients
+          id={id}
+          email={email}
+          getContent={() => {
+            if (!editorRef.current)
+              throw new Error("Wait for the email editor to finish loading.");
+            return editorRef.current.getContent();
+          }}
+          beforeSend={async () => {
+            if (!editorRef.current)
+              throw new Error("Wait for the email editor to finish loading.");
+            await editorRef.current.save();
+          }}
+        />
+      )}
     </div>
   );
 }

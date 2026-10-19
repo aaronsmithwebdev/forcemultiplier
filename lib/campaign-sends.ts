@@ -105,6 +105,13 @@ export function prepareServiceNoticeHtml(
       "Service notices cannot contain an unsubscribe link. Remove the unsubscribe merge tag before sending.",
       409,
     );
+  return personalizeContactHtml(html, recipient);
+}
+
+export function personalizeContactHtml(
+  html: string,
+  recipient: { email: string; name: string | null; data?: unknown },
+) {
   const parts = (recipient.name || "").trim().split(/\s+/).filter(Boolean);
   const values = {
     FirstName: parts[0] || "there",
@@ -132,7 +139,7 @@ export function prepareServiceNoticeHtml(
   ].map((match) => match[1]);
   if (unsupported.length)
     throw new AppError(
-      `This service notice uses merge fields that are not ready for delivery: ${[...new Set(unsupported)].join(", ")}. Remove them or use FirstName, LastName, and Email.`,
+      `This email uses merge fields that are not ready for delivery: ${[...new Set(unsupported)].join(", ")}. Remove them or use FirstName, LastName, and Email.`,
       409,
     );
   return prepared;
@@ -193,6 +200,7 @@ async function recipientRows(
   excludeRunIds: string[],
   manual: string[],
   rules: QueryGroup,
+  sample?: { search?: string; emails?: string[]; serviceNotice: boolean },
 ) {
   if (!includeRunIds.length) return [];
   const excludedRuns = excludeRunIds.length
@@ -202,7 +210,9 @@ async function recipientRows(
     ? Prisma.sql`i.email IN (${Prisma.join(manual)})`
     : Prisma.sql`FALSE`;
   const fieldMatch = campaignExclusionSql(rules);
+  const search = `%${(sample?.search || "").replace(/[\\%_]/g, "\\$&")}%`;
   return db.$queryRaw<RecipientRow[]>(Prisma.sql`
+    SELECT * FROM (
     WITH included AS (
       SELECT m."normalizedEmail" AS email,
         MIN(m.name) AS name,
@@ -243,7 +253,18 @@ async function recipientRows(
           AND s.kind NOT IN ('global_unsubscribe', 'marketing_unsubscribe')
       ) AS "deliveryBlocked"
     FROM included i
-    ORDER BY i.email
+    ) candidates
+    ${
+      sample
+        ? Prisma.sql`WHERE NOT "audienceExcluded" AND NOT "fieldExcluded"
+      AND NOT "manuallyExcluded" AND NOT "deliveryBlocked"
+      AND (${sample.serviceNotice} OR (NOT "optedOut" AND NOT suppressed))
+      AND (email ILIKE ${search} ESCAPE '\\' OR name ILIKE ${search} ESCAPE '\\')
+      ${sample.emails?.length ? Prisma.sql`AND email IN (${Prisma.join(sample.emails)})` : Prisma.empty}`
+        : Prisma.empty
+    }
+    ORDER BY email
+    ${sample ? Prisma.sql`LIMIT 25` : Prisma.empty}
   `);
 }
 
@@ -369,6 +390,99 @@ async function validateExclusionRules(rules: QueryGroup, runIds: string[]) {
     }
   }
   check(rules);
+}
+
+export async function previewCampaignRecipients(
+  campaignId: string,
+  selection: AudienceSelection,
+  options: {
+    search?: string;
+    emails?: string[];
+    content?: TemplateContent;
+  } = {},
+) {
+  const campaign = await db.campaign.findUnique({
+    where: { id: campaignId },
+    include: { footer: true },
+  });
+  if (!campaign) throw new AppError("Campaign not found.", 404);
+  if (!selection.audienceIds.length)
+    throw new AppError(
+      "Choose a send audience before previewing recipients.",
+      409,
+    );
+  const audienceIds = [...new Set(selection.audienceIds)];
+  const exclusionAudienceIds = [
+    ...new Set(selection.exclusionAudienceIds),
+  ].filter((id) => !audienceIds.includes(id));
+  const [includeRunIds, excludeRunIds] = await Promise.all([
+    resolveRuns(audienceIds, "included"),
+    resolveRuns(exclusionAudienceIds, "excluded"),
+  ]);
+  await validateExclusionRules(selection.exclusionRules, includeRunIds);
+  const emails = uniqueEmails(options.emails || []);
+  if (emails.length > 2)
+    throw new AppError("Choose at most two preview recipients.");
+  if (options.content && !emails.length)
+    throw new AppError("Choose a preview recipient.");
+  const rows = (
+    await recipientRows(
+      includeRunIds,
+      excludeRunIds,
+      uniqueEmails(selection.manualExclusions),
+      selection.exclusionRules,
+      { search: options.search, emails, serviceNotice: campaign.serviceNotice },
+    )
+  ).filter(
+    (row) =>
+      recipientIsEligible(row, campaign.serviceNotice) &&
+      (!emails.length || emails.includes(row.email)),
+  );
+  if (
+    emails.length &&
+    emails.some((email) => !rows.some((row) => row.email === email))
+  )
+    throw new AppError(
+      "A selected recipient is no longer eligible. Load recipients again.",
+      409,
+    );
+  const rendered = options.content
+    ? await renderCampaignHtml(
+        options.content,
+        normalizeFooterContent(campaign.footer.content),
+      )
+    : null;
+  // Preview and test links cannot unsubscribe the sampled contact.
+  const html = rendered?.replace(
+    /\{\{\s*unsubscribe_url\s*\}\}/g,
+    "#test-unsubscribe",
+  );
+  return rows.map((row) => ({
+    email: row.email,
+    name: row.name,
+    ...(html !== undefined
+      ? {
+          html: campaign.serviceNotice
+            ? prepareServiceNoticeHtml(rendered!, row)
+            : personalizeContactHtml(html, row),
+          missingFields: [
+            ...new Set(
+              [
+                ...rendered!.matchAll(
+                  /\{\{\s*contact\.([A-Za-z0-9_.]+)\s*\}\}/g,
+                ),
+              ].map((match) => match[1]!),
+            ),
+          ].filter(
+            (field) =>
+              (FUNRAISIN_FIELDS as readonly string[]).includes(field) &&
+              (row.data?.[field] === null ||
+                row.data?.[field] === undefined ||
+                row.data?.[field] === ""),
+          ),
+        }
+      : {}),
+  }));
 }
 
 export async function campaignAudienceOptions(campaignId: string) {

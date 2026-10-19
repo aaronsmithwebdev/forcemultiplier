@@ -2601,3 +2601,24 @@ td strong {
     font-size: 10px;
   }
 }
+
+.recipient-personalisation {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+}
+.recipient-sample-options {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 16px 0;
+}
+.recipient-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 20px;
+}
+.recipient-email-preview {
+  width: 100%;
+  height: 640px;
+  border: 0;
+  background: #f3f5f1;
+}

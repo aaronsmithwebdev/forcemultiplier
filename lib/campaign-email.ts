@@ -60,6 +60,21 @@ export async function sendResendTest(
       409,
     );
   const html = await renderCampaignHtml(content, settings.footerContent);
+  return sendResendTestHtml(settings, recipient, html, key, request);
+}
+
+export async function sendResendTestHtml(
+  settings: CampaignEmailSettings,
+  recipient: string,
+  html: string,
+  key = process.env.RESEND_API_KEY,
+  request: typeof fetch = fetch,
+) {
+  if (!key?.trim())
+    throw new AppError(
+      "Resend is not configured. Add RESEND_API_KEY, then try again.",
+      409,
+    );
   const response = await request("https://api.resend.com/emails", {
     method: "POST",
     headers: {

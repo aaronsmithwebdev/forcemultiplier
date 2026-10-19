@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import type { QueryGroup } from "../lib/query-builder";
 import { api, Button, Loading, Notice, date } from "./common";
+import { CampaignRecipientPreview } from "./campaign-recipient-preview";
+import type { TemplateContent } from "@templatical/types";
 import { ContactQueryBuilder } from "./query-builder";
 
 type Audience = {
@@ -179,7 +181,17 @@ function AudiencePicker({
   );
 }
 
-export function CampaignRecipients({ id }: { id: string }) {
+export function CampaignRecipients({
+  id,
+  getContent,
+  email,
+  beforeSend,
+}: {
+  id: string;
+  getContent?: () => TemplateContent;
+  email?: string;
+  beforeSend?: () => Promise<void>;
+}) {
   const [review, setReview] = useState<Review | null>(null);
   const [included, setIncluded] = useState<string[]>([]);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -346,6 +358,7 @@ export function CampaignRecipients({ id }: { id: string }) {
     setSending(true);
     setError("");
     try {
+      await beforeSend?.();
       await api(`campaigns/${id}/send`, "POST", {
         audienceIds: included,
         exclusionAudienceIds: excluded,
@@ -517,6 +530,20 @@ export function CampaignRecipients({ id }: { id: string }) {
               />
             </span>
           </label>
+          {getContent && email && (
+            <CampaignRecipientPreview
+              id={id}
+              email={email}
+              getContent={getContent}
+              disabled={sending || !rulesValid || !!parsed.invalid.length}
+              selection={{
+                audienceIds: included,
+                exclusionAudienceIds: excluded,
+                manualExclusions: parsed.emails,
+                exclusionRules: rules,
+              }}
+            />
+          )}
           <div className="recipient-summary">
             <div>
               <small>Final recipients</small>
