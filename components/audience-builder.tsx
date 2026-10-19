@@ -349,10 +349,10 @@ export function AudienceBuilder() {
                 </>
               )}
               <p className="muted">
-                Entrants must have active, complete, unarchived registrations.
-                Donation counts include paid donations with a positive amount
-                after refunds, within the selected event or across all events.
-                Only contacts linked to Salesforce are included.
+                Paid entrants are selected using the registration’s is_paid flag
+                only. Donation counts include paid donations with a positive
+                amount after refunds, within the selected event or across all
+                events. Only contacts linked to Salesforce are included.
               </p>
             </div>
           )}

@@ -90,7 +90,7 @@ export async function funraisinAudiencePage(
     SELECT DISTINCT p."salesforceId"
     FROM "forcemultiplier"."FunraisinRegistration" r
     JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
-    WHERE r.active AND r.complete AND NOT r.archived
+    WHERE TRUE
       ${filters.paidOnly ? Prisma.sql`AND r."isPaid"` : Prisma.empty}
       ${filters.eventId ? Prisma.sql`AND r."eventId" = ${filters.eventId}` : Prisma.empty}
   `
@@ -130,7 +130,6 @@ export async function funraisinAudiencePage(
       JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
       JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId"
       WHERE ${filters.people === "entrants"} AND p."salesforceId" = s."salesforceId"
-        AND r.active AND r.complete AND NOT r.archived
         ${filters.paidOnly ? Prisma.sql`AND r."isPaid"` : Prisma.empty}
         ${filters.eventId ? Prisma.sql`AND r."eventId" = ${filters.eventId}` : Prisma.empty}
       ORDER BY e."eventDate" DESC NULLS LAST, r."historyId"::numeric DESC LIMIT 1

@@ -105,8 +105,9 @@ test("Funraisin filters reject unsafe IDs, fractional counts and inverted ranges
 test("Funraisin pages retain event fields while enriching current Salesforce consent", async (t) => {
   setup(t);
   mock(t, db, "$queryRaw", async (sql: any) => {
-    assert.match(sql.sql, /r\.active AND r\.complete AND NOT r\.archived/);
-    assert.match(sql.sql, /AND r\."isPaid"/);
+    // Both audience membership and the event/URL lookup must use payment alone.
+    assert.doesNotMatch(sql.sql, /r\.(?:active|complete|archived)/);
+    assert.equal(sql.sql.match(/AND r\."isPaid"/g)?.length, 2);
     assert.ok(sql.values.includes("42"));
     return [row];
   });
@@ -254,4 +255,22 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
   const result = await pullStep(run.id);
   assert.equal(result.status, "completed");
   assert.equal(saved, true);
+});
+
+test("unchecking paid entrants includes registrations without status filters", async (t) => {
+  setup(t);
+  mock(t, db, "$queryRaw", async (sql: any) => {
+    assert.doesNotMatch(sql.sql, /r\.(?:active|complete|archived|"isPaid")/);
+    assert.equal(sql.sql.match(/AND r\."eventId" =/g)?.length, 2);
+    assert.ok(sql.values.includes("42"));
+    return [row];
+  });
+  const page = await funraisinAudiencePage(
+    JSON.stringify({ ...JSON.parse(filters), paidOnly: false }),
+  );
+  assert.equal(page.records.length, 1);
+  assert.equal(
+    page.records[0]!.FunraisinFundraisingUrl,
+    "https://example.org/fundraisers/samwalker/autumn-walk",
+  );
 });
