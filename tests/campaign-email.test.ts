@@ -97,3 +97,36 @@ test("campaign test email requires Resend configuration", async () => {
     /RESEND_API_KEY/,
   );
 });
+
+test("fundraising page merge tags survive rendering as clickable links", async () => {
+  const html = await renderCampaignHtml(
+    {
+      ...content,
+      blocks: [
+        createParagraphBlock({
+          content:
+            '<p><a href="{{contact.FunraisinFundraisingUrl}}">Your fundraising page</a></p>',
+        }),
+      ],
+    },
+    settings.footerContent,
+  );
+  assert.match(html, /href="\{\{contact\.FunraisinFundraisingUrl\}\}"/);
+  const { prepareBroadcastHtml, prepareServiceNoticeHtml } =
+    await import("../lib/campaign-sends");
+  assert.match(
+    prepareBroadcastHtml(html),
+    /href="\{\{\{contact\.FunraisinFundraisingUrl\}\}\}"/,
+  );
+  const personalized = prepareServiceNoticeHtml(html, {
+    email: "sam@example.org",
+    name: "Sam",
+    data: {
+      FunraisinFundraisingUrl: "https://example.org/fundraisers/sam/walk",
+    },
+  });
+  assert.match(
+    personalized,
+    /href="https:\/\/example.org\/fundraisers\/sam\/walk"/,
+  );
+});

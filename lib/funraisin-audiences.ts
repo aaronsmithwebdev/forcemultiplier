@@ -4,6 +4,7 @@ import { db } from "./db";
 import { AppError } from "./errors";
 import { connection } from "./providers";
 import { enrich } from "./salesforce";
+import { funraisinFundraisingUrl } from "./funraisin";
 
 import { FUNRAISIN_FIELDS } from "./template-merge-tags";
 export { FUNRAISIN_FIELDS };
@@ -51,7 +52,11 @@ export async function funraisinAudienceConnection(orgId?: string) {
       "Wait for a successful Funraisin sync to finish before pulling an audience.",
       409,
     );
-  return { orgId: sync.orgId, version: sync.updatedAt.toISOString() };
+  return {
+    orgId: sync.orgId,
+    version: sync.updatedAt.toISOString(),
+    baseUrl: sync.baseUrl,
+  };
 }
 
 export async function funraisinAudiencePage(
@@ -105,6 +110,8 @@ export async function funraisinAudiencePage(
       donatedAt: Date | null;
       target: string | null;
       event: string | null;
+      username: string | null;
+      eventKey: string | null;
     }[]
   >(Prisma.sql`
     WITH source AS (${source}), numbered AS (SELECT *, COUNT(*) OVER () AS total FROM source),
@@ -115,8 +122,19 @@ export async function funraisinAudiencePage(
     )
     SELECT s."salesforceId" AS "Id", s.total,
       stats.count, stats.amount::text, latest."donatedAt", latest.target,
-      ${filters.eventId ? Prisma.sql`(SELECT name FROM "forcemultiplier"."FunraisinEvent" WHERE id = ${filters.eventId})` : filters.people === "donors" ? Prisma.sql`latest.event` : Prisma.sql`(SELECT STRING_AGG(DISTINCT e.name, ', ' ORDER BY e.name) FROM "forcemultiplier"."FunraisinRegistration" r JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId" JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId" WHERE p."salesforceId" = s."salesforceId" AND r.active AND r.complete AND NOT r.archived ${filters.paidOnly ? Prisma.sql`AND r."isPaid"` : Prisma.empty})`} AS event
+      ${filters.eventId ? Prisma.sql`(SELECT name FROM "forcemultiplier"."FunraisinEvent" WHERE id = ${filters.eventId})` : filters.people === "donors" ? Prisma.sql`latest.event` : Prisma.sql`entrant.name`} AS event, entrant.username, entrant."eventKey"
     FROM selected s
+    LEFT JOIN LATERAL (
+      SELECT p.username, e."eventKey", e.name
+      FROM "forcemultiplier"."FunraisinRegistration" r
+      JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
+      JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId"
+      WHERE ${filters.people === "entrants"} AND p."salesforceId" = s."salesforceId"
+        AND r.active AND r.complete AND NOT r.archived
+        ${filters.paidOnly ? Prisma.sql`AND r."isPaid"` : Prisma.empty}
+        ${filters.eventId ? Prisma.sql`AND r."eventId" = ${filters.eventId}` : Prisma.empty}
+      ORDER BY e."eventDate" DESC NULLS LAST, r."historyId"::numeric DESC LIMIT 1
+    ) entrant ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(*) AS count, COALESCE(SUM(d.amount - COALESCE(d."refundAmount", 0)), 0) AS amount
       FROM "forcemultiplier"."FunraisinDonation" d
@@ -141,6 +159,13 @@ export async function funraisinAudiencePage(
     rows.map((row) => ({
       Id: row.Id,
       FunraisinEventName: row.event ?? "",
+      FunraisinUsername: row.username ?? "",
+      FunraisinEventKey: row.eventKey ?? "",
+      FunraisinFundraisingUrl: funraisinFundraisingUrl(
+        config.baseUrl,
+        row.username,
+        row.eventKey,
+      ),
       FunraisinDonationCount: Number(row.count),
       FunraisinDonationTotal: row.amount,
       FunraisinLastDonatedAt: row.donatedAt?.toISOString().slice(0, 10) ?? "",

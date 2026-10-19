@@ -471,7 +471,7 @@ export function AudienceBuilder() {
           </div>
           <div className="aside-note">
             {type === "funraisin"
-              ? "Funraisin audiences use the latest completed sync. Event and donation fields are included automatically and can be inserted into email content. If you include multiple event audiences, personalisation uses the first matching Funraisin snapshot."
+              ? "Funraisin audiences use the latest completed sync. Event and donation fields are included automatically and can be inserted into email content. For entrants across all events, the username and fundraising URL use the most recent matching event. If you include multiple event audiences, personalisation uses the first matching Funraisin snapshot."
               : "Report and list-view sources follow their saved Salesforce definitions on each new pull. Unsupported report rules are flagged for review."}
           </div>
         </aside>

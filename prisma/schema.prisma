@@ -675,6 +675,7 @@ model ContactMirrorSync {
 }
 
 model FunraisinEvent {
+  eventKey       String?
   id             String                  @id
   name           String
   eventDate      DateTime?
@@ -686,6 +687,7 @@ model FunraisinEvent {
 }
 
 model FunraisinParticipant {
+  username       String?
   memberId       String                  @id
   salesforceId   String
   firstName      String?
@@ -744,6 +746,7 @@ model FunraisinDonation {
 }
 
 model FunraisinSync {
+  participantUrlsVersion Int @default(0)
   id              String    @id @default("default")
   orgId           String?
   baseUrl         String?

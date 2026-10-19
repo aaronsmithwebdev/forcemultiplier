@@ -1,3 +1,4 @@
+import { db } from "../lib/db";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -5,6 +6,8 @@ import {
   funraisinId,
   funraisinPageUrl,
   funraisinRow,
+  funraisinFundraisingUrl,
+  runFunraisinSyncStep,
 } from "../lib/funraisin";
 
 test("Funraisin records keep event and Salesforce identities distinct", () => {
@@ -36,7 +39,12 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       event_name: " Autumn Walk ",
       event_date: "2026-10-17",
     }),
-    { id: "42", name: "Autumn Walk", eventDate: new Date("2026-10-17") },
+    {
+      id: "42",
+      name: "Autumn Walk",
+      eventDate: new Date("2026-10-17"),
+      eventKey: null,
+    },
   );
   assert.deepEqual(
     funraisinRow("registrations", {
@@ -93,6 +101,7 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       firstName: "Mary Jane",
       name: "Mary Jane Smith",
       email: null,
+      username: null,
     },
   );
   assert.deepEqual(
@@ -149,4 +158,126 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       d_refund_amount: "0.00",
     }),
   );
+});
+
+test("participant username and event key are imported without guessing from names", () => {
+  assert.equal(
+    funraisinRow("participants", { member_id: "7", m_username: " samwalker " })
+      .username,
+    "samwalker",
+  );
+  assert.equal(
+    funraisinRow("events", {
+      event_id: "42",
+      event_name: "Autumn Walk",
+      event_key: " autumn-walk ",
+    }).eventKey,
+    "autumn-walk",
+  );
+  assert.equal(
+    funraisinRow("participants", { member_id: "7", m_username: "" }).username,
+    null,
+  );
+});
+
+test("fundraising URLs combine a safe base, username and event key", () => {
+  assert.equal(
+    funraisinFundraisingUrl("https://example.org/", "samwalker", "autumn-walk"),
+    "https://example.org/fundraisers/samwalker/autumn-walk",
+  );
+  assert.equal(
+    funraisinFundraisingUrl(
+      "https://example.org/site/api/",
+      "samwalker",
+      "autumn-walk",
+    ),
+    "https://example.org/site/fundraisers/samwalker/autumn-walk",
+  );
+  assert.equal(
+    funraisinFundraisingUrl("https://example.org/", "José", "autumn-walk"),
+    "https://example.org/fundraisers/Jos%C3%A9/autumn-walk",
+  );
+  for (const segment of [
+    null,
+    "",
+    "..",
+    ".",
+    "/evil",
+    "a/b",
+    "a\\b",
+    "bad?query",
+    "bad#fragment",
+    "a b",
+  ]) {
+    assert.equal(
+      funraisinFundraisingUrl("https://example.org/", segment, "walk"),
+      "",
+    );
+    assert.equal(
+      funraisinFundraisingUrl("https://example.org/", "sam", segment),
+      "",
+    );
+  }
+  for (const base of [
+    null,
+    "",
+    "broken",
+    "http://example.org",
+    "javascript:alert(1)",
+    "https://user:pass@example.org/",
+    "https://example.org/?key=secret",
+    "https://example.org/#fragment",
+  ]) {
+    assert.equal(funraisinFundraisingUrl(base, "sam", "walk"), "");
+  }
+});
+
+test("URL field rollout schedules a full backfill even after a recent full scan", async (t) => {
+  const env = { ...process.env };
+  t.after(() => {
+    process.env = env;
+  });
+  process.env.FUNRAISIN_BASE_URL = "https://example.org/";
+  process.env.FUNRAISIN_API_KEY = "test";
+  function mock(target: any, name: string, fn: any) {
+    const original = target[name];
+    target[name] = fn;
+    t.after(() => {
+      target[name] = original;
+    });
+  }
+  const sync = {
+    id: "default",
+    orgId: "org-1",
+    baseUrl: "https://example.org/",
+    participantUrlsVersion: 0,
+    lastFullAt: new Date(),
+    lastCompletedAt: new Date(),
+    scanUntil: null,
+    phase: "events",
+    offset: 0,
+    mode: "incremental",
+  };
+  mock(db.connection, "findUnique", async () => ({
+    externalId: "org-1",
+    tokens: "test",
+  }));
+  mock(db.funraisinSync, "upsert", async () => sync);
+  mock(db.funraisinSync, "updateMany", async () => ({ count: 1 }));
+  mock(db.funraisinSync, "findUniqueOrThrow", async () => sync);
+  const starts: any[] = [];
+  mock(db.funraisinSync, "update", async ({ data }: any) => {
+    starts.push(data);
+    return { ...sync, ...data };
+  });
+  mock(globalThis, "fetch", async () => {
+    throw new Error("Stop before fetching data");
+  });
+  await assert.rejects(runFunraisinSyncStep(), /Stop before fetching/);
+  assert.equal(starts[0].mode, "full");
+  assert.equal(starts[0].participantUrlsVersion, 1);
+  sync.participantUrlsVersion = 1;
+  starts.length = 0;
+  await assert.rejects(runFunraisinSyncStep(), /Stop before fetching/);
+  assert.equal(starts[0].mode, "incremental");
 });

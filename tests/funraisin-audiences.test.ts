@@ -30,6 +30,7 @@ function setup(t: TestContext) {
   });
   const sync = {
     orgId: "org-1",
+    baseUrl: "https://example.org/",
     lastCompletedAt: new Date(),
     scanUntil: null,
     error: null,
@@ -78,6 +79,8 @@ const row = {
   donatedAt: new Date("2026-10-18Z"),
   target: "Alex",
   event: "Walk",
+  username: "samwalker",
+  eventKey: "autumn-walk",
 };
 
 test("Funraisin filters reject unsafe IDs, fractional counts and inverted ranges", () => {
@@ -116,6 +119,10 @@ test("Funraisin pages retain event fields while enriching current Salesforce con
     Email: "sam@example.org",
     HasOptedOutOfEmail: true,
     FunraisinEventName: "Walk",
+    FunraisinUsername: "samwalker",
+    FunraisinEventKey: "autumn-walk",
+    FunraisinFundraisingUrl:
+      "https://example.org/fundraisers/samwalker/autumn-walk",
     FunraisinDonationCount: 3,
     FunraisinDonationTotal: "75.50",
     FunraisinLastDonatedAt: "2026-10-18",

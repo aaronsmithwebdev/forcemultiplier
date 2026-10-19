@@ -98,13 +98,19 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
     const eventName = shortText(row.event_name, 150);
     if (!eventName)
       throw new AppError("Funraisin returned an event without a name.", 502);
-    return { id, name: eventName, eventDate: date(row.event_date) };
+    return {
+      id,
+      name: eventName,
+      eventDate: date(row.event_date),
+      eventKey: shortText(row.event_key, 255),
+    };
   }
   if (phase === "participants")
     return {
       id,
       salesforceId: funraisinContactId(row.crm_member_id),
       firstName: shortText(row.m_fname, 150),
+      username: shortText(row.m_username, 150),
       name: name(row.m_fname, row.m_lname),
       email: normalizedEmail(shortText(row.m_email, 254)),
     };
@@ -148,6 +154,39 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
     amount: money(row.d_amount),
     refundAmount: money(row.d_refund_amount),
   };
+}
+
+export function funraisinFundraisingUrl(
+  baseUrl: string | null | undefined,
+  username: string | null | undefined,
+  eventKey: string | null | undefined,
+) {
+  if (!baseUrl || !username || !eventKey) return "";
+  if (
+    [username, eventKey].some(
+      (segment) =>
+        !segment.trim() ||
+        segment === "." ||
+        segment === ".." ||
+        /[/\\?#\s\x00-\x1f\x7f]/.test(segment),
+    )
+  )
+    return "";
+  try {
+    const base = new URL(baseUrl);
+    if (
+      base.protocol !== "https:" ||
+      base.username ||
+      base.password ||
+      base.search ||
+      base.hash
+    )
+      return "";
+    base.pathname = `${base.pathname.replace(/\/+$/, "").replace(/\/api$/, "")}/fundraisers/${encodeURIComponent(username)}/${encodeURIComponent(eventKey)}`;
+    return base.href;
+  } catch {
+    return "";
+  }
 }
 
 function apiUrl() {
@@ -351,17 +390,17 @@ async function savePage(
       if (valid.length) {
         if (phase === "events")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinEvent" (id, name, "eventDate", "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.name}, ${row.eventDate}, ${seen})`))}
-          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "eventDate" = EXCLUDED."eventDate",
+          INSERT INTO "forcemultiplier"."FunraisinEvent" (id, name, "eventDate", "eventKey", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.name}, ${row.eventDate}, ${row.eventKey}, ${seen})`))}
+          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "eventDate" = EXCLUDED."eventDate", "eventKey" = EXCLUDED."eventKey",
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinEvent"."lastSeenScan")
         `);
         if (phase === "participants")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, username, "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${row.username}, ${seen})`))}
           ON CONFLICT ("memberId") DO UPDATE SET "salesforceId" = EXCLUDED."salesforceId",
-            "firstName" = EXCLUDED."firstName", name = EXCLUDED.name, email = EXCLUDED.email,
+            "firstName" = EXCLUDED."firstName", name = EXCLUDED.name, email = EXCLUDED.email, username = EXCLUDED.username,
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinParticipant"."lastSeenScan")
         `);
         if (phase === "registrations")
@@ -499,11 +538,14 @@ export async function runFunraisinSyncStep() {
       });
     if (!sync.scanUntil) {
       const full =
-        !sync.lastFullAt || Date.now() - sync.lastFullAt.getTime() >= 7 * DAY;
+        sync.participantUrlsVersion < 1 ||
+        !sync.lastFullAt ||
+        Date.now() - sync.lastFullAt.getTime() >= 7 * DAY;
       sync = await db.funraisinSync.update({
         where: { id: sync.id },
         data: {
           mode: full ? "full" : "incremental",
+          ...(full ? { participantUrlsVersion: 1 } : {}),
           scanId: full ? randomUUID() : null,
           scanUntil: new Date(),
           processed: 0,

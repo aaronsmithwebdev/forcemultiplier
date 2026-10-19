@@ -2,6 +2,9 @@ import type { MergeTag } from "@templatical/types";
 
 export const FUNRAISIN_FIELDS = [
   "FunraisinEventName",
+  "FunraisinUsername",
+  "FunraisinEventKey",
+  "FunraisinFundraisingUrl",
   "FunraisinDonationCount",
   "FunraisinDonationTotal",
   "FunraisinLastDonatedAt",
