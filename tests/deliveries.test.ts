@@ -155,7 +155,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     activityProgress: 0,
     batch: null,
     mappings: [],
-    total: 2,
+    total: 5,
     processed: 0,
     submitted: 0,
     skipped: 0,
@@ -197,14 +197,54 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     {
       salesforceId: "003000000000000001",
       email: "ada@example.com",
+      normalizedEmail: "ada@example.com",
       optedOut: false,
       data: { FirstName: "Ada", LastName: "Lovelace" },
     },
     {
       salesforceId: "003000000000000002",
+      email: "ada@example.com",
+      normalizedEmail: "ada@example.com",
+      optedOut: false,
+      data: { FirstName: "Different" },
+    },
+    {
+      salesforceId: "003000000000000003",
       email: "no@example.com",
+      normalizedEmail: "no@example.com",
       optedOut: true,
       data: { FirstName: "No" },
+    },
+    {
+      salesforceId: "003000000000000004",
+      email: "shared@example.com",
+      normalizedEmail: "shared@example.com",
+      optedOut: false,
+      data: { FirstName: "Shared" },
+    },
+    {
+      salesforceId: "003000000000000005",
+      email: "shared@example.com",
+      normalizedEmail: "shared@example.com",
+      optedOut: true,
+      data: { FirstName: "Opted Out" },
+    },
+  ]);
+  mockMethod(t, db, "$queryRaw", async () => [
+    {
+      email: "ada@example.com",
+      salesforceId: "003000000000000001",
+      optedOut: false,
+    },
+    {
+      email: "no@example.com",
+      salesforceId: "003000000000000003",
+      optedOut: true,
+    },
+    {
+      email: "shared@example.com",
+      salesforceId: "003000000000000004",
+      optedOut: true,
     },
   ]);
   mockMethod(t, db.unsubscribeEvent, "findMany", async () => []);
@@ -248,9 +288,9 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   ]);
   const imported = await deliveryStep("delivery");
   assert.equal(imported.status, "reconciling");
-  assert.equal(imported.processed, 2);
+  assert.equal(imported.processed, 5);
   assert.equal(imported.submitted, 1);
-  assert.equal(imported.skipped, 1);
+  assert.equal(imported.skipped, 4);
 });
 
 test("list reconciliation tracks desired contacts and preserves unrelated members", () => {

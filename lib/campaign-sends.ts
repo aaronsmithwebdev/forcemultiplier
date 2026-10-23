@@ -213,18 +213,23 @@ async function recipientRows(
   const search = `%${(sample?.search || "").replace(/[\\%_]/g, "\\$&")}%`;
   return db.$queryRaw<RecipientRow[]>(Prisma.sql`
     SELECT * FROM (
-    WITH included AS (
-      SELECT m."normalizedEmail" AS email,
-        MIN(m.name) AS name,
-        (ARRAY_AGG(m.data ORDER BY (m.data ? 'FunraisinEventName') DESC,
-          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS data,
-        MIN(m."salesforceId") AS "salesforceId",
-        COUNT(*) AS "sourceRows",
-        BOOL_OR(m."optedOut") AS "optedOut",
-        BOOL_OR(${fieldMatch}) AS "fieldExcluded"
+    WITH candidates AS (
+      SELECT m.*, COALESCE(${fieldMatch}, FALSE) AS "fieldExcluded"
       FROM "forcemultiplier"."AudienceMember" m
       WHERE m."runId" IN (${Prisma.join(includeRunIds)})
         AND m."normalizedEmail" IS NOT NULL
+    ), included AS (
+      SELECT m."normalizedEmail" AS email,
+        (ARRAY_AGG(m.name ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS name,
+        (ARRAY_AGG(m.data ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS data,
+        (ARRAY_AGG(m."salesforceId" ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS "salesforceId",
+        COUNT(*) AS "sourceRows",
+        BOOL_OR(m."optedOut") AS "optedOut",
+        BOOL_AND(m."fieldExcluded") AS "fieldExcluded"
+      FROM candidates m
       GROUP BY m."normalizedEmail"
     )
     SELECT i.*,

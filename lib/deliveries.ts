@@ -469,33 +469,57 @@ export async function deliveryStep(id: string) {
     const mappings = Array.isArray(run.mappings)
       ? (run.mappings as unknown as FieldMapping[])
       : [];
-    const emailCandidates = members.flatMap((member) =>
-      member.normalizedEmail ? [member.normalizedEmail] : [],
-    );
-    const [legacyUnsubscribes, suppressions] = await Promise.all([
-      db.unsubscribeEvent.findMany({
-        where: {
-          accountId: run.accountId,
-          email: { in: emailCandidates },
-        },
-        select: { email: true },
-      }),
-      db.suppression.findMany({
-        where: { email: { in: emailCandidates } },
-        select: { email: true },
-      }),
-    ]);
+    const emailCandidates = [
+      ...new Set(
+        members.flatMap((member) =>
+          member.normalizedEmail ? [member.normalizedEmail] : [],
+        ),
+      ),
+    ];
+    const [legacyUnsubscribes, suppressions, duplicateGroups] =
+      await Promise.all([
+        db.unsubscribeEvent.findMany({
+          where: {
+            accountId: run.accountId,
+            email: { in: emailCandidates },
+          },
+          select: { email: true },
+        }),
+        db.suppression.findMany({
+          where: { email: { in: emailCandidates } },
+          select: { email: true },
+        }),
+        emailCandidates.length
+          ? db.$queryRaw<
+              { email: string; salesforceId: string; optedOut: boolean }[]
+            >(Prisma.sql`
+            SELECT "normalizedEmail" AS email,
+              MIN("salesforceId") AS "salesforceId",
+              BOOL_OR("optedOut") AS "optedOut"
+            FROM "forcemultiplier"."AudienceMember"
+            WHERE "runId" = ${run.sourceRunId}
+              AND "normalizedEmail" IN (${Prisma.join(emailCandidates)})
+            GROUP BY "normalizedEmail"
+          `)
+          : [],
+      ]);
     const knownUnsubscribes = new Set(
       [...legacyUnsubscribes, ...suppressions].map((row) => row.email),
     );
-    const prepared = members.map((member) =>
-      prepareContact(
-        member,
+    const byEmail = new Map(duplicateGroups.map((row) => [row.email, row]));
+    const prepared = members.map((member) => {
+      const group = member.normalizedEmail
+        ? byEmail.get(member.normalizedEmail)
+        : null;
+      if (group && member.salesforceId !== group.salesforceId)
+        return { contact: null, issue: null };
+      return prepareContact(
+        { ...member, optedOut: member.optedOut || !!group?.optedOut },
         mappings,
         !!member.normalizedEmail &&
           knownUnsubscribes.has(member.normalizedEmail),
-      ),
-    );
+      );
+    });
     const contacts = prepared.flatMap((row) =>
       row.contact ? [row.contact] : [],
     );
@@ -808,24 +832,40 @@ async function reconcileStep(
       run.sourceRunId,
       ...(previousDelivery ? [previousDelivery.sourceRunId] : []),
     ];
-    const [sourceMembers, existingMembers] = await Promise.all([
-      db.audienceMember.findMany({
-        where: {
-          runId: { in: sourceRunIds },
-          optedOut: false,
-          normalizedEmail: { in: emails },
-        },
-        distinct: ["runId", "normalizedEmail"],
-        select: { runId: true, normalizedEmail: true },
-      }),
-      db.managedListMember.findMany({
-        where: { managedListId: managedList.id, email: { in: emails } },
-        select: { email: true, desiredDeliveryId: true },
-      }),
-    ]);
+    const [sourceMembers, existingMembers, optedOutMembers] = await Promise.all(
+      [
+        db.audienceMember.findMany({
+          where: {
+            runId: { in: sourceRunIds },
+            optedOut: false,
+            normalizedEmail: { in: emails },
+          },
+          distinct: ["runId", "normalizedEmail"],
+          select: { runId: true, normalizedEmail: true },
+        }),
+        db.managedListMember.findMany({
+          where: { managedListId: managedList.id, email: { in: emails } },
+          select: { email: true, desiredDeliveryId: true },
+        }),
+        db.audienceMember.findMany({
+          where: {
+            runId: run.sourceRunId,
+            optedOut: true,
+            normalizedEmail: { in: emails },
+          },
+          distinct: ["normalizedEmail"],
+          select: { normalizedEmail: true },
+        }),
+      ],
+    );
+    const optedOutEmails = new Set(
+      optedOutMembers.map((member) => member.normalizedEmail),
+    );
     const desired = new Set(
       sourceMembers.flatMap((member) =>
-        member.runId === run.sourceRunId && member.normalizedEmail
+        member.runId === run.sourceRunId &&
+        member.normalizedEmail &&
+        !optedOutEmails.has(member.normalizedEmail)
           ? [member.normalizedEmail]
           : [],
       ),
@@ -972,6 +1012,12 @@ async function recordMissingContacts(
     WHERE member."runId" = ${run.sourceRunId}
       AND member."optedOut" = false
       AND member."normalizedEmail" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "forcemultiplier"."AudienceMember" opted_out
+        WHERE opted_out."runId" = member."runId"
+          AND opted_out."normalizedEmail" = member."normalizedEmail"
+          AND opted_out."optedOut" = true
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM "forcemultiplier"."ManagedListMember" managed

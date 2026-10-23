@@ -107,6 +107,13 @@ test("preview candidates use the production audience precedence and all exclusio
   ])
     assert.ok(query.values.includes(value));
   assert.match(query.sql, /array_position/);
+  assert.match(query.sql, /BOOL_AND\(m\."fieldExcluded"\)/);
+  assert.match(query.sql, /ARRAY_AGG\(m\.name ORDER BY m\."fieldExcluded"/);
+  assert.match(query.sql, /ARRAY_AGG\(m\.data ORDER BY m\."fieldExcluded"/);
+  assert.match(
+    query.sql,
+    /ARRAY_AGG\(m\."salesforceId" ORDER BY m\."fieldExcluded"/,
+  );
   assert.match(query.sql, /NOT "audienceExcluded" AND NOT "fieldExcluded"/);
   assert.match(query.sql, /NOT "manuallyExcluded" AND NOT "deliveryBlocked"/);
   assert.match(query.sql, /NOT "optedOut" AND NOT suppressed/);
