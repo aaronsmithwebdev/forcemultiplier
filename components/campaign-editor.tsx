@@ -6,18 +6,16 @@ import { init, type TemplaticalEditor } from "@templatical/editor";
 import type { MergeTag, TemplateContent } from "@templatical/types";
 import type { ImportReport } from "@templatical/import-html";
 import "@templatical/editor/style.css";
-import { api, Badge, Button, Loading, Notice } from "./common";
+import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
 import { footerLayout } from "@/lib/email-layout";
 import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
-import { FooterPreview } from "./footer-preview";
 
 type Footer = {
   id: string;
   name: string;
-  previewHtml: string;
   isDefault: boolean;
 };
 
@@ -135,6 +133,8 @@ export function CampaignEditor({
 
   async function chooseFooter(nextId: string) {
     if (!editorRef.current || nextId === footerId) return;
+    const previousId = footerId;
+    setFooterId(nextId);
     setSaving(true);
     setChangingFooter(true);
     setError("");
@@ -143,6 +143,7 @@ export function CampaignEditor({
       await api(`campaigns/${id}`, "PATCH", { footerId: nextId });
       window.location.reload();
     } catch (cause) {
+      setFooterId(previousId);
       setError((cause as Error).message);
       setSaving(false);
       setChangingFooter(false);
@@ -244,48 +245,41 @@ export function CampaignEditor({
           )}
         </section>
       )}
-      {!preview && !loading && (
-        <fieldset className="card campaign-footer-field campaign-design-footer">
-          <legend>Email footer</legend>
-          <p>
-            Choose the footer that follows your email body. It appears in
-            Preview and test sends. Changing it saves your design and refreshes
-            the editor. <Link href="/footers">Manage email footers</Link>
-          </p>
-          {changingFooter && <p role="status">Saving your footer choice…</p>}
-          <div className="campaign-footer-options">
-            {footers.map((footer) => (
-              <label
-                className={`campaign-footer-option ${footerId === footer.id ? "selected" : ""}`}
-                key={footer.id}
-              >
-                <input
-                  type="radio"
-                  name="footerId"
-                  value={footer.id}
-                  checked={footerId === footer.id}
-                  disabled={saving}
-                  onChange={() => void chooseFooter(footer.id)}
-                />
-                <FooterPreview
-                  html={footer.previewHtml}
-                  title={`${footer.name} footer thumbnail`}
-                  className="footer-thumbnail"
-                />
-                <span>
-                  <strong>{footer.name}</strong>
-                  {footer.isDefault && <Badge tone="green">Default</Badge>}
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
       <div className="template-editor-frame">
         {loading && <Loading />}
         <div ref={container} className="templatical-container" />
       </div>
-      <div className="campaign-next-actions">
+      <div
+        className={`campaign-next-actions ${preview ? "" : "campaign-design-actions"}`}
+      >
+        {!preview && !loading && (
+          <div className="campaign-footer-control">
+            <label>
+              Email footer
+              <select
+                value={footerId}
+                disabled={saving}
+                onChange={(event) => void chooseFooter(event.target.value)}
+              >
+                {footers.map((footer) => (
+                  <option key={footer.id} value={footer.id}>
+                    {footer.name}
+                    {footer.isDefault ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Link href="/footers" target="_blank" rel="noopener noreferrer">
+              Manage footers ↗
+            </Link>
+            {changingFooter && <span role="status">Saving footer…</span>}
+            <small>
+              The selected footer follows the body in Preview and sends.
+              {archive &&
+                " Remove the imported footer blocks in the body to avoid a duplicate."}
+            </small>
+          </div>
+        )}
         {!preview && (
           <Button
             variant="secondary"

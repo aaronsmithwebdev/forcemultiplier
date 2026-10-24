@@ -503,8 +503,52 @@ summary {
 .campaign-next-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 14px;
+}
+.campaign-design-actions {
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  bottom: 0;
+  margin-top: 0;
+  padding: 12px 0;
+  position: sticky;
+  z-index: 5;
+}
+.campaign-footer-control {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-right: auto;
+}
+.campaign-footer-control label {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+.campaign-footer-control select {
+  margin: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  width: 220px;
+}
+.campaign-footer-control a {
+  font-size: 11px;
+  text-decoration: underline;
+}
+.campaign-footer-control > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.campaign-footer-control small {
+  color: var(--muted);
+  flex-basis: 100%;
+  font-size: 10px;
 }
 .campaign-next-actions > span {
   align-items: center;
@@ -2321,16 +2365,6 @@ td strong {
   clear: both;
   font-size: 10px;
   padding-top: 4px;
-}
-.campaign-design-footer {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin: 0 0 16px;
-  padding: 16px 20px 20px;
-}
-.campaign-design-footer a {
-  font-weight: 700;
-  text-decoration: underline;
 }
 .campaign-footer-options {
   display: grid;
