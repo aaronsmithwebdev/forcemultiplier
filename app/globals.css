@@ -2322,6 +2322,16 @@ td strong {
   font-size: 10px;
   padding-top: 4px;
 }
+.campaign-design-footer {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0 0 16px;
+  padding: 16px 20px 20px;
+}
+.campaign-design-footer a {
+  font-weight: 700;
+  text-decoration: underline;
+}
 .campaign-footer-options {
   display: grid;
   gap: 13px;
@@ -2509,7 +2519,7 @@ td strong {
     padding-left: 20px;
     padding-right: 20px;
   }
-  .campaign-footer-field {
+  .settings-card .campaign-footer-field {
     margin-left: -20px;
     margin-right: -20px;
     padding-left: 20px;

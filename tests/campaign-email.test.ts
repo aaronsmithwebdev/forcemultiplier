@@ -91,6 +91,17 @@ test("campaign HTML renders the required footer through a Templatical layout", a
   );
 });
 
+test("campaign HTML uses the chosen footer after the design body", async () => {
+  const chosenFooter = {
+    ...settings.footerContent,
+    blocks: [createParagraphBlock({ content: "<p>Chosen footer</p>" })],
+  };
+  const html = await renderCampaignHtml(content, chosenFooter);
+  assert.match(html, /Chosen footer/);
+  assert.doesNotMatch(html, /Required footer/);
+  assert.ok(html.indexOf("Message body") < html.indexOf("Chosen footer"));
+});
+
 test("campaign test email requires Resend configuration", async () => {
   await assert.rejects(
     sendResendTest(settings, "author@example.org", content, ""),

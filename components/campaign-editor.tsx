@@ -6,12 +6,20 @@ import { init, type TemplaticalEditor } from "@templatical/editor";
 import type { MergeTag, TemplateContent } from "@templatical/types";
 import type { ImportReport } from "@templatical/import-html";
 import "@templatical/editor/style.css";
-import { api, Button, Loading, Notice } from "./common";
+import { api, Badge, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
 import { footerLayout } from "@/lib/email-layout";
 import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
+import { FooterPreview } from "./footer-preview";
+
+type Footer = {
+  id: string;
+  name: string;
+  previewHtml: string;
+  isDefault: boolean;
+};
 
 export function CampaignEditor({
   id,
@@ -32,6 +40,9 @@ export function CampaignEditor({
     report: ImportReport;
   } | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [footers, setFooters] = useState<Footer[]>([]);
+  const [footerId, setFooterId] = useState("");
+  const [changingFooter, setChangingFooter] = useState(false);
 
   useEffect(() => {
     if (!container.current) return;
@@ -40,22 +51,27 @@ export function CampaignEditor({
     let stopIssueTooltips = () => {};
     async function mount() {
       try {
-        const [tags, campaign]: [
+        const [tags, campaign, footerRows]: [
           MergeTag[],
           {
             id: string;
             name: string;
             content: TemplateContent;
+            footerId: string;
             footer: { content: TemplateContent };
             sourceArchiveId: string | null;
             sourceArchive: { campaignName: string } | null;
             conversionReport: ImportReport | null;
           },
+          Footer[],
         ] = await Promise.all([
           api("templates/merge-tags"),
           api(`campaigns/${id}`),
+          preview ? Promise.resolve([]) : api("footers"),
         ]);
         if (cancelled || !container.current) return;
+        setFooters(footerRows);
+        setFooterId(campaign.footerId);
         if (campaign.sourceArchiveId && campaign.conversionReport)
           setArchive({
             name: campaign.sourceArchive?.campaignName || campaign.name,
@@ -115,7 +131,23 @@ export function CampaignEditor({
       stopIssueTooltips();
       editor?.unmount();
     };
-  }, [email, id]);
+  }, [email, id, preview]);
+
+  async function chooseFooter(nextId: string) {
+    if (!editorRef.current || nextId === footerId) return;
+    setSaving(true);
+    setChangingFooter(true);
+    setError("");
+    try {
+      await editorRef.current.save();
+      await api(`campaigns/${id}`, "PATCH", { footerId: nextId });
+      window.location.reload();
+    } catch (cause) {
+      setError((cause as Error).message);
+      setSaving(false);
+      setChangingFooter(false);
+    }
+  }
 
   async function saveAndGoTo(destination = "settings") {
     if (!editorRef.current) return;
@@ -212,6 +244,43 @@ export function CampaignEditor({
           )}
         </section>
       )}
+      {!preview && !loading && (
+        <fieldset className="card campaign-footer-field campaign-design-footer">
+          <legend>Email footer</legend>
+          <p>
+            Choose the footer that follows your email body. It appears in
+            Preview and test sends. Changing it saves your design and refreshes
+            the editor. <Link href="/footers">Manage email footers</Link>
+          </p>
+          {changingFooter && <p role="status">Saving your footer choice…</p>}
+          <div className="campaign-footer-options">
+            {footers.map((footer) => (
+              <label
+                className={`campaign-footer-option ${footerId === footer.id ? "selected" : ""}`}
+                key={footer.id}
+              >
+                <input
+                  type="radio"
+                  name="footerId"
+                  value={footer.id}
+                  checked={footerId === footer.id}
+                  disabled={saving}
+                  onChange={() => void chooseFooter(footer.id)}
+                />
+                <FooterPreview
+                  html={footer.previewHtml}
+                  title={`${footer.name} footer thumbnail`}
+                  className="footer-thumbnail"
+                />
+                <span>
+                  <strong>{footer.name}</strong>
+                  {footer.isDefault && <Badge tone="green">Default</Badge>}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
       <div className="template-editor-frame">
         {loading && <Loading />}
         <div ref={container} className="templatical-container" />
@@ -231,6 +300,7 @@ export function CampaignEditor({
           <Button
             variant="secondary"
             busy={savingTemplate}
+            disabled={saving}
             onClick={() => void saveAsTemplate()}
           >
             Save as template
