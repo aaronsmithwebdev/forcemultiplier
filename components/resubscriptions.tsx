@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, Badge, Button, date, Heading, Notice } from "./common";
+import { api, Badge, Button, Heading, Notice } from "./common";
+import { useDate } from "./time-zone";
 import { parseResubscribeCsv } from "@/lib/resubscribe-input";
 
 type Field = { name: string; label: string; type: string };
@@ -34,6 +35,7 @@ type State = {
 const label = (value: string) => value.replaceAll("_", " ");
 
 export function Resubscriptions() {
+  const date = useDate();
   const [state, setState] = useState<State | null>(null);
   const [lists, setLists] = useState<{ list_id: string; name: string }[]>([]);
   const [listCursor, setListCursor] = useState("");

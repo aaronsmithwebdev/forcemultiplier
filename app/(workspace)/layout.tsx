@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { session } from "@/lib/auth";
 import { Shell } from "@/components/shell";
+import { TimeZoneProvider } from "@/components/time-zone";
+import { db } from "@/lib/db";
+import { defaultTimeZone } from "@/lib/time-zone";
 export const dynamic = "force-dynamic";
 export default async function Workspace({
   children,
@@ -9,5 +12,13 @@ export default async function Workspace({
 }) {
   const user = await session();
   if (!user) redirect("/login");
-  return <Shell email={user.email ?? "Supabase user"}>{children}</Shell>;
+  const settings = await db.workspaceSettings.findUnique({
+    where: { id: "workspace" },
+    select: { timeZone: true },
+  });
+  return (
+    <TimeZoneProvider initialTimeZone={settings?.timeZone ?? defaultTimeZone}>
+      <Shell email={user.email ?? "Supabase user"}>{children}</Shell>
+    </TimeZoneProvider>
+  );
 }

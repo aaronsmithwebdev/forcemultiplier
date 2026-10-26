@@ -11,7 +11,8 @@ import {
   XCircle,
 } from "lucide-react";
 import type { QueryGroup } from "../lib/query-builder";
-import { api, Button, Loading, Notice, date } from "./common";
+import { api, Button, Loading, Notice } from "./common";
+import { useDate } from "./time-zone";
 import { CampaignRecipientPreview } from "./campaign-recipient-preview";
 import type { TemplateContent } from "@templatical/types";
 import { ContactQueryBuilder } from "./query-builder";
@@ -92,6 +93,7 @@ function AudiencePicker({
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
+  const date = useDate();
   const [search, setSearch] = useState("");
   const [focused, setFocused] = useState(false);
   const chosen = selected.flatMap((id) => {
@@ -192,6 +194,7 @@ export function CampaignRecipients({
   email?: string;
   beforeSend?: () => Promise<void>;
 }) {
+  const date = useDate();
   const [review, setReview] = useState<Review | null>(null);
   const [included, setIncluded] = useState<string[]>([]);
   const [excluded, setExcluded] = useState<string[]>([]);

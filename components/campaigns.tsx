@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MailPlus, Plus, Search, Trash2 } from "lucide-react";
-import { api, Button, Empty, Heading, Loading, Notice, date } from "./common";
+import { api, Button, Empty, Heading, Loading, Notice } from "./common";
+import { useDate } from "./time-zone";
 
 type CampaignRow = {
   id: string;
@@ -14,6 +15,7 @@ type CampaignRow = {
 type TemplateRow = { id: string; name: string };
 
 export function Campaigns() {
+  const date = useDate();
   const [rows, setRows] = useState<CampaignRow[] | null>(null);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [search, setSearch] = useState("");

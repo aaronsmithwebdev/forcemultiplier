@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { archivePreviewDocument } from "@/lib/archive-preview";
 import { api, Badge, Button, Empty, Heading, Loading, Notice } from "./common";
+import { useDate, useTimeZone } from "./time-zone";
 
 type Item = {
   id: string;
@@ -36,6 +37,8 @@ type ImageState = {
 };
 
 export function Archive() {
+  const date = useDate();
+  const { timeZone } = useTimeZone();
   const [state, setState] = useState<State | null>(null);
   const [imageState, setImageState] = useState<ImageState | null>(null);
   const [query, setQuery] = useState("");
@@ -268,8 +271,10 @@ export function Archive() {
               {imageState?.job ? (
                 <small>
                   Sent since{" "}
-                  {new Date(imageState.job.cutoff).toLocaleDateString()} ·{" "}
-                  {(imageState.counts.failed || 0).toLocaleString()} failed ·{" "}
+                  {new Date(imageState.job.cutoff).toLocaleDateString("en-AU", {
+                    timeZone,
+                  })}{" "}
+                  · {(imageState.counts.failed || 0).toLocaleString()} failed ·{" "}
                   {(imageState.counts.excluded || 0).toLocaleString()} shared or
                   external images need review.
                 </small>
@@ -340,7 +345,11 @@ export function Archive() {
                       <tr key={item.id}>
                         <td>{item.campaignName}</td>
                         <td>{item.subject || "—"}</td>
-                        <td>{new Date(item.sentAt).toLocaleDateString()}</td>
+                        <td>
+                          {new Date(item.sentAt).toLocaleDateString("en-AU", {
+                            timeZone,
+                          })}
+                        </td>
                         <td>{item.role}</td>
                         <td>
                           <Button
@@ -393,9 +402,8 @@ export function Archive() {
                   <h2>{selected.campaignName}</h2>
                   <p>{selected.subject}</p>
                   <small>
-                    Sent {new Date(selected.sentAt).toLocaleString()} ·{" "}
-                    {selected.role} · {selected.sendCount.toLocaleString()}{" "}
-                    recipients
+                    Sent {date(selected.sentAt)} · {selected.role} ·{" "}
+                    {selected.sendCount.toLocaleString()} recipients
                   </small>
                 </div>
                 <div className="button-row">

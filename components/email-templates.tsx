@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FilePenLine, Plus, Search, Trash2 } from "lucide-react";
-import { api, Button, Empty, Heading, Loading, Notice, date } from "./common";
+import { api, Button, Empty, Heading, Loading, Notice } from "./common";
+import { useDate } from "./time-zone";
 
 type TemplateRow = {
   id: string;
@@ -13,6 +14,7 @@ type TemplateRow = {
 };
 
 export function EmailTemplates() {
+  const date = useDate();
   const [rows, setRows] = useState<TemplateRow[] | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState("");

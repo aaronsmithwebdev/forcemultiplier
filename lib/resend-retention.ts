@@ -39,6 +39,7 @@ export function resendRetentionCutoff(days: number, now = new Date()) {
 export async function resendRetentionState() {
   const row = await settings();
   return {
+    timeZone: row.timeZone,
     retentionDays: row.resendContactRetentionDays,
     lastRunAt: row.resendCleanupLastRunAt,
     lastDeleted: row.resendCleanupLastDeleted,
@@ -47,14 +48,22 @@ export async function resendRetentionState() {
   };
 }
 
-export async function saveResendRetentionDays(retentionDays: number) {
-  await settings();
+export async function saveWorkspaceSettings(
+  retentionDays: number,
+  timeZone: string,
+) {
+  const current = await settings();
   await db.workspaceSettings.update({
     where: { id: SETTINGS_ID },
     data: {
-      resendContactRetentionDays: retentionDays,
-      resendCleanupNextRunAt: null,
-      resendCleanupError: null,
+      timeZone,
+      ...(current.resendContactRetentionDays === retentionDays
+        ? {}
+        : {
+            resendContactRetentionDays: retentionDays,
+            resendCleanupNextRunAt: null,
+            resendCleanupError: null,
+          }),
     },
   });
   return resendRetentionState();

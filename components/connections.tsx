@@ -10,16 +10,8 @@ import {
   ShieldCheck,
   Unplug,
 } from "lucide-react";
-import {
-  api,
-  Badge,
-  Button,
-  Copy,
-  date,
-  Heading,
-  Loading,
-  Notice,
-} from "./common";
+import { api, Badge, Button, Copy, Heading, Loading, Notice } from "./common";
+import { useDate } from "./time-zone";
 import { FieldBrowser } from "./field-browser";
 import { ContactQueryBuilder } from "./query-builder";
 import type { QueryGroup } from "@/lib/query-builder";
@@ -121,6 +113,7 @@ export function Connections() {
   );
 }
 function ContactMirrorCard() {
+  const date = useDate();
   const [status, setStatus] = useState<MirrorStatus | null>(null);
   const [fields, setFields] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<QueryGroup>({
@@ -391,6 +384,7 @@ function ConnectionCard({
   row: Connection;
   refresh: () => Promise<void>;
 }) {
+  const date = useDate();
   const sf = row.provider === "salesforce";
   const [clientId, setClientId] = useState(row.clientId),
     [secret, setSecret] = useState(""),

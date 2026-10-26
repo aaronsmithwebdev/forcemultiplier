@@ -18,14 +18,15 @@ import {
   api,
   Badge,
   Button,
-  date,
   Empty,
   Heading,
   Loading,
   Notice,
   valueAt,
 } from "./common";
+import { useDate } from "./time-zone";
 export function AudienceDetail({ id }: { id: string }) {
+  const date = useDate();
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),

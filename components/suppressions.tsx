@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { Play, ShieldCheck } from "lucide-react";
 import { parseEmailCsv } from "@/lib/resubscribe-input";
-import { api, Badge, Button, date, Heading, Notice } from "./common";
+import { api, Badge, Button, Heading, Notice } from "./common";
+import { useDate } from "./time-zone";
 
 type Event = {
   id: string;
@@ -67,6 +68,7 @@ const originatingEmail = (event: Event) =>
   "Not supplied by source";
 
 export function Suppressions() {
+  const date = useDate();
   const [state, setState] = useState<State | null>(null);
   const [csv, setCsv] = useState<ReturnType<typeof parseEmailCsv> | null>(null);
   const [sourceRef, setSourceRef] = useState("");

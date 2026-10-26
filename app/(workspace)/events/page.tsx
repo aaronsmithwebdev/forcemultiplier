@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Empty, Heading } from "@/components/common";
 import { db } from "@/lib/db";
+import { defaultTimeZone, formatDate } from "@/lib/time-zone";
 
 export default async function Page({
   searchParams,
@@ -9,11 +10,15 @@ export default async function Page({
 }) {
   const { q = "" } = await searchParams;
   const search = q.trim().slice(0, 100);
-  const [sync, salesforce] = await Promise.all([
+  const [sync, salesforce, settings] = await Promise.all([
     db.funraisinSync.findUnique({ where: { id: "default" } }),
     db.connection.findUnique({
       where: { provider: "salesforce" },
       select: { externalId: true, tokens: true },
+    }),
+    db.workspaceSettings.findUnique({
+      where: { id: "workspace" },
+      select: { timeZone: true },
     }),
   ]);
   const currentOrg =
@@ -64,7 +69,7 @@ export default async function Page({
                       : sync.scanUntil
                         ? `Importing ${sync.phase}: ${sync.processed.toLocaleString()} records processed${sync.skipped ? `; ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped` : ""}.`
                         : sync.lastCompletedAt
-                          ? `Last synced ${sync.lastCompletedAt.toLocaleString()}${sync.skipped ? `; ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped` : ""}.`
+                          ? `Last synced ${formatDate(sync.lastCompletedAt, settings?.timeZone ?? defaultTimeZone)}${sync.skipped ? `; ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped` : ""}.`
                           : "The scheduled import will start shortly."}
             </p>
           </div>

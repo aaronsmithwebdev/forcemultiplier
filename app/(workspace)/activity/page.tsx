@@ -1,12 +1,19 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { Badge, Empty, Heading } from "@/components/common";
+import { defaultTimeZone, formatDate } from "@/lib/time-zone";
 export default async function Page() {
-  const runs = await db.pullRun.findMany({
-    take: 100,
-    orderBy: { createdAt: "desc" },
-    include: { audience: { select: { name: true } } },
-  });
+  const [runs, settings] = await Promise.all([
+    db.pullRun.findMany({
+      take: 100,
+      orderBy: { createdAt: "desc" },
+      include: { audience: { select: { name: true } } },
+    }),
+    db.workspaceSettings.findUnique({
+      where: { id: "workspace" },
+      select: { timeZone: true },
+    }),
+  ]);
   return (
     <>
       <Heading title="Pull history" />
@@ -36,7 +43,12 @@ export default async function Page() {
                         {run.audience.name}
                       </Link>
                     </td>
-                    <td>{run.createdAt.toLocaleString()}</td>
+                    <td>
+                      {formatDate(
+                        run.createdAt,
+                        settings?.timeZone ?? defaultTimeZone,
+                      )}
+                    </td>
                     <td>
                       <Badge tone={run.status === "completed" ? "green" : ""}>
                         {run.status}

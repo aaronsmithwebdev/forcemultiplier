@@ -11,8 +11,11 @@ import {
   Search,
   ArrowRight,
 } from "lucide-react";
-import { api, Badge, date, Empty, Heading, Loading, Notice } from "./common";
+import { api, Badge, Empty, Heading, Loading, Notice } from "./common";
+import { useDate, useTimeZone } from "./time-zone";
 export function Audiences() {
+  const date = useDate();
+  const { timeZone } = useTimeZone();
   const [rows, setRows] = useState<any[] | null>(null),
     [connections, setConnections] = useState<any[]>([]),
     [error, setError] = useState(""),
@@ -146,7 +149,10 @@ export function Audiences() {
                           <strong>{row.name}</strong>
                           <small>
                             Created{" "}
-                            {new Date(row.createdAt).toLocaleDateString()}
+                            {new Date(row.createdAt).toLocaleDateString(
+                              "en-AU",
+                              { timeZone },
+                            )}
                           </small>
                         </div>
                       </Link>

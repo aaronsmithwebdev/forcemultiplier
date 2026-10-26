@@ -607,6 +607,7 @@ model CampaignRecipient {
 
 model WorkspaceSettings {
   id                         String    @id @default("workspace")
+  timeZone                   String    @default("Australia/Sydney")
   resendContactRetentionDays Int       @default(90)
   resendCleanupLeaseUntil    DateTime?
   resendCleanupNextRunAt     DateTime?

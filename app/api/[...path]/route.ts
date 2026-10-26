@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { TemplateContent } from "@templatical/types";
 import { db } from "@/lib/db";
+import { timeZones } from "@/lib/time-zone";
 import { runFunraisinSyncStep } from "@/lib/funraisin";
 import {
   contactMirrorState,
@@ -58,7 +59,7 @@ import { receiveResendWebhook } from "@/lib/resend-webhooks";
 import {
   resendRetentionState,
   runResendContactCleanup,
-  saveResendRetentionDays,
+  saveWorkspaceSettings,
 } from "@/lib/resend-retention";
 import {
   archivePreview,
@@ -595,9 +596,14 @@ async function handle(
       return json(await resendRetentionState());
     if (key === "settings" && method === "PUT") {
       const data = z
-        .object({ retentionDays: z.number().int().min(1).max(3650) })
+        .object({
+          retentionDays: z.number().int().min(1).max(3650),
+          timeZone: z.enum(timeZones),
+        })
         .parse(await body(request));
-      return json(await saveResendRetentionDays(data.retentionDays));
+      return json(
+        await saveWorkspaceSettings(data.retentionDays, data.timeZone),
+      );
     }
     if (key === "suppressions" && method === "GET")
       return json(await suppressionState(params.get("q") || ""));

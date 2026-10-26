@@ -11,9 +11,8 @@ import {
 } from "lucide-react";
 import { Badge, Copy, Empty, Heading } from "@/components/common";
 import { displayContactValue, getContactDetail } from "@/lib/contacts";
-
-const shownAt = (value: Date | null | undefined) =>
-  value ? value.toLocaleString() : "—";
+import { db } from "@/lib/db";
+import { defaultTimeZone, formatDate } from "@/lib/time-zone";
 
 export default async function Page({
   params,
@@ -23,6 +22,12 @@ export default async function Page({
   const { id } = await params;
   const contact = await getContactDetail(id);
   if (!contact) notFound();
+  const settings = await db.workspaceSettings.findUnique({
+    where: { id: "workspace" },
+    select: { timeZone: true },
+  });
+  const shownAt = (value: Date | null | undefined) =>
+    value ? formatDate(value, settings?.timeZone ?? defaultTimeZone) : "—";
 
   const currentAudiences = contact.audiences.filter((row) => row.current);
   const sentCampaigns = contact.campaigns.filter(

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, Button, date, Heading, Notice } from "./common";
+import { api, Button, Heading, Notice } from "./common";
+import { useDate } from "./time-zone";
 
 type Request = {
   id: string;
@@ -14,6 +15,7 @@ type Request = {
   writeStartedAt: string | null;
 };
 export function MarketingResubscriptions() {
+  const date = useDate();
   const [rows, setRows] = useState<Request[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

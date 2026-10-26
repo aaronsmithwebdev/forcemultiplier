@@ -125,8 +125,6 @@ export function Copy({ value }: { value: string }) {
     </button>
   );
 }
-export const date = (value: string | Date | null | undefined) =>
-  value ? new Date(value).toLocaleString() : "Not yet";
 export function Badge({
   children,
   tone = "",

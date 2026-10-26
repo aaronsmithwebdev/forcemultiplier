@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { Empty, Heading } from "@/components/common";
 import { db } from "@/lib/db";
+import { defaultTimeZone, formatDate } from "@/lib/time-zone";
 
 type Person = {
   salesforceId: string;
@@ -34,12 +35,16 @@ export default async function Page({
     Number.isSafeInteger(requestedPage) && requestedPage > 0
       ? Math.min(requestedPage, 100_000)
       : 1;
-  const [event, sync, salesforce] = await Promise.all([
+  const [event, sync, salesforce, settings] = await Promise.all([
     db.funraisinEvent.findUnique({ where: { id } }),
     db.funraisinSync.findUnique({ where: { id: "default" } }),
     db.connection.findUnique({
       where: { provider: "salesforce" },
       select: { externalId: true, instanceUrl: true, tokens: true },
+    }),
+    db.workspaceSettings.findUnique({
+      where: { id: "workspace" },
+      select: { timeZone: true },
     }),
   ]);
   if (
@@ -149,7 +154,7 @@ export default async function Page({
           {sync.total ? ` of ${sync.total.toLocaleString()}` : ""} records
           processed in this stage.
           {sync.error &&
-            ` Last attempt failed: ${sync.error} Next retry: ${sync.dueAt.toLocaleString()}.`}
+            ` Last attempt failed: ${sync.error} Next retry: ${formatDate(sync.dueAt, settings?.timeZone ?? defaultTimeZone)}.`}
         </p>
       )}
       <section className="card">
