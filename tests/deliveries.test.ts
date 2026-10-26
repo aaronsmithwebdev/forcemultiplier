@@ -7,10 +7,24 @@ import {
   managedContactRows,
   prepareContact,
   activityIssues,
+  startDelivery,
 } from "../lib/deliveries";
 import { encrypt } from "../lib/security";
 
 process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
+
+test("a manual email change requires a new snapshot before list delivery", async (t) => {
+  mockMethod(t, db.pullRun, "findFirst", async () => ({
+    id: "snapshot",
+    fields: [],
+    manualVersion: 1,
+  }));
+  mockMethod(t, db.audience, "findUnique", async () => ({ manualVersion: 2 }));
+  await assert.rejects(
+    startDelivery("audience", "list", []),
+    /Pull contacts to apply manual email changes/,
+  );
+});
 
 test("Constant Contact import excludes opt-outs and maps safe names and email", () => {
   assert.deepEqual(

@@ -233,6 +233,7 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
   let saved = false;
   mock(t, db, "$transaction", async (fn: any) =>
     fn({
+      audience: { findUniqueOrThrow: async () => ({ manualVersion: 0 }) },
       pullRun: {
         updateMany: async ({ data }: any) => {
           assert.equal(data.status, "completed");
@@ -249,6 +250,9 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
           saved = true;
           return { count: 1 };
         },
+      },
+      manualAudienceMember: {
+        findMany: async () => [],
       },
     }),
   );

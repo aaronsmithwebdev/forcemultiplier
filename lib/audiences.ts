@@ -72,6 +72,41 @@ export async function updateAudienceQuery(id: string, query: string) {
     data: { query, sourceType: "soql", sourceId: null },
   });
 }
+export async function addManualMember(id: string, email: string) {
+  const audience = await db.audience.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+  if (!audience) throw new AppError("Audience not found.", 404);
+  return db.$transaction(async (tx) => {
+    const added = await tx.manualAudienceMember.createMany({
+      data: [{ audienceId: id, email }],
+      skipDuplicates: true,
+    });
+    if (added.count)
+      await tx.audience.update({
+        where: { id },
+        data: { manualVersion: { increment: 1 } },
+      });
+    return tx.manualAudienceMember.findUniqueOrThrow({
+      where: { audienceId_email: { audienceId: id, email } },
+    });
+  });
+}
+
+export async function removeManualMember(id: string, email: string) {
+  return db.$transaction(async (tx) => {
+    const removed = await tx.manualAudienceMember.deleteMany({
+      where: { audienceId: id, email },
+    });
+    if (!removed.count) throw new AppError("Manual email not found.", 404);
+    await tx.audience.update({
+      where: { id },
+      data: { manualVersion: { increment: 1 } },
+    });
+  });
+}
+
 export async function startPull(id: string) {
   const audience = await db.audience.findUnique({ where: { id } });
   if (!audience) throw new AppError("Audience not found.", 404);
@@ -254,10 +289,19 @@ export async function pullStep(id: string) {
     return await pullStage(id, "save page", () =>
       db.$transaction(
         async (tx) => {
+          const manualVersion = page.done
+            ? (
+                await tx.audience.findUniqueOrThrow({
+                  where: { id: run.audienceId },
+                  select: { manualVersion: true },
+                })
+              ).manualVersion
+            : undefined;
           const owner = await tx.pullRun.updateMany({
             where: { id, leaseUntil: lease, status: "running" },
             data: {
               processed,
+              ...(page.done ? { manualVersion } : {}),
               total,
               cursor: page.done ? null : page.nextRecordsUrl,
               status: page.done ? "completed" : "running",
@@ -289,6 +333,38 @@ export async function pullStep(id: string) {
               "Contact IDs repeated across pages. Restart this pull.",
               409,
             );
+          if (page.done) {
+            const manual = await tx.manualAudienceMember.findMany({
+              where: { audienceId: run.audienceId },
+              select: { email: true },
+            });
+            if (manual.length) {
+              const existing = await tx.audienceMember.findMany({
+                where: {
+                  runId: id,
+                  normalizedEmail: { in: manual.map((member) => member.email) },
+                },
+                select: { normalizedEmail: true },
+              });
+              const emails = new Set(
+                existing.map((member) => member.normalizedEmail),
+              );
+              await tx.audienceMember.createMany({
+                data: manual
+                  .filter((member) => !emails.has(member.email))
+                  .map(({ email }) => ({
+                    runId: id,
+                    salesforceId: `manual:${email}`,
+                    email,
+                    normalizedEmail: email,
+                    name: null,
+                    optedOut: false,
+                    data: { Email: email },
+                  })),
+                skipDuplicates: true,
+              });
+            }
+          }
           return tx.pullRun.findUniqueOrThrow({ where: { id } });
         },
         { maxWait: 15000, timeout: 15000 },

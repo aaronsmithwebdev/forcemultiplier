@@ -7,6 +7,7 @@ process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
 function fixture(t: any, total: number) {
   let state: any = {
     id: "run",
+    audienceId: "audience",
     orgId: "org",
     status: "pending",
     query: "SELECT Id FROM Contact",
@@ -17,6 +18,7 @@ function fixture(t: any, total: number) {
     leaseUntil: null,
   };
   const members = new Map<string, any>();
+  const manualEmails: string[] = [];
   let failPage = -1;
   let failDatabaseOnce = false;
   let malformed = false;
@@ -51,11 +53,18 @@ function fixture(t: any, total: number) {
       saved = new Map(members);
     try {
       return await fn({
+        audience: { findUniqueOrThrow: async () => ({ manualVersion: 0 }) },
         pullRun: {
           updateMany: update,
           findUniqueOrThrow: async () => ({ ...state }),
         },
         audienceMember: {
+          findMany: async ({ where }: any) =>
+            [...members.values()].filter(
+              (member) =>
+                member.runId === where.runId &&
+                where.normalizedEmail.in.includes(member.normalizedEmail),
+            ),
           createMany: async ({ data }: any) => {
             if (failDatabaseOnce) {
               failDatabaseOnce = false;
@@ -71,6 +80,9 @@ function fixture(t: any, total: number) {
               }
             return { count };
           },
+        },
+        manualAudienceMember: {
+          findMany: async () => manualEmails.map((email) => ({ email })),
         },
       });
     } catch (e) {
@@ -122,6 +134,7 @@ function fixture(t: any, total: number) {
       return state;
     },
     members,
+    manualEmails,
     failAt: (page: number) => {
       failPage = page;
     },
@@ -143,6 +156,23 @@ test("a full pull paginates beyond 2,000 and publishes every unique contact", as
   assert.equal(f.members.size, 2105);
   assert.equal(result.cursor, null);
   assert.equal((await pullStep("run")).status, "completed");
+});
+test("manual emails join each completed snapshot without duplicating pulled emails", async (t) => {
+  const f = fixture(t, 1);
+  f.manualEmails.push("manager@example.test", "fixture@example.test");
+  const result = await pullStep("run");
+  assert.equal(result.status, "completed");
+  assert.equal(result.processed, 1);
+  assert.equal(f.members.size, 2);
+  assert.deepEqual(f.members.get("manual:manager@example.test"), {
+    runId: "run",
+    salesforceId: "manual:manager@example.test",
+    email: "manager@example.test",
+    normalizedEmail: "manager@example.test",
+    name: null,
+    optedOut: false,
+    data: { Email: "manager@example.test" },
+  });
 });
 test("provider failure preserves cursor and successful pages; resume completes without duplicates", async (t) => {
   const f = fixture(t, 450);

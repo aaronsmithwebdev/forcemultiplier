@@ -259,6 +259,15 @@ export async function startDelivery(
   });
   if (!source)
     throw new AppError("Complete a Salesforce pull before sending.", 409);
+  const audience = await db.audience.findUnique({
+    where: { id: audienceId },
+    select: { manualVersion: true },
+  });
+  if (audience && audience.manualVersion !== source.manualVersion)
+    throw new AppError(
+      "Pull contacts to apply manual email changes before sending.",
+      409,
+    );
   const destination = await resolveDestination(
     source.fields,
     listId,

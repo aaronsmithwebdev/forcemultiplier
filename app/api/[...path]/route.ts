@@ -45,8 +45,10 @@ import {
 } from "@/lib/salesforce";
 import { previewQuery, validateQuery, sfId } from "@/lib/soql";
 import {
+  addManualMember,
   createAudience,
   pullStep,
+  removeManualMember,
   startPull,
   updateAudienceQuery,
 } from "@/lib/audiences";
@@ -948,6 +950,21 @@ async function handle(
       return json(await createAudience(data), 201);
     }
     if (p[0] === "audiences" && p[1]) {
+      if (
+        p[2] === "manual-members" &&
+        p.length === 3 &&
+        ["POST", "DELETE"].includes(method)
+      ) {
+        const { email } = z
+          .object({
+            email: z.string().trim().toLowerCase().pipe(z.email().max(254)),
+          })
+          .parse(await body(request));
+        if (method === "POST")
+          return json(await addManualMember(p[1], email), 201);
+        await removeManualMember(p[1], email);
+        return json({ ok: true });
+      }
       if (p.length === 2 && method === "PUT") {
         const data = z
           .object({ query: z.string().max(20000) })
@@ -1005,6 +1022,7 @@ async function handle(
           where: { id: p[1] },
           include: {
             runs: { take: 10, orderBy: { createdAt: "desc" } },
+            manualMembers: { orderBy: { email: "asc" } },
             schedule: {
               include: { runs: { take: 10, orderBy: { createdAt: "desc" } } },
             },

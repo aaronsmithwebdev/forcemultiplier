@@ -50,7 +50,9 @@ export function AudienceDetail({ id }: { id: string }) {
     [message, setMessage] = useState(""),
     [editingQuery, setEditingQuery] = useState(false),
     [queryDraft, setQueryDraft] = useState(""),
-    [querySaving, setQuerySaving] = useState(false);
+    [querySaving, setQuerySaving] = useState(false),
+    [manualEmail, setManualEmail] = useState(""),
+    [manualBusy, setManualBusy] = useState(false);
   const stop = useRef(false);
   const loadVersion = useRef(0);
   const load = async () => {
@@ -281,6 +283,23 @@ export function AudienceDetail({ id }: { id: string }) {
       setQuerySaving(false);
     }
   }
+  async function changeManualMember(email: string, method: "POST" | "DELETE") {
+    setManualBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`audiences/${id}/manual-members`, method, { email });
+      if (method === "POST") setManualEmail("");
+      setMessage(
+        "Manual email list updated. Pull contacts to apply the change before sending.",
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setManualBusy(false);
+    }
+  }
   if (!data)
     return (
       <>
@@ -296,6 +315,8 @@ export function AudienceDetail({ id }: { id: string }) {
   );
   const run = busy ? progress : active;
   const sendingRun = delivery || activeDelivery;
+  const manualChangesPending =
+    data.manualVersion !== (data.completeRun?.manualVersion ?? 0);
   const schedule = data.schedule;
   const weekdays = [
     "Sunday",
@@ -334,7 +355,9 @@ export function AudienceDetail({ id }: { id: string }) {
               <Button
                 variant="secondary"
                 busy={sending}
-                disabled={busy || sending}
+                disabled={
+                  busy || sending || (manualChangesPending && !activeDelivery)
+                }
                 onClick={() =>
                   activeDelivery ? send(activeDelivery) : openDelivery("send")
                 }
@@ -425,8 +448,8 @@ export function AudienceDetail({ id }: { id: string }) {
               </h3>
               <p>
                 {sendingRun.processed.toLocaleString()} of{" "}
-                {sendingRun.total.toLocaleString()} Salesforce contacts checked
-                · {sendingRun.submitted.toLocaleString()} submitted ·{" "}
+                {sendingRun.total.toLocaleString()} contacts checked ·{" "}
+                {sendingRun.submitted.toLocaleString()} submitted ·{" "}
                 {sendingRun.skipped.toLocaleString()} excluded ·{" "}
                 {sendingRun.removed.toLocaleString()} removed
               </p>
@@ -651,6 +674,62 @@ export function AudienceDetail({ id }: { id: string }) {
       <section className="card">
         <div className="section-toolbar">
           <div>
+            <h2>Manual emails</h2>
+            <p>
+              Add people who do not match the audience filters. A new pull
+              includes them in the snapshot used for Constant Contact syncs.
+            </p>
+          </div>
+        </div>
+        <form
+          className="button-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void changeManualMember(manualEmail, "POST");
+          }}
+        >
+          <label>
+            Email address
+            <input
+              type="email"
+              required
+              maxLength={254}
+              value={manualEmail}
+              onChange={(event) => setManualEmail(event.target.value)}
+              disabled={manualBusy}
+            />
+          </label>
+          <Button type="submit" busy={manualBusy} disabled={busy || sending}>
+            Add email
+          </Button>
+        </form>
+        {manualChangesPending && (
+          <p className="muted">
+            Pull contacts to apply these changes before sending to a list.
+          </p>
+        )}
+        {data.manualMembers.length > 0 && (
+          <ul>
+            {data.manualMembers.map((member: { email: string }) => (
+              <li key={member.email}>
+                {member.email}{" "}
+                <Button
+                  variant="ghost"
+                  aria-label={`Remove ${member.email}`}
+                  busy={manualBusy}
+                  disabled={busy || sending}
+                  onClick={() => changeManualMember(member.email, "DELETE")}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="card">
+        <div className="section-toolbar">
+          <div>
             <h2>Contacts</h2>
             <p>
               {data.completeRun
@@ -703,20 +782,28 @@ export function AudienceDetail({ id }: { id: string }) {
                   {data.members.map((m: any) => (
                     <tr key={m.salesforceId}>
                       <td>
-                        <Link
-                          className="contact-link"
-                          href={`/contacts/${encodeURIComponent(m.salesforceId)}`}
-                        >
-                          <strong>{m.name || "Unnamed contact"}</strong>
-                          <small className="block muted">
-                            {m.salesforceId}
-                          </small>
-                        </Link>
+                        {m.salesforceId.startsWith("manual:") ? (
+                          <strong>Manual email</strong>
+                        ) : (
+                          <Link
+                            className="contact-link"
+                            href={`/contacts/${encodeURIComponent(m.salesforceId)}`}
+                          >
+                            <strong>{m.name || "Unnamed contact"}</strong>
+                            <small className="block muted">
+                              {m.salesforceId}
+                            </small>
+                          </Link>
+                        )}
                       </td>
                       <td>{m.email || "No email"}</td>
                       <td>
                         <Badge tone={m.optedOut ? "amber" : ""}>
-                          {m.optedOut ? "Opted out" : "Not opted out in SF"}
+                          {m.salesforceId.startsWith("manual:")
+                            ? "Manual"
+                            : m.optedOut
+                              ? "Opted out"
+                              : "Not opted out in SF"}
                         </Badge>
                       </td>
                       {data.fields.map((f: string) => (

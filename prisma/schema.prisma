@@ -40,19 +40,21 @@ model OAuthAttempt {
 }
 
 model Audience {
-  id           String        @id @default(cuid())
-  name         String
-  sourceType   String
-  sourceId     String?
-  query        String
-  fields       Json          @default("[]")
-  orgId        String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  runs         PullRun[]
-  deliveries   DeliveryRun[]
-  managedLists ManagedList[]
-  schedule     SyncSchedule?
+  id            String                 @id @default(cuid())
+  name          String
+  sourceType    String
+  sourceId      String?
+  query         String
+  fields        Json                   @default("[]")
+  orgId         String
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  runs          PullRun[]
+  deliveries    DeliveryRun[]
+  managedLists  ManagedList[]
+  schedule      SyncSchedule?
+  manualMembers ManualAudienceMember[]
+  manualVersion Int                    @default(0)
 
   @@schema("forcemultiplier")
 }
@@ -195,21 +197,22 @@ model ManagedListMember {
 }
 
 model PullRun {
-  id         String           @id @default(cuid())
-  audienceId String
-  audience   Audience         @relation(fields: [audienceId], references: [id], onDelete: Cascade)
-  status     String           @default("pending")
-  query      String
-  fields     Json
-  orgId      String
-  cursor     String?
-  total      Int              @default(0)
-  processed  Int              @default(0)
-  error      String?
-  leaseUntil DateTime?
-  createdAt  DateTime         @default(now())
-  finishedAt DateTime?
-  members    AudienceMember[]
+  id            String           @id @default(cuid())
+  audienceId    String
+  audience      Audience         @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  status        String           @default("pending")
+  query         String
+  fields        Json
+  orgId         String
+  cursor        String?
+  total         Int              @default(0)
+  processed     Int              @default(0)
+  manualVersion Int              @default(0)
+  error         String?
+  leaseUntil    DateTime?
+  createdAt     DateTime         @default(now())
+  finishedAt    DateTime?
+  members       AudienceMember[]
 
   @@index([audienceId, createdAt])
   @@schema("forcemultiplier")
@@ -227,6 +230,16 @@ model AudienceMember {
 
   @@id([runId, salesforceId])
   @@index([runId, normalizedEmail])
+  @@schema("forcemultiplier")
+}
+
+model ManualAudienceMember {
+  audienceId String
+  audience   Audience @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  email      String
+  createdAt  DateTime @default(now())
+
+  @@id([audienceId, email])
   @@schema("forcemultiplier")
 }
 
