@@ -671,7 +671,7 @@ export function AudienceDetail({ id }: { id: string }) {
           )
         )}
       </details>
-      <section className="card">
+      <section className="card manual-emails-card">
         <div className="section-toolbar">
           <div>
             <h2>Manual emails</h2>
@@ -681,51 +681,53 @@ export function AudienceDetail({ id }: { id: string }) {
             </p>
           </div>
         </div>
-        <form
-          className="button-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void changeManualMember(manualEmail, "POST");
-          }}
-        >
-          <label>
-            Email address
-            <input
-              type="email"
-              required
-              maxLength={254}
-              value={manualEmail}
-              onChange={(event) => setManualEmail(event.target.value)}
-              disabled={manualBusy}
-            />
-          </label>
-          <Button type="submit" busy={manualBusy} disabled={busy || sending}>
-            Add email
-          </Button>
-        </form>
-        {manualChangesPending && (
-          <p className="muted">
-            Pull contacts to apply these changes before sending to a list.
-          </p>
-        )}
-        {data.manualMembers.length > 0 && (
-          <ul>
-            {data.manualMembers.map((member: { email: string }) => (
-              <li key={member.email}>
-                {member.email}{" "}
-                <Button
-                  variant="ghost"
-                  aria-label={`Remove ${member.email}`}
-                  busy={manualBusy}
-                  disabled={busy || sending}
-                  onClick={() => changeManualMember(member.email, "DELETE")}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="manual-emails-body">
+          <form
+            className="manual-email-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void changeManualMember(manualEmail, "POST");
+            }}
+          >
+            <label>
+              Email address
+              <input
+                type="email"
+                required
+                maxLength={254}
+                value={manualEmail}
+                onChange={(event) => setManualEmail(event.target.value)}
+                disabled={manualBusy}
+              />
+            </label>
+            <Button type="submit" busy={manualBusy} disabled={busy || sending}>
+              Add email
+            </Button>
+          </form>
+          {manualChangesPending && (
+            <p className="muted">
+              Pull contacts to apply these changes before sending to a list.
+            </p>
+          )}
+          {data.manualMembers.length > 0 && (
+            <ul className="manual-email-list">
+              {data.manualMembers.map((member: { email: string }) => (
+                <li key={member.email}>
+                  <span>{member.email}</span>
+                  <Button
+                    variant="ghost"
+                    aria-label={`Remove ${member.email}`}
+                    busy={manualBusy}
+                    disabled={busy || sending}
+                    onClick={() => changeManualMember(member.email, "DELETE")}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
       <section className="card">
         <div className="section-toolbar">

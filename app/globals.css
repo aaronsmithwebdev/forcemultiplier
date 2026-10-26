@@ -1911,6 +1911,42 @@ td strong {
   font-size: 11px;
   margin-bottom: 20px;
 }
+.manual-emails-card {
+  margin-bottom: 24px;
+}
+.manual-emails-body {
+  padding: 24px 26px;
+}
+.manual-email-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.manual-email-form label {
+  width: min(100%, 380px);
+  margin: 0;
+}
+.manual-email-form .button {
+  height: 44px;
+}
+.manual-emails-body > p {
+  margin-top: 16px;
+}
+.manual-email-list {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.manual-email-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
 .schedule-card {
   padding: 22px;
   margin-bottom: 23px;
