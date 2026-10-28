@@ -141,3 +141,23 @@ test("fundraising page merge tags survive rendering as clickable links", async (
     /href="https:\/\/example.org\/fundraisers\/sam\/walk"/,
   );
 });
+
+test("no footer renders and test-sends only the email design", async () => {
+  const html = await renderCampaignHtml(content, null);
+  assert.match(html, /Message body/);
+  assert.doesNotMatch(html, /Required footer|Chosen footer/);
+  let sentHtml = "";
+  const request = (async (_url: unknown, options?: RequestInit) => {
+    sentHtml = JSON.parse(String(options?.body)).html;
+    return Response.json({ id: "no-footer-test" });
+  }) as typeof fetch;
+  await sendResendTest(
+    { ...settings, footerContent: null },
+    "author@example.org",
+    content,
+    "re_test",
+    request,
+  );
+  assert.match(sentHtml, /Message body/);
+  assert.doesNotMatch(sentHtml, /Required footer/);
+});

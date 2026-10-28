@@ -454,7 +454,9 @@ export async function previewCampaignRecipients(
   const rendered = options.content
     ? await renderCampaignHtml(
         options.content,
-        normalizeFooterContent(campaign.footer.content),
+        campaign.footer
+          ? normalizeFooterContent(campaign.footer.content)
+          : null,
       )
     : null;
   // Preview and test links cannot unsubscribe the sampled contact.
@@ -599,7 +601,9 @@ export async function startCampaignSend(
     !campaign.replyToEmail
   )
     throw new AppError("Complete Send settings before sending.", 409);
-  const footerContent = normalizeFooterContent(campaign.footer?.content);
+  const footerContent = campaign.footer
+    ? normalizeFooterContent(campaign.footer.content)
+    : null;
   if (
     !campaign.serviceNotice &&
     campaign.replyToEmail.toLowerCase() !== campaign.fromEmail.toLowerCase()
@@ -643,8 +647,11 @@ export async function startCampaignSend(
         fromEmail: campaign.fromEmail,
         replyToEmail: campaign.replyToEmail,
         serviceNotice: campaign.serviceNotice,
-        footerName: campaign.footer.name,
-        footerContent: footerContent as unknown as Prisma.InputJsonValue,
+        footerName: campaign.footer?.name ?? "No footer",
+        footerContent:
+          footerContent === null
+            ? Prisma.JsonNull
+            : (footerContent as unknown as Prisma.InputJsonValue),
         includeAudienceIds: campaign.audienceIds,
         excludeAudienceIds: campaign.exclusionAudienceIds,
         includeRunIds,
@@ -805,7 +812,9 @@ export async function campaignSendStep(id?: string) {
       if (send.serviceNotice) {
         const rendered = await renderCampaignHtml(
           send.content as unknown as TemplateContent,
-          normalizeFooterContent(send.footerContent),
+          send.footerContent === null
+            ? null
+            : normalizeFooterContent(send.footerContent),
         );
         prepareServiceNoticeHtml(rendered, eligible[0]!);
       }
@@ -894,7 +903,9 @@ export async function campaignSendStep(id?: string) {
       }
       const rendered = await renderCampaignHtml(
         send.content as unknown as TemplateContent,
-        normalizeFooterContent(send.footerContent),
+        send.footerContent === null
+          ? null
+          : normalizeFooterContent(send.footerContent),
       );
       const submitted = await db.campaignRecipient.count({
         where: { sendId: send.id, status: "submitted" },
@@ -956,7 +967,9 @@ export async function campaignSendStep(id?: string) {
       });
       const rendered = await renderCampaignHtml(
         send.content as unknown as TemplateContent,
-        normalizeFooterContent(send.footerContent),
+        send.footerContent === null
+          ? null
+          : normalizeFooterContent(send.footerContent),
       );
       const broadcastId = await createResendBroadcast({
         segmentId: send.segmentId,

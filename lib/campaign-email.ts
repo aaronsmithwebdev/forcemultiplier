@@ -8,7 +8,7 @@ export type CampaignEmailSettings = {
   fromName: string;
   fromEmail: string;
   replyToEmail: string;
-  footerContent: TemplateContent;
+  footerContent: TemplateContent | null;
 };
 
 export function resendTestPayload(
@@ -42,7 +42,7 @@ export async function renderEmailHtml(
 
 export function renderCampaignHtml(
   content: TemplateContent,
-  footer: TemplateContent,
+  footer: TemplateContent | null,
 ) {
   return renderEmailHtml(content, footerLayout(content, footer));
 }

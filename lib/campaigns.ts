@@ -15,7 +15,7 @@ export type CampaignPatch = Partial<{
   fromEmail: string;
   replyToEmail: string;
   serviceNotice: boolean;
-  footerId: string;
+  footerId: string | null;
 }>;
 
 const campaignSelect = {
@@ -101,7 +101,7 @@ export async function createCampaign(
 
 export async function saveCampaign(id: string, patch: CampaignPatch) {
   const current = await getCampaign(id);
-  if (patch.footerId !== undefined) {
+  if (patch.footerId != null) {
     const footer = await db.emailFooter.findUnique({
       where: { id: patch.footerId },
       select: { id: true },

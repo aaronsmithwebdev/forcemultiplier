@@ -129,7 +129,11 @@ import {
   listCampaigns,
   saveCampaign,
 } from "@/lib/campaigns";
-import { sendResendTest, sendResendTestHtml } from "@/lib/campaign-email";
+import {
+  renderCampaignHtml,
+  sendResendTest,
+  sendResendTestHtml,
+} from "@/lib/campaign-email";
 import {
   campaignAudienceOptions,
   previewCampaignRecipients,
@@ -366,6 +370,19 @@ async function handle(
     }
     if (p[0] === "campaigns" && p[1]) {
       const id = templateId.parse(p[1]);
+      if (p[2] === "design-preview" && p.length === 3 && method === "POST") {
+        const data = z
+          .object({ content: campaignContent })
+          .parse(await body(request, 2_000_000));
+        const campaign = await getCampaign(id);
+        return json({
+          html: await renderCampaignHtml(
+            data.content as unknown as TemplateContent,
+            (campaign.footer?.content ??
+              null) as unknown as TemplateContent | null,
+          ),
+        });
+      }
       if (p[2] === "review" && p.length === 3 && method === "GET")
         return json(await campaignAudienceOptions(id));
       if (p[2] === "recipients" && p.length === 3 && method === "POST") {
@@ -452,7 +469,8 @@ async function handle(
           );
         const settings = {
           ...campaign,
-          footerContent: campaign.footer.content as unknown as TemplateContent,
+          footerContent: (campaign.footer?.content ??
+            null) as unknown as TemplateContent | null,
         };
         const content = data.content as unknown as TemplateContent;
         if (data.sample) {
@@ -488,7 +506,7 @@ async function handle(
             fromEmail: email.optional(),
             replyToEmail: email.optional(),
             serviceNotice: z.boolean().optional(),
-            footerId: templateId.optional(),
+            footerId: templateId.nullable().optional(),
           })
           .refine((value) => Object.keys(value).length > 0, {
             message: "Include a campaign field to save.",

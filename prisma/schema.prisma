@@ -533,8 +533,8 @@ model Campaign {
   fromEmail            String        @default("")
   replyToEmail         String        @default("")
   serviceNotice        Boolean       @default(false)
-  footerId             String
-  footer               EmailFooter   @relation(fields: [footerId], references: [id], onDelete: Restrict)
+  footerId             String?
+  footer               EmailFooter?  @relation(fields: [footerId], references: [id], onDelete: Restrict)
   audienceIds          String[]      @default([])
   exclusionAudienceIds String[]      @default([])
   manualExclusions     String[]      @default([])

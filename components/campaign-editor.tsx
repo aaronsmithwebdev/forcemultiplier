@@ -10,14 +10,10 @@ import { api, Button, Loading, Notice } from "./common";
 import { CampaignSteps } from "./campaign-steps";
 import { templateMediaProvider } from "./template-editor";
 import { CampaignRecipients } from "./campaign-recipients";
+import { FooterPicker, type FooterOption } from "./footer-picker";
+import { FooterPreview } from "./footer-preview";
 import { footerLayout } from "@/lib/email-layout";
 import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
-
-type Footer = {
-  id: string;
-  name: string;
-  isDefault: boolean;
-};
 
 export function CampaignEditor({
   id,
@@ -38,12 +34,20 @@ export function CampaignEditor({
     report: ImportReport;
   } | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
-  const [footers, setFooters] = useState<Footer[]>([]);
-  const [footerId, setFooterId] = useState("");
+  const [footers, setFooters] = useState<FooterOption[]>([]);
+  const [footerId, setFooterId] = useState<string | null>(null);
   const [changingFooter, setChangingFooter] = useState(false);
+
+  const [footerRevision, setFooterRevision] = useState(0);
+  const [designContent, setDesignContent] = useState<TemplateContent | null>(
+    null,
+  );
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewError, setPreviewError] = useState("");
 
   useEffect(() => {
     if (!container.current) return;
+    setLoading(true);
     let cancelled = false;
     let editor: TemplaticalEditor | null = null;
     let stopIssueTooltips = () => {};
@@ -55,13 +59,13 @@ export function CampaignEditor({
             id: string;
             name: string;
             content: TemplateContent;
-            footerId: string;
-            footer: { content: TemplateContent };
+            footerId: string | null;
+            footer: { content: TemplateContent } | null;
             sourceArchiveId: string | null;
             sourceArchive: { campaignName: string } | null;
             conversionReport: ImportReport | null;
           },
-          Footer[],
+          FooterOption[],
         ] = await Promise.all([
           api("templates/merge-tags"),
           api(`campaigns/${id}`),
@@ -70,6 +74,7 @@ export function CampaignEditor({
         if (cancelled || !container.current) return;
         setFooters(footerRows);
         setFooterId(campaign.footerId);
+        setDesignContent(campaign.content);
         if (campaign.sourceArchiveId && campaign.conversionReport)
           setArchive({
             name: campaign.sourceArchive?.campaignName || campaign.name,
@@ -77,7 +82,10 @@ export function CampaignEditor({
           });
         const instance = await init({
           container: container.current,
-          layout: footerLayout(campaign.content, campaign.footer.content),
+          layout: footerLayout(
+            campaign.content,
+            campaign.footer?.content ?? null,
+          ),
           mergeTags: { syntax: "liquid", tags },
           media: templateMediaProvider(),
           templates: {
@@ -101,6 +109,7 @@ export function CampaignEditor({
             send: ({ recipient, content }) =>
               api(`campaigns/${id}/test`, "POST", { recipient, content }),
           },
+          onChange: setDesignContent,
           onError: (cause) => setError(cause.message),
         });
         if (cancelled) {
@@ -129,10 +138,31 @@ export function CampaignEditor({
       stopIssueTooltips();
       editor?.unmount();
     };
-  }, [email, id, preview]);
+  }, [email, id, preview, footerRevision]);
 
-  async function chooseFooter(nextId: string) {
-    if (!editorRef.current || nextId === footerId) return;
+  useEffect(() => {
+    if (preview || !designContent || loading || changingFooter) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setPreviewError("");
+      void api(`campaigns/${id}/design-preview`, "POST", {
+        content: designContent,
+      })
+        .then(({ html }) => {
+          if (!cancelled) setPreviewHtml(html);
+        })
+        .catch((cause) => {
+          if (!cancelled) setPreviewError(cause.message);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [id, preview, designContent, footerId, loading, changingFooter]);
+
+  async function chooseFooter(nextId: string | null) {
+    if (!editorRef.current || saving || nextId === footerId) return;
     const previousId = footerId;
     setFooterId(nextId);
     setSaving(true);
@@ -141,10 +171,12 @@ export function CampaignEditor({
     try {
       await editorRef.current.save();
       await api(`campaigns/${id}`, "PATCH", { footerId: nextId });
-      window.location.reload();
+      setPreviewHtml("");
+      setFooterRevision((revision) => revision + 1);
     } catch (cause) {
       setFooterId(previousId);
       setError((cause as Error).message);
+    } finally {
       setSaving(false);
       setChangingFooter(false);
     }
@@ -249,37 +281,60 @@ export function CampaignEditor({
         {loading && <Loading />}
         <div ref={container} className="templatical-container" />
       </div>
-      <div
-        className={`campaign-next-actions ${preview ? "" : "campaign-design-actions"}`}
-      >
-        {!preview && !loading && (
-          <div className="campaign-footer-control">
-            <label>
-              Email footer
-              <select
-                value={footerId}
-                disabled={saving}
-                onChange={(event) => void chooseFooter(event.target.value)}
-              >
-                {footers.map((footer) => (
-                  <option key={footer.id} value={footer.id}>
-                    {footer.name}
-                    {footer.isDefault ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {!preview && designContent && (
+        <section className="card campaign-footer-picker">
+          <div className="section-toolbar">
+            <div>
+              <h2>Email footer</h2>
+              <p>
+                Choose a finishing touch. See it connected to your design below.
+              </p>
+            </div>
             <Link href="/footers" target="_blank" rel="noopener noreferrer">
               Manage footers ↗
             </Link>
-            {changingFooter && <span role="status">Saving footer…</span>}
-            <small>
-              The selected footer follows the body in Preview and sends.
-              {archive &&
-                " Remove the imported footer blocks in the body to avoid a duplicate."}
-            </small>
           </div>
-        )}
+          <fieldset className="campaign-footer-field">
+            <legend>Choose an email footer</legend>
+            <FooterPicker
+              footers={footers}
+              value={footerId}
+              disabled={saving || loading}
+              onChange={(nextId) => void chooseFooter(nextId)}
+            />
+            {changingFooter && <p role="status">Saving footer…</p>}
+            {archive && (
+              <p>
+                Remove imported footer blocks from the design to avoid a
+                duplicate.
+              </p>
+            )}
+          </fieldset>
+          <div className="campaign-connected-preview">
+            <div className="campaign-preview-heading">
+              <strong>Email preview</strong>
+              <span>
+                {footerId
+                  ? footers.find((footer) => footer.id === footerId)?.name
+                  : "No footer"}
+              </span>
+            </div>
+            <Notice message={previewError} />
+            {previewHtml ? (
+              <FooterPreview
+                html={previewHtml}
+                title="Email design with selected footer"
+                className="campaign-email-preview"
+              />
+            ) : (
+              <p role="status">Rendering your email…</p>
+            )}
+          </div>
+        </section>
+      )}
+      <div
+        className={`campaign-next-actions ${preview ? "" : "campaign-design-actions"}`}
+      >
         {!preview && (
           <Button
             variant="secondary"
