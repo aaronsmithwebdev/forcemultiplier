@@ -114,6 +114,7 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
       username: shortText(row.m_username, 150),
       name: name(row.m_fname, row.m_lname),
       email: normalizedEmail(shortText(row.m_email, 254)),
+      dateOfBirth: date(row.m_dob),
     };
   if (phase === "registrations") {
     // Legacy registrations can contain a blank status; only Y is affirmative.
@@ -425,10 +426,11 @@ async function savePage(
         `);
         if (phase === "participants")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, username, "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${row.username}, ${seen})`))}
+          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, username, "dateOfBirth", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${row.username}, ${row.dateOfBirth}, ${seen})`))}
           ON CONFLICT ("memberId") DO UPDATE SET "salesforceId" = EXCLUDED."salesforceId",
             "firstName" = EXCLUDED."firstName", name = EXCLUDED.name, email = EXCLUDED.email, username = EXCLUDED.username,
+            "dateOfBirth" = EXCLUDED."dateOfBirth",
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinParticipant"."lastSeenScan")
         `);
         if (phase === "registrations")
@@ -602,7 +604,7 @@ export async function runFunraisinSyncStep() {
         data: { orgId: account.externalId, baseUrl },
       });
     if (!sync.scanUntil) {
-      const historical = sync.participantUrlsVersion < 1 || !sync.lastFullAt;
+      const historical = sync.participantUrlsVersion < 2 || !sync.lastFullAt;
       const mode = historical
         ? "full"
         : sync.currentYearOnly
@@ -614,7 +616,7 @@ export async function runFunraisinSyncStep() {
         where: { id: sync.id },
         data: {
           mode,
-          ...(mode === "full" ? { participantUrlsVersion: 1 } : {}),
+          ...(mode === "full" ? { participantUrlsVersion: 2 } : {}),
           scanId: mode !== "incremental" ? randomUUID() : null,
           scanUntil: new Date(),
           scanEventIds: [],
@@ -706,7 +708,7 @@ export async function funraisinSyncState() {
   return {
     configured: !!apiUrl(),
     currentYearOnly: sync?.currentYearOnly ?? true,
-    historicalComplete: !!sync?.lastFullAt && sync.participantUrlsVersion >= 1,
+    historicalComplete: !!sync?.lastFullAt && sync.participantUrlsVersion >= 2,
     schedulerReady: !!process.env.CRON_SECRET,
     status: funraisinSyncStatus(sync, settings?.timeZone ?? defaultTimeZone),
   };

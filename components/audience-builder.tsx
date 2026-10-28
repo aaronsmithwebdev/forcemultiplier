@@ -124,6 +124,13 @@ export function AudienceBuilder() {
   const funFilters = type === "funraisin" ? JSON.parse(query) : null;
   function updateFunFilters(patch: Record<string, unknown>) {
     setQuery(JSON.stringify({ ...funFilters, ...patch }));
+    if (patch.people)
+      setFields(
+        FUNRAISIN_FIELDS.filter(
+          (field) =>
+            patch.people === "entrants" || field !== "FunraisinDateOfBirth",
+        ),
+      );
     setRecords(null);
   }
   const queryEditor = (

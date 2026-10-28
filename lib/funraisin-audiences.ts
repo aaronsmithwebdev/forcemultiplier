@@ -118,6 +118,7 @@ export async function funraisinAudiencePage(
       event: string | null;
       username: string | null;
       eventKey: string | null;
+      dateOfBirth: Date | null;
     }[]
   >(Prisma.sql`
     WITH source AS (${source}), numbered AS (SELECT *, COUNT(*) OVER () AS total FROM source),
@@ -127,11 +128,11 @@ export async function funraisinAudiencePage(
       ORDER BY "salesforceId" LIMIT ${limit + 1}
     )
     SELECT s."salesforceId" AS "Id", s.total,
-      stats.count, stats.amount::text, latest."donatedAt", latest.target,
+      stats.count, stats.amount::text, latest."donatedAt", latest.target, entrant."dateOfBirth",
       ${filters.eventId ? Prisma.sql`(SELECT name FROM "forcemultiplier"."FunraisinEvent" WHERE id = ${filters.eventId})` : filters.people === "donors" ? Prisma.sql`latest.event` : Prisma.sql`entrant.name`} AS event, entrant.username, entrant."eventKey"
     FROM selected s
     LEFT JOIN LATERAL (
-      SELECT p.username, e."eventKey", e.name
+      SELECT p.username, p."dateOfBirth", e."eventKey", e.name
       FROM "forcemultiplier"."FunraisinRegistration" r
       JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
       JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId"
@@ -171,6 +172,12 @@ export async function funraisinAudiencePage(
         row.username,
         row.eventKey,
       ),
+      ...(filters.people === "entrants"
+        ? {
+            FunraisinDateOfBirth:
+              row.dateOfBirth?.toISOString().slice(0, 10) ?? "",
+          }
+        : {}),
       FunraisinDonationCount: Number(row.count),
       FunraisinDonationTotal: row.amount,
       FunraisinLastDonatedAt: row.donatedAt?.toISOString().slice(0, 10) ?? "",

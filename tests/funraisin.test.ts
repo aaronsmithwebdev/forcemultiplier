@@ -96,6 +96,7 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       crm_member_id: contact,
       m_fname: " Mary Jane ",
       m_lname: "Smith",
+      m_dob: "1990-02-28",
     }),
     {
       id: "7",
@@ -104,8 +105,15 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       name: "Mary Jane Smith",
       email: null,
       username: null,
+      dateOfBirth: new Date("1990-02-28"),
     },
   );
+  for (const invalid of ["0000-00-00", "2001-02-29", "not a date"])
+    assert.equal(
+      funraisinRow("participants", { member_id: "7", m_dob: invalid })
+        .dateOfBirth,
+      null,
+    );
   assert.deepEqual(
     funraisinRow("teams", {
       team_id: "8",
@@ -234,7 +242,7 @@ test("fundraising URLs combine a safe base, username and event key", () => {
   }
 });
 
-test("URL field rollout schedules a full backfill even after a recent full scan", async (t) => {
+test("participant field rollout schedules a full backfill even after a recent full scan", async (t) => {
   const env = { ...process.env };
   t.after(() => {
     process.env = env;
@@ -277,8 +285,12 @@ test("URL field rollout schedules a full backfill even after a recent full scan"
   });
   await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
   assert.equal(starts[0].mode, "full");
-  assert.equal(starts[0].participantUrlsVersion, 1);
+  assert.equal(starts[0].participantUrlsVersion, 2);
   sync.participantUrlsVersion = 1;
+  starts.length = 0;
+  await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
+  assert.equal(starts[0].mode, "full");
+  sync.participantUrlsVersion = 2;
   starts.length = 0;
   await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
   assert.equal(starts[0].mode, "incremental");
@@ -295,7 +307,7 @@ function syncSetup(t: TestContext, overrides: Record<string, unknown> = {}) {
     id: "default",
     orgId: "org-1",
     baseUrl: "https://example.org/",
-    participantUrlsVersion: 1,
+    participantUrlsVersion: 2,
     currentYearOnly: true,
     lastFullAt: new Date("2020-01-01"),
     lastCompletedAt: new Date(),

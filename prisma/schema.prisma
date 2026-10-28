@@ -707,6 +707,7 @@ model FunraisinParticipant {
   firstName      String?
   name           String?
   email          String?
+  dateOfBirth    DateTime?               @db.Date
   lastSeenScan   String?
   registrations  FunraisinRegistration[]
 

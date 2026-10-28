@@ -5,6 +5,7 @@ export const FUNRAISIN_FIELDS = [
   "FunraisinUsername",
   "FunraisinEventKey",
   "FunraisinFundraisingUrl",
+  "FunraisinDateOfBirth",
   "FunraisinDonationCount",
   "FunraisinDonationTotal",
   "FunraisinLastDonatedAt",

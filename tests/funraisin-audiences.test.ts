@@ -82,6 +82,7 @@ const row = {
   event: "Walk",
   username: "samwalker",
   eventKey: "autumn-walk",
+  dateOfBirth: new Date("1990-02-28"),
 };
 
 test("Funraisin filters reject unsafe IDs, fractional counts and inverted ranges", () => {
@@ -109,6 +110,8 @@ test("Funraisin pages retain event fields while enriching current Salesforce con
     // Both audience membership and the event/URL lookup must use payment alone.
     assert.doesNotMatch(sql.sql, /r\.(?:active|complete|archived)/);
     assert.equal(sql.sql.match(/AND r\."isPaid"/g)?.length, 2);
+    assert.match(sql.sql, /p\."dateOfBirth"/);
+    assert.match(sql.sql, /entrant\."dateOfBirth"/);
     assert.ok(sql.values.includes("42"));
     return [row];
   });
@@ -125,6 +128,7 @@ test("Funraisin pages retain event fields while enriching current Salesforce con
     FunraisinEventKey: "autumn-walk",
     FunraisinFundraisingUrl:
       "https://example.org/fundraisers/samwalker/autumn-walk",
+    FunraisinDateOfBirth: "1990-02-28",
     FunraisinDonationCount: 3,
     FunraisinDonationTotal: "75.50",
     FunraisinLastDonatedAt: "2026-10-18",
@@ -154,6 +158,26 @@ test("donors are counted after payment and refunds, within the selected event", 
   );
   assert.equal(page.done, true);
   assert.deepEqual(page.records, []);
+});
+
+test("donor audiences do not contain participant birth dates", async (t) => {
+  setup(t);
+  mock(t, db, "$queryRaw", async () => [row]);
+  const page = await funraisinAudiencePage(
+    JSON.stringify({ type: "funraisin", people: "donors" }),
+  );
+  assert.equal(Object.hasOwn(page.records[0]!, "FunraisinDateOfBirth"), false);
+  mock(t, db.audience, "create", async ({ data }: any) => data);
+  const audience = await createAudience({
+    name: "Donors",
+    sourceType: "funraisin",
+    query: JSON.stringify({ type: "funraisin", people: "donors" }),
+    fields: [],
+  });
+  assert.deepEqual(
+    audience.fields,
+    FUNRAISIN_FIELDS.filter((field) => field !== "FunraisinDateOfBirth"),
+  );
 });
 
 test("pagination uses a lookahead and rejects sync changes before publishing", async (t) => {
@@ -271,6 +295,7 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
         createMany: async ({ data }: any) => {
           assert.equal(data[0].salesforceId, id);
           assert.equal(data[0].optedOut, true);
+          assert.equal(data[0].data.FunraisinDateOfBirth, "1990-02-28");
           assert.equal(data[0].data.FunraisinLastDonatedToName, "Alex");
           saved = true;
           return { count: 1 };

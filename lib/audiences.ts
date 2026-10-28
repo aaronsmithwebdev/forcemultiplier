@@ -30,7 +30,10 @@ export async function createAudience(input: {
         sourceType: "funraisin",
         query: JSON.stringify(filters),
         orgId: sync.orgId,
-        fields: [...FUNRAISIN_FIELDS],
+        fields: FUNRAISIN_FIELDS.filter(
+          (field) =>
+            filters.people === "entrants" || field !== "FunraisinDateOfBirth",
+        ),
       },
     });
   }
