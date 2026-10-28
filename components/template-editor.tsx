@@ -12,7 +12,7 @@ import type {
 } from "@templatical/types";
 import "@templatical/editor/style.css";
 import { api, Loading, Notice } from "./common";
-import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
+import { customizeTemplaticalEditor } from "./templatical-editor";
 
 const assetBucket = "email-template-assets";
 const assetTypes: Record<string, string> = {
@@ -139,7 +139,7 @@ export function TemplateEditor({ id }: { id: string }) {
           return;
         }
         editor = instance;
-        stopIssueTooltips = showTemplaticalIssueTooltips(
+        stopIssueTooltips = customizeTemplaticalEditor(
           container.current!,
           instance,
         );

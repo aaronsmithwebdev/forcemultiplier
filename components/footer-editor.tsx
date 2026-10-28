@@ -7,7 +7,7 @@ import type { TemplateContent } from "@templatical/types";
 import "@templatical/editor/style.css";
 import { api, Badge, Button, Loading, Notice } from "./common";
 import { templateMediaProvider } from "./template-editor";
-import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
+import { customizeTemplaticalEditor } from "./templatical-editor";
 
 export function FooterEditor({ id }: { id: string }) {
   const container = useRef<HTMLDivElement>(null);
@@ -52,7 +52,7 @@ export function FooterEditor({ id }: { id: string }) {
           return;
         }
         editor = instance;
-        stopIssueTooltips = showTemplaticalIssueTooltips(
+        stopIssueTooltips = customizeTemplaticalEditor(
           container.current!,
           instance,
         );

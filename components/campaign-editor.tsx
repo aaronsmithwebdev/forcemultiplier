@@ -13,7 +13,7 @@ import { CampaignRecipients } from "./campaign-recipients";
 import { FooterPicker, type FooterOption } from "./footer-picker";
 import { FooterPreview } from "./footer-preview";
 import { footerLayout } from "@/lib/email-layout";
-import { showTemplaticalIssueTooltips } from "./templatical-issue-tooltips";
+import { customizeTemplaticalEditor } from "./templatical-editor";
 
 export function CampaignEditor({
   id,
@@ -118,7 +118,7 @@ export function CampaignEditor({
         }
         editor = instance;
         editorRef.current = instance;
-        stopIssueTooltips = showTemplaticalIssueTooltips(
+        stopIssueTooltips = customizeTemplaticalEditor(
           container.current!,
           instance,
         );

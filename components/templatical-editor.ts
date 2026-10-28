@@ -12,12 +12,17 @@ export function issueMessagesByBlock(issues: LintIssue[]) {
   return messages;
 }
 
-export function showTemplaticalIssueTooltips(
+export function customizeTemplaticalEditor(
   container: HTMLElement,
   editor: TemplaticalEditor,
 ) {
   // shortcut: Depends on Templatical's badge markup; use its API when it exposes issue text.
   const root = container.shadowRoot ?? container;
+  // Templatical adds 96px of stage background on each side of the email.
+  // ponytail: Uses SDK markup until it exposes a canvas-stage width option.
+  const style = document.createElement("style");
+  style.textContent = ".tpl-canvas-stage { width: fit-content !important; }";
+  root.appendChild(style);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function update() {
@@ -63,6 +68,7 @@ export function showTemplaticalIssueTooltips(
 
   return () => {
     observer.disconnect();
+    style.remove();
     root.removeEventListener("mouseover", onMouseOver);
     clearTimeout(timer);
   };

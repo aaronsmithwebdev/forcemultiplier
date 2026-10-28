@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LintIssue } from "@templatical/quality";
-import { issueMessagesByBlock } from "../components/templatical-issue-tooltips";
+import { issueMessagesByBlock } from "../components/templatical-editor";
 
 test("block tooltips include every error and warning for that block", () => {
   const issues = [
