@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { Empty, Heading } from "@/components/common";
 import { db } from "@/lib/db";
-import { defaultTimeZone, formatDate } from "@/lib/time-zone";
+import { defaultTimeZone } from "@/lib/time-zone";
+import { funraisinSyncStatus } from "@/lib/funraisin";
 
 type Person = {
   salesforceId: string;
@@ -148,15 +149,10 @@ export default async function Page({
           "Date not set"}{" "}
         · Funraisin event {event.id}
       </p>
-      {sync.scanUntil && (
-        <p className="page-intro">
-          Syncing {sync.phase}: {sync.processed.toLocaleString()}
-          {sync.total ? ` of ${sync.total.toLocaleString()}` : ""} records
-          processed in this stage.
-          {sync.error &&
-            ` Last attempt failed: ${sync.error} Next retry: ${formatDate(sync.dueAt, settings?.timeZone ?? defaultTimeZone)}.`}
-        </p>
-      )}
+      <p className="page-intro">
+        {funraisinSyncStatus(sync, settings?.timeZone ?? defaultTimeZone)}{" "}
+        <Link href="/connections">Sync settings</Link>
+      </p>
       <section className="card">
         <div className="section-toolbar">
           <div>

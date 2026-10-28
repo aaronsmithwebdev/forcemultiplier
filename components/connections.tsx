@@ -96,6 +96,7 @@ export function Connections() {
             <ConnectionCard key={row.provider} row={row} refresh={load} />
           ))}
           <ResendCard />
+          <FunraisinCard />
           <ContactMirrorCard />
         </div>
       )}
@@ -110,6 +111,97 @@ export function Connections() {
         </div>
       </div>
     </>
+  );
+}
+function FunraisinCard() {
+  const [status, setStatus] = useState<{
+    configured: boolean;
+    currentYearOnly: boolean;
+    historicalComplete: boolean;
+    schedulerReady: boolean;
+    status: string;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function load(currentYearOnly?: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      setStatus(
+        await api(
+          "funraisin/sync",
+          currentYearOnly === undefined ? "GET" : "PUT",
+          currentYearOnly === undefined ? undefined : { currentYearOnly },
+        ),
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    void load();
+  }, []);
+  return (
+    <section className="card connection-card">
+      <div className="connection-card-top">
+        <span className="provider-logo">fr</span>
+        <Badge tone={status?.configured ? "green" : ""}>
+          {status?.configured ? "Configured" : "Not configured"}
+        </Badge>
+      </div>
+      <h2>Funraisin</h2>
+      <Notice message={error} />
+      {!status ? (
+        !error && <Loading />
+      ) : (
+        <div className="connected-details">
+          <p role="status">{status.status}</p>
+          {!status.configured && (
+            <p>
+              Set FUNRAISIN_BASE_URL and FUNRAISIN_API_KEY on the server to
+              connect Funraisin.
+            </p>
+          )}
+          {!status.schedulerReady && (
+            <p>Set CRON_SECRET to allow scheduled syncs.</p>
+          )}
+          <label className="consent-check">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={status.currentYearOnly}
+              disabled={busy}
+              onChange={(e) => void load(e.target.checked)}
+            />
+            Sync current year’s event data on daily sync
+          </label>
+          <p>
+            The initial import always includes all years. When enabled, later
+            daily syncs refresh registrations, teams and donations only for
+            events dated in the current year, using the workspace time zone.
+            Older event data stays available. Events without a date are
+            excluded.
+          </p>
+          <p>
+            The event catalog is checked for new events, and shared participant
+            profiles refresh from recent changes. Turn this off to refresh
+            changes across all years and reconcile all records weekly. Changes
+            apply after the current sync finishes.
+          </p>
+          {!status.historicalComplete && (
+            <p>
+              The all-years import must finish before current-year daily syncs
+              begin.
+            </p>
+          )}
+          <Button variant="ghost" busy={busy} onClick={() => void load()}>
+            <RefreshCw size={15} /> Refresh status
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 function ContactMirrorCard() {

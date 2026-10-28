@@ -760,6 +760,9 @@ model FunraisinDonation {
 }
 
 model FunraisinSync {
+  currentYearOnly Boolean   @default(true)
+  scanEventIds    String[]  @default([])
+  eventIndex      Int       @default(0)
   participantUrlsVersion Int @default(0)
   id              String    @id @default("default")
   orgId           String?

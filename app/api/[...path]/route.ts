@@ -14,7 +14,11 @@ import { z } from "zod";
 import type { TemplateContent } from "@templatical/types";
 import { db } from "@/lib/db";
 import { timeZones } from "@/lib/time-zone";
-import { runFunraisinSyncStep } from "@/lib/funraisin";
+import {
+  runFunraisinSyncStep,
+  funraisinSyncState,
+  setFunraisinCurrentYearOnly,
+} from "@/lib/funraisin";
 import {
   contactMirrorState,
   rebuildContactMirror,
@@ -911,6 +915,14 @@ async function handle(
         })),
         childRelationships: info.childRelationships,
       });
+    }
+    if (key === "funraisin/sync" && method === "GET")
+      return json(await funraisinSyncState());
+    if (key === "funraisin/sync" && method === "PUT") {
+      const data = z
+        .object({ currentYearOnly: z.boolean() })
+        .parse(await body(request));
+      return json(await setFunraisinCurrentYearOnly(data.currentYearOnly));
     }
     if (key === "funraisin/events" && method === "GET") {
       await funraisinAudienceConnection(undefined, {

@@ -4,6 +4,7 @@ import { db } from "./db";
 import { normalizedEmail } from "./email";
 import { AppError, publicError } from "./errors";
 import { sfId } from "./soql";
+import { defaultTimeZone, formatDate } from "./time-zone";
 
 const PHASES = [
   "events",
@@ -216,6 +217,7 @@ export function funraisinPageUrl(
   phase: Phase,
   offset: number,
   since: Date | null,
+  eventId?: string,
 ) {
   const url = new URL(
     `${base.pathname.replace(/\/+$/, "")}/api/${ENDPOINT[phase]}`,
@@ -226,6 +228,11 @@ export function funraisinPageUrl(
   url.searchParams.set("offset", String(offset));
   if (since)
     url.searchParams.set("date_from", since.toISOString().slice(0, 10));
+  if (eventId)
+    url.searchParams.set(
+      phase === "teams" ? "filter[event_id]" : "event_id",
+      eventId,
+    );
   return url;
 }
 
@@ -234,14 +241,20 @@ async function page(
   phase: Phase,
   offset: number,
   since: Date | null,
+  eventId?: string,
 ) {
   // ponytail: offset pages can shift during source writes; overlapping polls and weekly full scans reduce gaps until Funraisin offers a stable cursor.
-  const url = funraisinPageUrl(config.url, phase, offset, since);
+  const url = funraisinPageUrl(config.url, phase, offset, since, eventId);
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${config.key}` },
     cache: "no-store",
     redirect: "manual",
     signal: AbortSignal.timeout(25_000),
+  }).catch((error) => {
+    throw new AppError(
+      `Funraisin ${ENDPOINT[phase]} ${error?.name === "TimeoutError" ? "request timed out" : "could not be reached"}. The server will retry from the last saved page.`,
+      502,
+    );
   });
   if (!response.ok)
     throw new AppError(
@@ -267,6 +280,14 @@ async function page(
     (offset < total && !result.data.length)
   )
     throw new AppError("Funraisin returned an incomplete page.", 502);
+  if (
+    eventId &&
+    result.data.some((row) => funraisinId(row.event_id) !== eventId)
+  )
+    throw new AppError(
+      `Funraisin ${ENDPOINT[phase]} returned records outside the selected event. Sync stopped to protect stored data.`,
+      502,
+    );
   return { total, rows: result.data as Record<string, unknown>[] };
 }
 
@@ -358,10 +379,17 @@ async function savePage(
   valid = rows.filter((row) => !issueIds.has(row.id));
   const skipped = issues.length;
   const validIds = new Set(valid.map((row) => row.id));
-  const finished = sync.offset + result.rows.length >= result.total;
+  const scoped =
+    sync.mode === "current-year" &&
+    phase !== "events" &&
+    phase !== "participants";
+  const pageFinished = sync.offset + result.rows.length >= result.total;
+  const finished =
+    pageFinished &&
+    (!scoped || sync.eventIndex >= sync.scanEventIds.length - 1);
   const next = PHASES[PHASES.indexOf(phase) + 1];
   const done = finished && !next;
-  const seen = sync.mode === "full" ? sync.scanId : null;
+  const seen = sync.mode !== "incremental" ? sync.scanId : null;
   await db.$transaction(
     async (tx) => {
       if (valid.length)
@@ -432,7 +460,7 @@ async function savePage(
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinTeam"."lastSeenScan")
         `);
       }
-      if (finished && sync.mode === "full") {
+      if (finished && (sync.mode === "full" || scoped)) {
         const table = {
           events: "FunraisinEvent",
           participants: "FunraisinParticipant",
@@ -440,9 +468,12 @@ async function savePage(
           teams: "FunraisinTeam",
           donations: "FunraisinDonation",
         }[phase];
-        const previous = await tx.$queryRawUnsafe<[{ count: bigint }]>(
-          `SELECT count(*) AS count FROM "forcemultiplier"."${table}"`,
-        );
+        const scope = scoped
+          ? Prisma.sql`AND "eventId" IN (${sync.scanEventIds.length ? Prisma.join(sync.scanEventIds) : Prisma.sql`NULL`})`
+          : Prisma.empty;
+        const previous = await tx.$queryRaw<[{ count: bigint }]>(Prisma.sql`
+          SELECT count(*) AS count FROM "forcemultiplier".${Prisma.raw(`"${table}"`)} WHERE TRUE ${scope}
+        `);
         if (
           Number(previous[0]!.count) >= 100 &&
           sync.processed + rows.length < Number(previous[0]!.count) * 0.8
@@ -451,20 +482,52 @@ async function savePage(
             "Funraisin returned far fewer records than the previous scan. Review before reconciliation.",
             409,
           );
-        await tx.$executeRawUnsafe(
-          `DELETE FROM "forcemultiplier"."${table}" WHERE "lastSeenScan" IS DISTINCT FROM $1`,
-          sync.scanId,
-        );
-        await tx.$executeRaw`
+        await tx.$executeRaw(Prisma.sql`
+          DELETE FROM "forcemultiplier".${Prisma.raw(`"${table}"`)}
+          WHERE "lastSeenScan" IS DISTINCT FROM ${sync.scanId} ${scope}
+        `);
+        if (!scoped)
+          await tx.$executeRaw`
           DELETE FROM "forcemultiplier"."FunraisinIssue"
           WHERE phase = ${phase} AND "lastSeenScan" IS DISTINCT FROM ${sync.scanId}
         `;
+      }
+      let scanEventIds: string[] | undefined;
+      if (finished && phase === "events" && sync.mode === "current-year") {
+        const settings = await tx.workspaceSettings.findUnique({
+          where: { id: "workspace" },
+          select: { timeZone: true },
+        });
+        const year = Number(
+          new Intl.DateTimeFormat("en", {
+            timeZone: settings?.timeZone ?? defaultTimeZone,
+            year: "numeric",
+          }).format(sync.scanUntil!),
+        );
+        const events = await tx.funraisinEvent.findMany({
+          where: {
+            eventDate: {
+              gte: new Date(`${year}-01-01T00:00:00Z`),
+              lt: new Date(`${year + 1}-01-01T00:00:00Z`),
+            },
+            lastSeenScan: sync.scanId,
+          },
+          orderBy: { id: "asc" },
+          select: { id: true },
+        });
+        scanEventIds = events.map((event) => event.id);
       }
       const updated = await tx.funraisinSync.updateMany({
         where: { id: sync.id, leaseUntil: lease, phase, offset: sync.offset },
         data: {
           phase: finished ? (next ?? "events") : phase,
-          offset: finished ? 0 : sync.offset + rows.length,
+          offset: pageFinished ? 0 : sync.offset + rows.length,
+          eventIndex: finished
+            ? 0
+            : scoped && pageFinished
+              ? sync.eventIndex + 1
+              : sync.eventIndex,
+          ...(scanEventIds ? { scanEventIds } : {}),
           total: finished ? 0 : result.total,
           processed: finished ? 0 : sync.processed + rows.length,
           skipped: sync.skipped + skipped,
@@ -473,9 +536,11 @@ async function savePage(
                 mode: "incremental",
                 scanId: null,
                 scanUntil: null,
+                scanEventIds: [],
+                eventIndex: 0,
                 lastCompletedAt: new Date(),
                 ...(sync.mode === "full" ? { lastFullAt: new Date() } : {}),
-                dueAt: new Date(Date.now() + HOUR),
+                dueAt: new Date(Date.now() + DAY),
               }
             : {}),
           error: null,
@@ -537,17 +602,23 @@ export async function runFunraisinSyncStep() {
         data: { orgId: account.externalId, baseUrl },
       });
     if (!sync.scanUntil) {
-      const full =
-        sync.participantUrlsVersion < 1 ||
-        !sync.lastFullAt ||
-        Date.now() - sync.lastFullAt.getTime() >= 7 * DAY;
+      const historical = sync.participantUrlsVersion < 1 || !sync.lastFullAt;
+      const mode = historical
+        ? "full"
+        : sync.currentYearOnly
+          ? "current-year"
+          : Date.now() - sync.lastFullAt!.getTime() >= 7 * DAY
+            ? "full"
+            : "incremental";
       sync = await db.funraisinSync.update({
         where: { id: sync.id },
         data: {
-          mode: full ? "full" : "incremental",
-          ...(full ? { participantUrlsVersion: 1 } : {}),
-          scanId: full ? randomUUID() : null,
+          mode,
+          ...(mode === "full" ? { participantUrlsVersion: 1 } : {}),
+          scanId: mode !== "incremental" ? randomUUID() : null,
           scanUntil: new Date(),
+          scanEventIds: [],
+          eventIndex: 0,
           processed: 0,
           skipped: 0,
         },
@@ -555,16 +626,27 @@ export async function runFunraisinSyncStep() {
     }
     let result: Awaited<ReturnType<typeof savePage>> | null = null;
     for (let step = 0; step < 5; step++) {
+      // ponytail: participant profiles are shared and have no event filter; refresh their recent changes globally until Funraisin offers an event-scoped profile endpoint.
       const since =
-        sync.mode === "incremental" && sync.lastCompletedAt
+        (sync.mode === "incremental" ||
+          (sync.mode === "current-year" && sync.phase === "participants")) &&
+        sync.lastCompletedAt
           ? new Date(sync.lastCompletedAt.getTime() - 2 * DAY)
           : null;
-      const fetched = await page(
-        config,
-        sync.phase as Phase,
-        sync.offset,
-        since,
-      );
+      const scoped =
+        sync.mode === "current-year" &&
+        sync.phase !== "events" &&
+        sync.phase !== "participants";
+      const fetched =
+        scoped && !sync.scanEventIds.length
+          ? { total: 0, rows: [] }
+          : await page(
+              config,
+              sync.phase as Phase,
+              sync.offset,
+              since,
+              scoped ? sync.scanEventIds[sync.eventIndex] : undefined,
+            );
       result = await savePage(sync, lease, fetched);
       if (result.finished) break;
       sync = await db.funraisinSync.findUniqueOrThrow({
@@ -576,7 +658,10 @@ export async function runFunraisinSyncStep() {
     await db.funraisinSync.updateMany({
       where: { id: "default", leaseUntil: lease },
       data: {
-        error: publicError(error).error,
+        error:
+          publicError(error).status === 500
+            ? "The Funraisin sync worker could not finish this batch. Saved pages are kept; the worker will retry."
+            : publicError(error).error,
         dueAt: new Date(Date.now() + 5 * 60_000),
       },
     });
@@ -587,4 +672,51 @@ export async function runFunraisinSyncStep() {
       data: { leaseUntil: null },
     });
   }
+}
+
+export function funraisinSyncStatus(
+  sync: FunraisinSync | null,
+  timeZone = defaultTimeZone,
+  now = new Date(),
+) {
+  if (!sync) return "Waiting for the first scheduled import.";
+  const last = sync.lastCompletedAt
+    ? ` Last completed sync: ${formatDate(sync.lastCompletedAt, timeZone)}.`
+    : " The initial historical import has not completed yet.";
+  const progress = sync.scanUntil
+    ? ` ${sync.phase}: ${sync.processed.toLocaleString()} records processed${sync.mode === "current-year" && sync.scanEventIds.length && !["events", "participants"].includes(sync.phase) ? `; event ${sync.eventIndex + 1} of ${sync.scanEventIds.length}` : ""}.`
+    : "";
+  if (sync.leaseUntil && sync.leaseUntil > now)
+    return `Sync worker is running.${progress}${last}`;
+  if (sync.error)
+    return `Last attempt failed: ${sync.error} ${sync.dueAt > now ? `Retry scheduled for ${formatDate(sync.dueAt, timeZone)}.` : "Waiting for the scheduled worker to retry."}${progress}${last}`;
+  if (sync.scanUntil)
+    return `Sync is between batches, waiting for the scheduled worker.${progress}${last}`;
+  return `Next daily sync: ${formatDate(sync.dueAt, timeZone)}.${last}`;
+}
+
+export async function funraisinSyncState() {
+  const [sync, settings] = await Promise.all([
+    db.funraisinSync.findUnique({ where: { id: "default" } }),
+    db.workspaceSettings.findUnique({
+      where: { id: "workspace" },
+      select: { timeZone: true },
+    }),
+  ]);
+  return {
+    configured: !!apiUrl(),
+    currentYearOnly: sync?.currentYearOnly ?? true,
+    historicalComplete: !!sync?.lastFullAt && sync.participantUrlsVersion >= 1,
+    schedulerReady: !!process.env.CRON_SECRET,
+    status: funraisinSyncStatus(sync, settings?.timeZone ?? defaultTimeZone),
+  };
+}
+
+export async function setFunraisinCurrentYearOnly(currentYearOnly: boolean) {
+  await db.funraisinSync.upsert({
+    where: { id: "default" },
+    create: { id: "default", currentYearOnly },
+    update: { currentYearOnly },
+  });
+  return funraisinSyncState();
 }

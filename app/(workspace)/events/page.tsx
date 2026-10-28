@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Empty, Heading } from "@/components/common";
 import { db } from "@/lib/db";
-import { defaultTimeZone, formatDate } from "@/lib/time-zone";
+import { defaultTimeZone } from "@/lib/time-zone";
+import { funraisinSyncStatus } from "@/lib/funraisin";
 
 export default async function Page({
   searchParams,
@@ -62,15 +63,13 @@ export default async function Page({
                 ? "Set FUNRAISIN_BASE_URL and FUNRAISIN_API_KEY on the server to start syncing."
                 : !salesforce?.externalId || !salesforce.tokens
                   ? "Connect Salesforce before importing Funraisin contacts."
-                  : sync?.error
-                    ? `Sync issue (retrying): ${sync.error}`
-                    : !sync
-                      ? "The scheduled import will start shortly."
-                      : sync.scanUntil
-                        ? `Importing ${sync.phase}: ${sync.processed.toLocaleString()} records processed${sync.skipped ? `; ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped` : ""}.`
-                        : sync.lastCompletedAt
-                          ? `Last synced ${formatDate(sync.lastCompletedAt, settings?.timeZone ?? defaultTimeZone)}${sync.skipped ? `; ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped` : ""}.`
-                          : "The scheduled import will start shortly."}
+                  : funraisinSyncStatus(
+                      sync,
+                      settings?.timeZone ?? defaultTimeZone,
+                    )}
+              {!!sync?.skipped &&
+                ` ${sync.skipped.toLocaleString()} records without a valid Contact or event link skipped.`}{" "}
+              <Link href="/connections">Sync settings</Link>
             </p>
           </div>
           <form action="/events" method="get" className="search-box">
