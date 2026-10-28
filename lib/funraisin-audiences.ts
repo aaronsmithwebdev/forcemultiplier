@@ -32,7 +32,10 @@ export function parseFunraisinAudience(query: string) {
   }
 }
 
-export async function funraisinAudienceConnection(orgId?: string) {
+export async function funraisinAudienceConnection(
+  orgId?: string,
+  { requireCompletedSync = true } = {},
+) {
   const [account, sync] = await Promise.all([
     connection("salesforce"),
     db.funraisinSync.findUnique({ where: { id: "default" } }),
@@ -47,7 +50,10 @@ export async function funraisinAudienceConnection(orgId?: string) {
       "Connect the Salesforce org linked to the Funraisin sync.",
       409,
     );
-  if (!sync.lastCompletedAt || sync.scanUntil || sync.error)
+  if (
+    requireCompletedSync &&
+    (!sync.lastCompletedAt || sync.scanUntil || sync.error)
+  )
     throw new AppError(
       "Wait for a successful Funraisin sync to finish before pulling an audience.",
       409,

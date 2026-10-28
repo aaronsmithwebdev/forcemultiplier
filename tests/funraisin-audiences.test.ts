@@ -5,6 +5,7 @@ import { encrypt } from "../lib/security";
 import { createAudience, startPull, pullStep } from "../lib/audiences";
 import {
   FUNRAISIN_FIELDS,
+  funraisinAudienceConnection,
   funraisinAudiencePage,
   parseFunraisinAudience,
 } from "../lib/funraisin-audiences";
@@ -190,6 +191,30 @@ test("incomplete syncs and a different org cannot supply audiences", async (t) =
   sync.error = null;
   await assert.rejects(
     funraisinAudiencePage(filters, null, 25, "other-org"),
+    /linked to the Funraisin sync/,
+  );
+});
+
+test("event browsing allows incomplete syncs but still requires the linked Salesforce org", async (t) => {
+  const sync = setup(t);
+  for (const state of [
+    { lastCompletedAt: null, scanUntil: new Date(), error: null },
+    { lastCompletedAt: new Date(), scanUntil: new Date(), error: null },
+    { lastCompletedAt: new Date(), scanUntil: null, error: "Sync failed" },
+  ]) {
+    Object.assign(sync, state);
+    const config = await funraisinAudienceConnection(undefined, {
+      requireCompletedSync: false,
+    });
+    assert.equal(config.orgId, "org-1");
+    await assert.rejects(
+      funraisinAudienceConnection(),
+      /successful Funraisin sync/,
+    );
+  }
+  sync.orgId = "other-org";
+  await assert.rejects(
+    funraisinAudienceConnection(undefined, { requireCompletedSync: false }),
     /linked to the Funraisin sync/,
   );
 });

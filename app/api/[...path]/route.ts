@@ -913,7 +913,9 @@ async function handle(
       });
     }
     if (key === "funraisin/events" && method === "GET") {
-      await funraisinAudienceConnection();
+      await funraisinAudienceConnection(undefined, {
+        requireCompletedSync: false,
+      });
       return json(
         await db.funraisinEvent.findMany({
           orderBy: [{ eventDate: "desc" }, { name: "asc" }],
