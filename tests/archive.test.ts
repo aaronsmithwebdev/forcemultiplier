@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   archiveNextPath,
+  archiveSearchWhere,
   completedSends,
   retryableArchiveError,
 } from "../lib/archive";
@@ -18,6 +19,28 @@ test("archive pagination keeps the provider cursor and a bounded page size", () 
     () => archiveNextPath("https://other.example/v3/emails?next=x"),
     /invalid archive cursor/,
   );
+});
+
+test("archive search matches words in any order across searchable fields", () => {
+  const expected = {
+    accountId: "account",
+    AND: ["sydney", "east", "2025", "results"].map((term) => ({
+      OR: ["campaignName", "subject", "previewText"].map((field) => ({
+        [field]: { contains: term, mode: "insensitive" },
+      })),
+    })),
+  };
+  assert.deepEqual(
+    archiveSearchWhere("account", "sydney east 2025 results"),
+    expected,
+  );
+  assert.deepEqual(
+    archiveSearchWhere("account", "sydney-east, 2025 results"),
+    expected,
+  );
+  assert.deepEqual(archiveSearchWhere("account", "  "), {
+    accountId: "account",
+  });
 });
 
 test("only completed sends qualify for the archive", () => {

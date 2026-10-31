@@ -65,23 +65,30 @@ async function account() {
   return cc.externalId;
 }
 
-export async function archiveState(search = "", offset = 0) {
-  const importJob = await db.archiveImport.findUnique({
-    where: { id: "constant-contact" },
-  });
-  const accountId = importJob?.accountId || "";
+export function archiveSearchWhere(accountId: string, search: string) {
   const query = search.trim().slice(0, 100);
+  const terms = query ? (query.match(/[\p{L}\p{M}\p{N}]+/gu) ?? [query]) : [];
   // ponytail: ILIKE scans this ~3k-item archive; add a full-text index if search slows down.
   const where: Prisma.ArchivedEmailWhereInput = {
     accountId,
-    ...(query
+    ...(terms.length
       ? {
-          OR: ["campaignName", "subject", "previewText"].map((field) => ({
-            [field]: { contains: query, mode: "insensitive" },
+          AND: terms.map((term) => ({
+            OR: ["campaignName", "subject", "previewText"].map((field) => ({
+              [field]: { contains: term, mode: "insensitive" },
+            })),
           })),
         }
       : {}),
   };
+  return where;
+}
+
+export async function archiveState(search = "", offset = 0) {
+  const importJob = await db.archiveImport.findUnique({
+    where: { id: "constant-contact" },
+  });
+  const where = archiveSearchWhere(importJob?.accountId || "", search);
   const [total, items] = await Promise.all([
     db.archivedEmail.count({ where }),
     db.archivedEmail.findMany({
