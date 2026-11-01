@@ -5,7 +5,16 @@ export const RESUBSCRIBE_CALL_LIMIT = 5000;
 export const RESUBSCRIBE_MAX_ROWS = 100000;
 
 // ponytail: bounded in-memory CSV parsing (20 MB); use a streaming parser for larger imports.
-export function parseEmailCsv(text: string) {
+export function parseEmailCsv(
+  text: string,
+  onRow?: (row: {
+    values: string[];
+    headers: string[];
+    email: string | null;
+    status: "valid" | "invalid" | "duplicate";
+  }) => void,
+) {
+  let headers: string[] = [];
   if (text.length > 20 * 1024 * 1024)
     throw new Error("CSV must be 20 MB or smaller.");
   text = text.replace(/^\uFEFF/, "");
@@ -35,10 +44,23 @@ export function parseEmailCsv(text: string) {
             "CSV needs exactly one Email or Email Address column.",
           );
         column = matches[0];
+        headers = row.map((value) =>
+          value.trim().toLowerCase().replace(/[ _-]/g, ""),
+        );
       } else {
         if (++rows > RESUBSCRIBE_MAX_ROWS)
           throw new Error("CSV can contain at most 100,000 contact rows.");
         const email = normalizedEmail(row[column]);
+        onRow?.({
+          values: row,
+          headers,
+          email,
+          status: !email
+            ? "invalid"
+            : emails.has(email)
+              ? "duplicate"
+              : "valid",
+        });
         if (!email) invalid++;
         else if (emails.has(email)) duplicates++;
         else emails.add(email);

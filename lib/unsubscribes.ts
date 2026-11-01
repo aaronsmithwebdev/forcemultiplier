@@ -258,6 +258,7 @@ async function writeEvents(
       ON a."id" = d."audienceId" AND a."orgId" = e."orgId"
     WHERE e."accountId" = ${accountId}
       AND e."orgId" = ${orgId}
+      AND am."salesforceId" IS NOT NULL
       AND e."contactId" IN (${Prisma.join(contactIds)})
       AND d."status" IN ('completed', 'completed_with_errors')
       AND NOT EXISTS (

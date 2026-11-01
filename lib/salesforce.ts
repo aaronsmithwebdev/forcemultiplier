@@ -289,7 +289,11 @@ export function translateReport(
     ],
   };
 }
-export async function enrich(records: Record<string, any>[], fields: string[]) {
+export async function enrich(
+  records: Record<string, any>[],
+  fields: string[],
+  orgId?: string,
+) {
   const ids = [...new Set(records.map((r) => r.Id))];
   if (ids.some((id) => typeof id !== "string" || !sfId(id)))
     throw new AppError(
@@ -315,7 +319,7 @@ export async function enrich(records: Record<string, any>[], fields: string[]) {
       .join(",")})`;
     let cursor: string | undefined;
     do {
-      const page = await sfQuery(query, cursor);
+      const page = await sfQuery(query, cursor, orgId);
       output.push(...page.records);
       cursor = page.done ? undefined : page.nextRecordsUrl;
       if (!page.done && !cursor)

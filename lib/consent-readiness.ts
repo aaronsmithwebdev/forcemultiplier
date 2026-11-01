@@ -7,6 +7,7 @@ const SALESFORCE_SOURCES = new Set([
   "listview",
   "campaign",
   "funraisin",
+  "import",
 ]);
 
 // Check small metadata records only; audience age and recipient count do not

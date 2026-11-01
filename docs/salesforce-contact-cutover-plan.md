@@ -10,7 +10,7 @@ Salesforce remains the CRM source of truth. Supabase holds a private, org-scoped
 | --- | --- |
 | Supported predicates using mirrored Contact fields only | Query the local Contact mirror. Support must be proven by parsing the saved query, not inferred from its text. |
 | Related objects, parent fields, formulas, saved Salesforce sources with unsupported semantics, or fields not mirrored | Run a complete Salesforce membership query where an equivalent is supported, then join its Contact IDs to current local Contact rows. Fetch any required non-mirrored personalization fields explicitly. If equivalence cannot be proved, block that source rather than publish a partial audience. |
-| Future Funraisin entrants | Use a separate Funraisin source and identity; link to Salesforce only through verified IDs. Do not treat an email match as identity or consent. |
+| Future Funraisin entrants | Use separate Funraisin source IDs and the shared internal person ID. Unambiguous email matches can resolve new source records to an existing person; merging established identities requires a verified source-provided Salesforce ID or explicit link review. Email matching does not establish consent. See [implemented audience imports](audience-imports.md). |
 
 The local mirror is **not** the consent authority. Marketing sends continue to require the suppression ledger, healthy Salesforce opt-out synchronization, Resend unsubscribe state, and the existing final eligibility checks. Neither a Contact import nor an audience refresh may clear an opt-out. An explicit, evidenced resubscription remains its own audited workflow.
 

@@ -15,7 +15,7 @@ type ImportBatch = {
 };
 type RemovalBatch = { emails: string[]; contactIds: string[] };
 type SubmittedContact = {
-  salesforceId: string;
+  salesforceId: string | null;
   name: string | null;
   email: string;
 };
@@ -120,7 +120,7 @@ export function importContact(
 
 export function prepareContact(
   member: {
-    salesforceId?: string;
+    salesforceId?: string | null;
     name?: string | null;
     email: string | null;
     optedOut: boolean;
@@ -462,9 +462,9 @@ export async function deliveryStep(id: string) {
     const members = await db.audienceMember.findMany({
       where: {
         runId: run.sourceRunId,
-        ...(run.cursor ? { salesforceId: { gt: run.cursor } } : {}),
+        ...(run.cursor ? { deliveryKey: { gt: run.cursor } } : {}),
       },
-      orderBy: { salesforceId: "asc" },
+      orderBy: { deliveryKey: "asc" },
       take: 2000,
     });
     if (!members.length) {
@@ -485,6 +485,21 @@ export async function deliveryStep(id: string) {
         ),
       ),
     ];
+    const personBlocks = await db.$queryRaw<{ email: string }[]>(Prisma.sql`
+      SELECT m.email FROM (VALUES ${Prisma.join(members.map((m) => Prisma.sql`(${m.personId}, ${m.normalizedEmail})`))}) m(id,email)
+      JOIN "forcemultiplier"."Person" original ON original.id=m.id
+      JOIN "forcemultiplier"."Person" p ON p.id=COALESCE(original."mergedIntoId",original.id)
+      WHERE p.unavailable OR p."optedOut" OR EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Person" shared WHERE shared."orgId"=p."orgId" AND shared.email=m.email
+          AND (shared.unavailable OR shared."optedOut") AND shared."mergedIntoId" IS NULL
+      ) OR EXISTS (
+        SELECT 1 FROM "forcemultiplier"."PersonEmail" pe JOIN "forcemultiplier"."Suppression" s ON s.email=pe.email
+        WHERE pe."personId"=p.id AND NOT EXISTS (
+          SELECT 1 FROM "forcemultiplier"."MarketingResubscription" consent WHERE consent.email=m.email AND consent.status='completed'
+            AND consent."consentAt">COALESCE(s."occurredAt",s."createdAt") AND consent."createdAt">s."createdAt"
+        )
+      )
+    `);
     const [legacyUnsubscribes, suppressions, duplicateGroups] =
       await Promise.all([
         db.unsubscribeEvent.findMany({
@@ -500,10 +515,10 @@ export async function deliveryStep(id: string) {
         }),
         emailCandidates.length
           ? db.$queryRaw<
-              { email: string; salesforceId: string; optedOut: boolean }[]
+              { email: string; deliveryKey: string; optedOut: boolean }[]
             >(Prisma.sql`
             SELECT "normalizedEmail" AS email,
-              MIN("salesforceId") AS "salesforceId",
+              MIN("deliveryKey") AS "deliveryKey",
               BOOL_OR("optedOut") AS "optedOut"
             FROM "forcemultiplier"."AudienceMember"
             WHERE "runId" = ${run.sourceRunId}
@@ -513,14 +528,16 @@ export async function deliveryStep(id: string) {
           : [],
       ]);
     const knownUnsubscribes = new Set(
-      [...legacyUnsubscribes, ...suppressions].map((row) => row.email),
+      [...legacyUnsubscribes, ...suppressions, ...personBlocks].map(
+        (row) => row.email,
+      ),
     );
     const byEmail = new Map(duplicateGroups.map((row) => [row.email, row]));
     const prepared = members.map((member) => {
       const group = member.normalizedEmail
         ? byEmail.get(member.normalizedEmail)
         : null;
-      if (group && member.salesforceId !== group.salesforceId)
+      if (group && member.deliveryKey !== group.deliveryKey)
         return { contact: null, issue: null };
       return prepareContact(
         { ...member, optedOut: member.optedOut || !!group?.optedOut },
@@ -533,7 +550,7 @@ export async function deliveryStep(id: string) {
       row.contact ? [row.contact] : [],
     );
     const batch: ImportBatch = {
-      cursor: members.at(-1)!.salesforceId,
+      cursor: members.at(-1)!.deliveryKey,
       processed: members.length,
       submitted: contacts.length,
       skipped: members.length - contacts.length,

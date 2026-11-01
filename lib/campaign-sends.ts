@@ -29,6 +29,7 @@ type RecipientRow = {
   email: string;
   name: string | null;
   salesforceId: string | null;
+  personId?: string | null;
   data: Record<string, unknown>;
   sourceRows: bigint;
   optedOut: boolean;
@@ -195,7 +196,7 @@ async function resolveRuns(ids: string[], label: string) {
   return ids.map((id) => byId.get(id)!);
 }
 
-async function recipientRows(
+export async function recipientRows(
   includeRunIds: string[],
   excludeRunIds: string[],
   manual: string[],
@@ -214,20 +215,27 @@ async function recipientRows(
   return db.$queryRaw<RecipientRow[]>(Prisma.sql`
     SELECT * FROM (
     WITH candidates AS (
-      SELECT m.*, COALESCE(${fieldMatch}, FALSE) AS "fieldExcluded"
+      SELECT m.*, (p."optedOut" OR EXISTS (SELECT 1 FROM "forcemultiplier"."Person" shared WHERE shared."orgId"=p."orgId" AND shared.email=m."normalizedEmail" AND shared."optedOut" AND shared."mergedIntoId" IS NULL)) AS "currentOptedOut", p.id AS "currentPersonId", (COALESCE(${fieldMatch}, FALSE) OR p.unavailable OR EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Person" shared WHERE shared."orgId"=p."orgId"
+          AND shared.email=m."normalizedEmail" AND shared.unavailable AND shared."mergedIntoId" IS NULL
+      )) AS "fieldExcluded"
       FROM "forcemultiplier"."AudienceMember" m
+      JOIN "forcemultiplier"."Person" original ON original.id = m."personId"
+      JOIN "forcemultiplier"."Person" p ON p.id = COALESCE(original."mergedIntoId", original.id)
       WHERE m."runId" IN (${Prisma.join(includeRunIds)})
         AND m."normalizedEmail" IS NOT NULL
     ), included AS (
       SELECT m."normalizedEmail" AS email,
         (ARRAY_AGG(m.name ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
-          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS name,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId", m."personId"))[1] AS name,
         (ARRAY_AGG(m.data ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
-          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS data,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId", m."personId"))[1] AS data,
         (ARRAY_AGG(m."salesforceId" ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
-          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId"))[1] AS "salesforceId",
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId", m."personId"))[1] AS "salesforceId",
+        (ARRAY_AGG(m."personId" ORDER BY m."fieldExcluded", (m.data ? 'FunraisinEventName') DESC,
+          array_position(ARRAY[${Prisma.join(includeRunIds)}]::text[], m."runId"), m."salesforceId", m."personId"))[1] AS "personId",
         COUNT(*) AS "sourceRows",
-        BOOL_OR(m."optedOut") AS "optedOut",
+        BOOL_OR(m."optedOut" OR m."currentOptedOut") AS "optedOut",
         BOOL_AND(m."fieldExcluded") AS "fieldExcluded"
       FROM candidates m
       GROUP BY m."normalizedEmail"
@@ -240,7 +248,14 @@ async function recipientRows(
       ${manualMatch} AS "manuallyExcluded",
       (EXISTS (
         SELECT 1 FROM "forcemultiplier"."Suppression" s
-        WHERE s.email = i.email
+        WHERE (s.email = i.email OR EXISTS (
+          SELECT 1 FROM "forcemultiplier"."PersonEmail" pe
+          JOIN candidates c ON c."currentPersonId" = pe."personId"
+          WHERE c."normalizedEmail" = i.email AND pe.email = s.email
+            AND NOT EXISTS (SELECT 1 FROM "forcemultiplier"."MarketingResubscription" consent
+              WHERE consent.email=i.email AND consent.status='completed'
+              AND consent."consentAt">COALESCE(s."occurredAt",s."createdAt") AND consent."createdAt">s."createdAt")
+        ))
           AND s.kind IN ('global_unsubscribe', 'marketing_unsubscribe')
       ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."UnsubscribeEvent" u
@@ -729,6 +744,16 @@ export async function newlySuppressedCount(sendId: string) {
     FROM "forcemultiplier"."CampaignRecipient" r
     WHERE r."sendId" = ${sendId}
       AND (EXISTS (
+        SELECT 1 FROM "forcemultiplier"."Person" original
+        JOIN "forcemultiplier"."Person" p ON p.id=COALESCE(original."mergedIntoId",original.id)
+        WHERE original.id=r."personId" AND (p.unavailable OR p."optedOut" OR EXISTS (
+          SELECT 1 FROM "forcemultiplier"."PersonEmail" pe JOIN "forcemultiplier"."Suppression" s ON s.email=pe.email
+          WHERE pe."personId"=p.id AND NOT EXISTS (
+            SELECT 1 FROM "forcemultiplier"."MarketingResubscription" consent WHERE consent.email=r.email AND consent.status='completed'
+              AND consent."consentAt">COALESCE(s."occurredAt",s."createdAt") AND consent."createdAt">s."createdAt"
+          )
+        ))
+      ) OR EXISTS (
         SELECT 1 FROM "forcemultiplier"."Suppression" s
         WHERE s.email = r.email
       ) OR EXISTS (
@@ -825,6 +850,7 @@ export async function campaignSendStep(id?: string) {
             email: row.email,
             name: row.name,
             salesforceId: row.salesforceId,
+            personId: row.personId,
             data: (row.data ?? {}) as Prisma.InputJsonValue,
           })),
           skipDuplicates: true,

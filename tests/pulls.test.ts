@@ -1,3 +1,4 @@
+import { salesforcePeopleFixture } from "./people-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../lib/db";
@@ -19,6 +20,33 @@ function fixture(t: any, total: number) {
   };
   const members = new Map<string, any>();
   const manualEmails: string[] = [];
+  mockMethod(t, db.contactMirrorSync, "findUnique", async () => null);
+  mockMethod(t, db.person, "updateMany", async () => ({ count: 1 }));
+  mockMethod(t, db.audience, "findUniqueOrThrow", async () => ({
+    manualVersion: 0,
+  }));
+  mockMethod(t, db.manualAudienceMember, "findMany", async () =>
+    manualEmails.map((email) => ({
+      email,
+      personId: `local:${email}`,
+      person: {
+        id:
+          email === "fixture@example.test" && total
+            ? "person:003000000000000000"
+            : `local:${email}`,
+        orgId: "org",
+        salesforceId:
+          email === "fixture@example.test" && total
+            ? "003000000000000000"
+            : null,
+        email,
+        firstName: null,
+        lastName: null,
+        optedOut: false,
+        unavailable: false,
+      },
+    })),
+  );
   let failPage = -1;
   let failDatabaseOnce = false;
   let malformed = false;
@@ -53,17 +81,22 @@ function fixture(t: any, total: number) {
       saved = new Map(members);
     try {
       return await fn({
+        $executeRaw: async () => 0,
+        $queryRaw: async (sql: any) => salesforcePeopleFixture(sql),
+        personEmail: { createMany: async () => ({ count: 0 }) },
         audience: { findUniqueOrThrow: async () => ({ manualVersion: 0 }) },
         pullRun: {
           updateMany: update,
           findUniqueOrThrow: async () => ({ ...state }),
         },
         audienceMember: {
+          count: async () => members.size,
           findMany: async ({ where }: any) =>
             [...members.values()].filter(
               (member) =>
                 member.runId === where.runId &&
-                where.normalizedEmail.in.includes(member.normalizedEmail),
+                (!where.normalizedEmail ||
+                  where.normalizedEmail.in.includes(member.normalizedEmail)),
             ),
           createMany: async ({ data }: any) => {
             if (failDatabaseOnce) {
@@ -74,8 +107,8 @@ function fixture(t: any, total: number) {
             }
             let count = 0;
             for (const r of data)
-              if (!members.has(r.salesforceId)) {
-                members.set(r.salesforceId, r);
+              if (!members.has(r.personId)) {
+                members.set(r.personId, r);
                 count++;
               }
             return { count };
@@ -164,14 +197,23 @@ test("manual emails join each completed snapshot without duplicating pulled emai
   assert.equal(result.status, "completed");
   assert.equal(result.processed, 1);
   assert.equal(f.members.size, 2);
-  assert.deepEqual(f.members.get("manual:manager@example.test"), {
+  assert.deepEqual(f.members.get("local:manager@example.test"), {
     runId: "run",
-    salesforceId: "manual:manager@example.test",
+    salesforceId: null,
+    personId: "local:manager@example.test",
+    deliveryKey: "local:local:manager@example.test",
     email: "manager@example.test",
     normalizedEmail: "manager@example.test",
     name: null,
     optedOut: false,
-    data: { Email: "manager@example.test" },
+    data: {
+      PersonId: "local:manager@example.test",
+      Id: null,
+      Email: "manager@example.test",
+      FirstName: null,
+      LastName: null,
+      HasOptedOutOfEmail: false,
+    },
   });
 });
 test("provider failure preserves cursor and successful pages; resume completes without duplicates", async (t) => {
@@ -217,3 +259,46 @@ function mockMethod(t: any, target: any, name: string, fn: any) {
     target[name] = original;
   });
 }
+
+test("an imported list publishes local people without a Salesforce Contact lookup", async (t) => {
+  const f = fixture(t, 0);
+  f.state.query = "import";
+  f.manualEmails.push("first@example.org", "second@example.org");
+  mockMethod(t, globalThis, "fetch", async () =>
+    assert.fail("Local members must not require CRM Contact enrichment"),
+  );
+  const run = await pullStep("run");
+  assert.equal(run.status, "completed");
+  assert.equal(run.total, 2);
+  assert.equal(run.processed, 2);
+  assert.equal(f.members.size, 2);
+  for (const person of f.members.values()) {
+    assert.equal(person.salesforceId, null);
+    assert.ok(person.personId);
+    assert.equal(person.data.Id, null);
+  }
+});
+
+test("different people sharing an email retain separate audience memberships", async (t) => {
+  const f = fixture(t, 1);
+  mockMethod(t, db.manualAudienceMember, "findMany", async () => [
+    {
+      email: "fixture@example.test",
+      personId: "shared-local",
+      person: {
+        id: "shared-local",
+        orgId: "org",
+        salesforceId: null,
+        email: "fixture@example.test",
+        firstName: "Another",
+        lastName: "Person",
+        optedOut: false,
+        unavailable: false,
+      },
+    },
+  ]);
+  await pullStep("run");
+  assert.equal(f.members.size, 2);
+  assert.ok(f.members.has("shared-local"));
+  assert.ok(f.members.has("person:003000000000000000"));
+});

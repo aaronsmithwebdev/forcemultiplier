@@ -1,5 +1,4 @@
 import { db } from "./db";
-import { sfId } from "./soql";
 
 type FieldSnapshot = {
   data: unknown;
@@ -58,11 +57,32 @@ export function displayContactValue(value: unknown) {
   return String(value);
 }
 
-export async function getContactDetail(salesforceId: string) {
-  if (!sfId(salesforceId)) return null;
-  // ponytail: this scans contact history by Salesforce ID; add a dedicated index if snapshot volume makes the detail view slow.
+export async function getContactDetail(id: string) {
+  const account = await db.connection.findUnique({
+    where: { provider: "salesforce" },
+    select: { externalId: true },
+  });
+  if (!account?.externalId) return null;
+  const orgId = account.externalId;
+  let person = await db.person.findFirst({
+    where: { orgId, OR: [{ id }, { salesforceId: id }] },
+  });
+  if (!person) return null;
+  if (person.mergedIntoId)
+    person = await db.person.findUniqueOrThrow({
+      where: { id: person.mergedIntoId },
+    });
+  const aliases = await db.person.findMany({
+    where: { orgId, mergedIntoId: person.id },
+    select: { id: true },
+  });
+  const personIds = [person.id, ...aliases.map((p) => p.id)];
+  const salesforceId = person.salesforceId;
+  const knownEmails = await db.personEmail.findMany({
+    where: { personId: { in: personIds } },
+  });
   const snapshots = await db.audienceMember.findMany({
-    where: { salesforceId, run: { status: "completed" } },
+    where: { personId: { in: personIds }, run: { status: "completed" } },
     orderBy: { run: { createdAt: "desc" } },
     include: {
       run: {
@@ -78,14 +98,17 @@ export async function getContactDetail(salesforceId: string) {
       },
     },
   });
-  if (!snapshots.length) return null;
 
   const audienceIds = [...new Set(snapshots.map((row) => row.run.audienceId))];
   const emails = [
     ...new Set(
-      snapshots
-        .map((row) => row.normalizedEmail)
-        .filter((email): email is string => Boolean(email)),
+      [
+        person.email,
+        ...knownEmails.map((e) => e.email),
+        ...snapshots
+          .map((row) => row.normalizedEmail)
+          .filter((email): email is string => Boolean(email)),
+      ].filter((email): email is string => Boolean(email)),
     ),
   ];
   const [
@@ -97,6 +120,8 @@ export async function getContactDetail(salesforceId: string) {
     deliveryIssues,
     resubscriptions,
     salesforce,
+    imports,
+    latestConsent,
   ] = await Promise.all([
     db.pullRun.findMany({
       where: { audienceId: { in: audienceIds }, status: "completed" },
@@ -105,7 +130,7 @@ export async function getContactDetail(salesforceId: string) {
       select: { id: true, audienceId: true },
     }),
     db.campaignRecipient.findMany({
-      where: { salesforceId },
+      where: { personId: { in: personIds } },
       orderBy: { updatedAt: "desc" },
       include: {
         send: {
@@ -133,7 +158,7 @@ export async function getContactDetail(salesforceId: string) {
     db.suppressionEvent.findMany({
       where: {
         OR: [
-          { salesforceId },
+          ...(salesforceId ? [{ salesforceId, orgId }] : []),
           ...(emails.length ? [{ email: { in: emails } }] : []),
         ],
       },
@@ -142,13 +167,26 @@ export async function getContactDetail(salesforceId: string) {
     }),
     emails.length
       ? db.unsubscribeEvent.findMany({
-          where: { OR: [{ salesforceId }, { email: { in: emails } }] },
+          where: {
+            orgId,
+            OR: [
+              ...(salesforceId ? [{ salesforceId }] : []),
+              { email: { in: emails } },
+            ],
+          },
           orderBy: { discoveredAt: "desc" },
           take: 50,
         })
       : [],
     db.deliveryIssue.findMany({
-      where: { salesforceId },
+      where: {
+        OR: [
+          ...(salesforceId
+            ? [{ salesforceId, delivery: { audience: { orgId } } }]
+            : []),
+          { email: { in: emails }, delivery: { audience: { orgId } } },
+        ],
+      },
       orderBy: { createdAt: "desc" },
       take: 50,
       include: {
@@ -162,7 +200,12 @@ export async function getContactDetail(salesforceId: string) {
       },
     }),
     db.resubscribeMember.findMany({
-      where: { salesforceId },
+      where: {
+        OR: [
+          ...(salesforceId ? [{ salesforceId, job: { orgId } }] : []),
+          { email: { in: emails }, job: { orgId } },
+        ],
+      },
       orderBy: { processedAt: "desc" },
       take: 50,
       include: {
@@ -173,15 +216,35 @@ export async function getContactDetail(salesforceId: string) {
       where: { provider: "salesforce" },
       select: { externalId: true, instanceUrl: true },
     }),
+    db.audienceImport.findMany({
+      where: {
+        orgId,
+        status: "committed",
+        OR: personIds.map((personId) => ({
+          rows: { array_contains: [{ personId }] },
+        })),
+      },
+      orderBy: { committedAt: "desc" },
+      take: 50,
+      select: { id: true, name: true, committedAt: true, createdBy: true },
+    }),
+    person.email
+      ? db.marketingResubscription.findFirst({
+          where: { email: person.email, status: "completed" },
+          orderBy: { consentAt: "desc" },
+          select: { consentAt: true, createdAt: true },
+        })
+      : Promise.resolve(null),
   ]);
 
-  const latest = snapshots[0]!;
   const latestByAudience = new Map(
     latestRuns.map((run) => [run.audienceId, run.id]),
   );
   const audienceMemberships = [
     ...new Map(
-      snapshots.map((snapshot) => [snapshot.run.audienceId, snapshot]),
+      [...snapshots]
+        .reverse()
+        .map((snapshot) => [snapshot.run.audienceId, snapshot]),
     ).values(),
   ].map((snapshot) => ({
     id: snapshot.run.audience.id,
@@ -190,9 +253,20 @@ export async function getContactDetail(salesforceId: string) {
     lastSeenAt: snapshot.run.finishedAt ?? snapshot.run.createdAt,
   }));
   const currentSuppression = suppressions.find(
-    (row) => row.email === latest.normalizedEmail,
+    (row) =>
+      row.email === person.email ||
+      !latestConsent ||
+      latestConsent.consentAt <= (row.occurredAt || row.createdAt) ||
+      latestConsent.createdAt <= row.createdAt,
   );
   const activity = [
+    ...imports.map((item) => ({
+      id: `import:${item.id}`,
+      at: item.committedAt!,
+      type: "List import",
+      title: item.name,
+      detail: `Imported by ${item.createdBy}`,
+    })),
     ...suppressionEvents.map((event) => ({
       id: `suppression:${event.id}`,
       at: event.recordedAt,
@@ -228,15 +302,18 @@ export async function getContactDetail(salesforceId: string) {
     .slice(0, 100);
 
   return {
+    id: person.id,
     salesforceId,
-    name: latest.name || "Unnamed contact",
-    email: latest.email,
-    normalizedEmail: latest.normalizedEmail,
-    optedOut: latest.optedOut,
-    orgId: latest.run.orgId,
-    capturedAt: latest.run.finishedAt ?? latest.run.createdAt,
-    firstSeenAt:
-      snapshots.at(-1)!.run.finishedAt ?? snapshots.at(-1)!.run.createdAt,
+    name:
+      [person.firstName, person.lastName].filter(Boolean).join(" ") ||
+      "Unnamed contact",
+    email: person.email,
+    normalizedEmail: person.email,
+    optedOut: person.optedOut,
+    unavailable: person.unavailable,
+    orgId: person.orgId,
+    capturedAt: person.updatedAt,
+    firstSeenAt: person.createdAt,
     historicalEmails: emails,
     fields: contactFieldValues(snapshots),
     audiences: audienceMemberships,
@@ -245,7 +322,9 @@ export async function getContactDetail(salesforceId: string) {
     currentSuppression,
     activity,
     salesforceUrl:
-      salesforce?.externalId === latest.run.orgId && salesforce.instanceUrl
+      salesforceId &&
+      salesforce?.externalId === person.orgId &&
+      salesforce.instanceUrl
         ? `${salesforce.instanceUrl}/lightning/r/Contact/${salesforceId}/view`
         : null,
   };

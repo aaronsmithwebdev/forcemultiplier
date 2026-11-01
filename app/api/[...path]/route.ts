@@ -1,4 +1,10 @@
 import {
+  audienceImportInput,
+  previewAudienceImport,
+  commitAudienceImport,
+} from "@/lib/audience-imports";
+import { personLinkCandidates, confirmPersonLink } from "@/lib/people";
+import {
   funraisinAudiencePage,
   funraisinAudienceConnection,
 } from "@/lib/funraisin-audiences";
@@ -328,6 +334,49 @@ async function handle(
       manualExclusions: z.array(email).max(5000).default([]),
       exclusionRules: exclusionGroup,
     });
+    if (key === "audience-imports" && method === "POST") {
+      return json(
+        await previewAudienceImport(
+          audienceImportInput.parse(await body(request, 2_100_000)),
+          user.id,
+        ),
+        201,
+      );
+    }
+    if (
+      p[0] === "audience-imports" &&
+      p[1] &&
+      p[2] === "commit" &&
+      p.length === 3 &&
+      method === "POST"
+    ) {
+      const data = z
+        .object({
+          permissionConfirmed: z.literal(true),
+          resolutions: z.record(z.string(), z.string().max(100)).default({}),
+        })
+        .parse(await body(request, 300_000));
+      return json(await commitAudienceImport(p[1], data.resolutions, user.id));
+    }
+    if (
+      p[0] === "contacts" &&
+      p[1] &&
+      p[2] === "salesforce-link" &&
+      p.length === 3
+    ) {
+      if (method === "GET") return json(await personLinkCandidates(p[1]));
+      if (method === "POST") {
+        const data = z
+          .object({
+            salesforceId: z
+              .string()
+              .regex(/^003[a-zA-Z0-9]{12}(?:[a-zA-Z0-9]{3})?$/),
+            confirmed: z.literal(true),
+          })
+          .parse(await body(request));
+        return json(await confirmPersonLink(p[1], data.salesforceId, user.id));
+      }
+    }
     if (key === "footers" && method === "GET")
       return json(await listFooters(params.get("q") || ""));
     if (key === "footers" && method === "POST") {
@@ -999,7 +1048,7 @@ async function handle(
           })
           .parse(await body(request));
         if (method === "POST")
-          return json(await addManualMember(p[1], email), 201);
+          return json(await addManualMember(p[1], email, user.id), 201);
         await removeManualMember(p[1], email);
         return json({ ok: true });
       }
@@ -1096,7 +1145,7 @@ async function handle(
         const members = complete
           ? await db.audienceMember.findMany({
               where: memberWhere,
-              orderBy: { salesforceId: "asc" },
+              orderBy: { personId: "asc" },
               skip: offset,
               take: 50,
             })

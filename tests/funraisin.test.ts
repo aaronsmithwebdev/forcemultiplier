@@ -102,6 +102,7 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       id: "7",
       salesforceId: linked,
       firstName: "Mary Jane",
+      lastName: "Smith",
       name: "Mary Jane Smith",
       email: null,
       username: null,
@@ -144,6 +145,8 @@ test("Funraisin records keep event and Salesforce identities distinct", () => {
       memberId: "7",
       teamId: "8",
       donatedAt: new Date("2026-10-17T09:04:03.000Z"),
+      firstName: "Pat",
+      lastName: "Donor",
       name: "Pat Donor",
       email: "pat@example.com",
       status: "paid",
@@ -285,12 +288,12 @@ test("participant field rollout schedules a full backfill even after a recent fu
   });
   await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
   assert.equal(starts[0].mode, "full");
-  assert.equal(starts[0].participantUrlsVersion, 2);
+  assert.equal(starts[0].participantUrlsVersion, 3);
   sync.participantUrlsVersion = 1;
   starts.length = 0;
   await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
   assert.equal(starts[0].mode, "full");
-  sync.participantUrlsVersion = 2;
+  sync.participantUrlsVersion = 3;
   starts.length = 0;
   await assert.rejects(runFunraisinSyncStep(), /events could not be reached/);
   assert.equal(starts[0].mode, "incremental");
@@ -307,7 +310,7 @@ function syncSetup(t: TestContext, overrides: Record<string, unknown> = {}) {
     id: "default",
     orgId: "org-1",
     baseUrl: "https://example.org/",
-    participantUrlsVersion: 2,
+    participantUrlsVersion: 3,
     currentYearOnly: true,
     lastFullAt: new Date("2020-01-01"),
     lastCompletedAt: new Date(),
@@ -337,6 +340,11 @@ function syncSetup(t: TestContext, overrides: Record<string, unknown> = {}) {
     externalId: "org-1",
     tokens: "test",
   }));
+  mock(db.personSource, "findMany", async () => []);
+  mock(db.personSource, "createMany", async () => ({ count: 0 }));
+  mock(db.person, "findMany", async () => []);
+  mock(db.person, "createMany", async () => ({ count: 0 }));
+  mock(db.personEmail, "createMany", async () => ({ count: 0 }));
   mock(db.workspaceSettings, "findUnique", async () => ({
     timeZone: "Australia/Sydney",
   }));
@@ -522,7 +530,7 @@ test("a failed page resumes its offset and reconciles only after every selected 
         : Array.from({ length: offset === "0" ? 1000 : 1 }, (_, index) => ({
             donation_id: String(Number(offset) + index + 1),
             event_id: "42",
-            crm_donor_id: "003ABCDEFGHIJKL",
+            crm_donor_id: "",
             d_amount: "10.00",
             d_refund_amount: "0.00",
           }));

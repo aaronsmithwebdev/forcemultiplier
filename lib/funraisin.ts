@@ -1,3 +1,10 @@
+import {
+  findSalesforceEmails,
+  lockPeople,
+  saveSalesforcePeople,
+  sourcePeople,
+} from "./people";
+import { enrich } from "./salesforce";
 import { randomUUID } from "node:crypto";
 import { Prisma, type FunraisinSync } from "@prisma/client";
 import { db } from "./db";
@@ -111,6 +118,7 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
       id,
       salesforceId: funraisinContactId(row.crm_member_id),
       firstName: shortText(row.m_fname, 150),
+      lastName: shortText(row.m_lname, 150),
       username: shortText(row.m_username, 150),
       name: name(row.m_fname, row.m_lname),
       email: normalizedEmail(shortText(row.m_email, 254)),
@@ -150,6 +158,8 @@ export function funraisinRow(phase: Phase, row: Record<string, unknown>) {
     memberId: funraisinId(row.member_id),
     teamId: funraisinId(row.team_id),
     donatedAt: dateTime(row.date_paid) ?? dateTime(row.date_created),
+    firstName: shortText(row.d_fname, 150),
+    lastName: shortText(row.d_lname, 150),
     name: name(row.d_fname, row.d_lname),
     email: normalizedEmail(shortText(row.d_email, 254)),
     status: shortText(row.d_status, 20),
@@ -337,7 +347,7 @@ async function savePage(
           ? [
               {
                 id: row.id,
-                reason: "Participant has no valid Salesforce Contact link.",
+                reason: "Participant is missing from the Funraisin catalog.",
               },
             ]
           : [],
@@ -353,27 +363,14 @@ async function savePage(
     });
     const eventIds = new Set(events.map((event) => event.id));
     issues = rows.flatMap((row) =>
-      !row.salesforceId
-        ? [{ id: row.id, reason: "Donor has no valid Salesforce Contact ID." }]
-        : row.eventId && !eventIds.has(row.eventId)
-          ? [
-              {
-                id: row.id,
-                reason: "Event is missing from the Funraisin catalog.",
-              },
-            ]
-          : [],
-    );
-  } else if (phase === "participants") {
-    issues = rows.flatMap((row) =>
-      row.salesforceId
-        ? []
-        : [
+      row.eventId && !eventIds.has(row.eventId)
+        ? [
             {
               id: row.id,
-              reason: "Participant has no valid Salesforce Contact ID.",
+              reason: "Event is missing from the Funraisin catalog.",
             },
-          ],
+          ]
+        : [],
     );
   }
   const issueIds = new Set(issues.map((issue) => issue.id));
@@ -391,8 +388,52 @@ async function savePage(
   const next = PHASES[PHASES.indexOf(phase) + 1];
   const done = finished && !next;
   const seen = sync.mode !== "incremental" ? sync.scanId : null;
+  const identityPhase = phase === "participants" || phase === "donations";
+  const linkedIds = identityPhase
+    ? [
+        ...new Set(
+          valid
+            .map((row) => row.salesforceId)
+            .filter((id): id is string => !!id),
+        ),
+      ]
+    : [];
+  const crmRecords = linkedIds.length
+    ? await enrich(
+        linkedIds.map((Id) => ({ Id })),
+        [],
+        sync.orgId!,
+      )
+    : [];
+  if (identityPhase)
+    crmRecords.push(
+      ...(await findSalesforceEmails(
+        [
+          ...new Set(
+            valid
+              .map((row) => row.email)
+              .filter((email): email is string => !!email),
+          ),
+        ],
+        sync.orgId!,
+      )),
+    );
   await db.$transaction(
     async (tx) => {
+      let personIds = new Map<string, string>();
+      if (identityPhase) {
+        await lockPeople(tx, sync.orgId!);
+        await saveSalesforcePeople(sync.orgId!, crmRecords, tx);
+        personIds = await sourcePeople(
+          tx,
+          sync.orgId!,
+          phase === "participants"
+            ? "funraisin-participant"
+            : "funraisin-donation",
+          valid,
+        );
+      }
+
       if (valid.length)
         await tx.funraisinIssue.deleteMany({
           where: { phase, sourceId: { in: valid.map((row) => row.id) } },
@@ -426,9 +467,9 @@ async function savePage(
         `);
         if (phase === "participants")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "firstName", name, email, username, "dateOfBirth", "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${row.firstName}, ${row.name}, ${row.email}, ${row.username}, ${row.dateOfBirth}, ${seen})`))}
-          ON CONFLICT ("memberId") DO UPDATE SET "salesforceId" = EXCLUDED."salesforceId",
+          INSERT INTO "forcemultiplier"."FunraisinParticipant" ("memberId", "salesforceId", "personId", "firstName", name, email, username, "dateOfBirth", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.salesforceId}, ${personIds.get(row.id)!}, ${row.firstName}, ${row.name}, ${row.email}, ${row.username}, ${row.dateOfBirth}, ${seen})`))}
+          ON CONFLICT ("memberId") DO UPDATE SET "salesforceId" = EXCLUDED."salesforceId", "personId" = EXCLUDED."personId",
             "firstName" = EXCLUDED."firstName", name = EXCLUDED.name, email = EXCLUDED.email, username = EXCLUDED.username,
             "dateOfBirth" = EXCLUDED."dateOfBirth",
             "lastSeenScan" = COALESCE(EXCLUDED."lastSeenScan", "FunraisinParticipant"."lastSeenScan")
@@ -444,9 +485,9 @@ async function savePage(
         `);
         if (phase === "donations")
           await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", "memberId", "teamId", "donatedAt", name, email, status, amount, "refundAmount", "lastSeenScan")
-          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${row.memberId}, ${row.teamId}, ${row.donatedAt}, ${row.name}, ${row.email}, ${row.status}, CAST(${row.amount} AS numeric), CAST(${row.refundAmount} AS numeric), ${seen})`))}
-          ON CONFLICT ("donationId") DO UPDATE SET "eventId" = EXCLUDED."eventId",
+          INSERT INTO "forcemultiplier"."FunraisinDonation" ("donationId", "eventId", "salesforceId", "personId", "memberId", "teamId", "donatedAt", name, email, status, amount, "refundAmount", "lastSeenScan")
+          VALUES ${Prisma.join(valid.map((row) => Prisma.sql`(${row.id}, ${row.eventId}, ${row.salesforceId}, ${personIds.get(row.id)!}, ${row.memberId}, ${row.teamId}, ${row.donatedAt}, ${row.name}, ${row.email}, ${row.status}, CAST(${row.amount} AS numeric), CAST(${row.refundAmount} AS numeric), ${seen})`))}
+          ON CONFLICT ("donationId") DO UPDATE SET "personId" = EXCLUDED."personId", "eventId" = EXCLUDED."eventId",
             "salesforceId" = EXCLUDED."salesforceId", "memberId" = EXCLUDED."memberId",
             "teamId" = EXCLUDED."teamId", "donatedAt" = EXCLUDED."donatedAt", name = EXCLUDED.name,
             email = EXCLUDED.email, status = EXCLUDED.status,
@@ -604,7 +645,7 @@ export async function runFunraisinSyncStep() {
         data: { orgId: account.externalId, baseUrl },
       });
     if (!sync.scanUntil) {
-      const historical = sync.participantUrlsVersion < 2 || !sync.lastFullAt;
+      const historical = sync.participantUrlsVersion < 3 || !sync.lastFullAt;
       const mode = historical
         ? "full"
         : sync.currentYearOnly
@@ -616,7 +657,7 @@ export async function runFunraisinSyncStep() {
         where: { id: sync.id },
         data: {
           mode,
-          ...(mode === "full" ? { participantUrlsVersion: 2 } : {}),
+          ...(mode === "full" ? { participantUrlsVersion: 3 } : {}),
           scanId: mode !== "incremental" ? randomUUID() : null,
           scanUntil: new Date(),
           scanEventIds: [],

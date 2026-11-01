@@ -1,3 +1,4 @@
+import { lockPeople, saveSalesforcePeople } from "./people";
 import { randomUUID } from "node:crypto";
 import { Prisma, type ContactMirrorSync } from "@prisma/client";
 import { z } from "zod";
@@ -508,8 +509,9 @@ async function saveContactPage(
       "Salesforce returned an incomplete Contact page. The mirror did not advance.",
       502,
     );
-  const rows = page.records.map((record: SalesforceContact) =>
-    mirrorContactRow(record, sync.orgId!, fields),
+  const rows: ReturnType<typeof mirrorContactRow>[] = page.records.map(
+    (record: SalesforceContact) =>
+      mirrorContactRow(record, sync.orgId!, fields),
   );
   if (
     rows.some(
@@ -588,6 +590,32 @@ async function saveContactPage(
         "The Contact mirror lease expired. Retry this page.",
         409,
       );
+    await lockPeople(tx, sync.orgId!);
+    const freshRows = rows.length
+      ? await tx.$queryRaw<{ salesforceId: string }[]>(Prisma.sql`
+      SELECT r.id AS "salesforceId" FROM (VALUES ${Prisma.join(rows.map((r) => Prisma.sql`(${r.salesforceId}, ${r.systemModstamp}::timestamp)`))}) r(id, stamp)
+      LEFT JOIN "forcemultiplier"."Person" p ON p."orgId" = ${sync.orgId} AND p."salesforceId" = r.id
+      WHERE p.id IS NULL OR p."updatedAt" <= r.stamp
+    `)
+      : [];
+    const freshIds = new Set(freshRows.map((r) => r.salesforceId));
+    await saveSalesforcePeople(
+      sync.orgId!,
+      rows
+        .filter((r) => freshIds.has(r.salesforceId))
+        .map((r) => ({
+          Id: r.salesforceId,
+          Email: r.email,
+          FirstName: r.firstName,
+          LastName: r.lastName,
+          HasOptedOutOfEmail: r.optedOut,
+        })),
+      tx,
+    );
+    if (freshIds.size)
+      await tx.$executeRaw(Prisma.sql`
+      UPDATE "forcemultiplier"."Person" SET unavailable=false WHERE "orgId"=${sync.orgId} AND "salesforceId" IN (${Prisma.join([...freshIds])})
+    `);
     for (let offset = 0; offset < rows.length; offset += 250)
       await tx.$executeRaw(Prisma.sql`
       INSERT INTO "forcemultiplier"."ContactMirror" (
@@ -613,6 +641,11 @@ async function saveContactPage(
         WHERE "orgId" = ${sync.orgId} AND "lastSeenScan" IS DISTINCT FROM ${scanId}
           AND "deletedAt" IS NULL AND "systemModstamp" <= ${boundary}
       `;
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE "forcemultiplier"."Person" p SET unavailable = true
+      FROM "forcemultiplier"."ContactMirror" c
+      WHERE p."orgId" = ${sync.orgId} AND c."orgId"=p."orgId" AND c."salesforceId"=p."salesforceId" AND c."deletedAt" IS NOT NULL
+    `);
   });
   return {
     phase: sync.phase,
@@ -721,6 +754,10 @@ async function saveExcludedPage(sync: ContactMirrorSync, lease: Date) {
       );
     if (ids.length)
       await tx.$executeRaw(Prisma.sql`
+      UPDATE "forcemultiplier"."Person" SET unavailable = true WHERE "orgId"=${sync.orgId} AND "salesforceId" IN (${Prisma.join(ids as string[])})
+    `);
+    if (ids.length)
+      await tx.$executeRaw(Prisma.sql`
         DELETE FROM "forcemultiplier"."ContactMirror"
         WHERE "orgId" = ${sync.orgId} AND "salesforceId" IN (${Prisma.join(ids as string[])})
           AND "systemModstamp" <= ${boundary}
@@ -814,6 +851,10 @@ async function saveDeletedWindow(sync: ContactMirrorSync, lease: Date) {
               Prisma.sql`(${r.id}, ${r.deletedAt})`,
           ),
       );
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "forcemultiplier"."Person" p SET unavailable = true FROM (VALUES ${values}) AS d(id, "deletedAt")
+        WHERE p."orgId"=${sync.orgId} AND p."salesforceId"=d.id
+      `);
       await tx.$executeRaw(Prisma.sql`
         UPDATE "forcemultiplier"."ContactMirror" AS c SET
           email = NULL, "normalizedEmail" = NULL, "firstName" = NULL,

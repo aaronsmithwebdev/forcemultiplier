@@ -1,3 +1,4 @@
+import { salesforcePeopleFixture } from "./people-fixture";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../lib/db";
@@ -29,6 +30,27 @@ function setup(t: TestContext) {
   t.after(() => {
     process.env = env;
   });
+  mock(t, db.person, "findMany", async ({ where }: any) =>
+    where.id.in.map((personId: string) => ({
+      id: personId,
+      orgId: "org-1",
+      salesforceId: id,
+      email: "sam@example.org",
+      firstName: "Sam",
+      lastName: null,
+      optedOut: true,
+      unavailable: false,
+    })),
+  );
+  mock(t, db.contactMirrorSync, "findUnique", async () => null);
+  mock(t, db.person, "updateMany", async () => ({ count: 1 }));
+  mock(t, db, "$transaction", async (fn: any) =>
+    fn({
+      $executeRaw: async () => 0,
+      $queryRaw: async (sql: any) => salesforcePeopleFixture(sql),
+      personEmail: { createMany: async () => ({ count: 0 }) },
+    }),
+  );
   const sync = {
     orgId: "org-1",
     baseUrl: "https://example.org/",
@@ -73,7 +95,7 @@ function setup(t: TestContext) {
   return sync;
 }
 const row = {
-  Id: id,
+  Id: `person:${id}`,
   total: 1n,
   count: 3n,
   amount: "75.50",
@@ -120,7 +142,9 @@ test("Funraisin pages retain event fields while enriching current Salesforce con
   assert.equal(page.totalSize, 1);
   assert.deepEqual(page.records[0], {
     Id: id,
+    PersonId: `person:${id}`,
     FirstName: "Sam",
+    LastName: null,
     Email: "sam@example.org",
     HasOptedOutOfEmail: true,
     FunraisinEventName: "Walk",
@@ -189,7 +213,7 @@ test("pagination uses a lookahead and rejects sync changes before publishing", a
   const page = await funraisinAudiencePage(filters, null, 1);
   assert.equal(page.done, false);
   assert.equal(page.records.length, 1);
-  assert.equal(JSON.parse(page.nextRecordsUrl!).after, id);
+  assert.equal(JSON.parse(page.nextRecordsUrl!).after, row.Id);
   sync.updatedAt = new Date("2026-10-19T01:00:00Z");
   await assert.rejects(
     funraisinAudiencePage(filters, page.nextRecordsUrl!),
@@ -279,9 +303,14 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
   mock(t, db.pullRun, "updateMany", async () => ({ count: 1 }));
   mock(t, db.pullRun, "findUnique", async () => run);
   mock(t, db, "$queryRaw", async () => [row]);
+  mock(t, db.manualAudienceMember, "findMany", async () => []);
+  mock(t, db.audience, "findUniqueOrThrow", async () => ({ manualVersion: 0 }));
   let saved = false;
   mock(t, db, "$transaction", async (fn: any) =>
     fn({
+      $executeRaw: async () => 0,
+      $queryRaw: async (sql: any) => salesforcePeopleFixture(sql),
+      personEmail: { createMany: async () => ({ count: 0 }) },
       audience: { findUniqueOrThrow: async () => ({ manualVersion: 0 }) },
       pullRun: {
         updateMany: async ({ data }: any) => {
@@ -327,4 +356,31 @@ test("unchecking paid entrants includes registrations without status filters", a
     page.records[0]!.FunraisinFundraisingUrl,
     "https://example.org/fundraisers/samwalker/autumn-walk",
   );
+});
+
+test("Funraisin audiences retain local entrants without Salesforce Contact IDs", async (t) => {
+  setup(t);
+  const localId = "local-entrant";
+  mock(t, db, "$queryRaw", async () => [{ ...row, Id: localId }]);
+  mock(t, db.person, "findMany", async () => [
+    {
+      id: localId,
+      orgId: "org-1",
+      salesforceId: null,
+      email: "local@example.org",
+      firstName: "Local",
+      lastName: "Entrant",
+      optedOut: false,
+      unavailable: false,
+    },
+  ]);
+  mock(t, globalThis, "fetch", async () =>
+    assert.fail("Local entrants must not be passed to Salesforce enrichment"),
+  );
+  const page = await funraisinAudiencePage(filters);
+  assert.equal(page.records[0].PersonId, localId);
+  assert.equal(page.records[0].Id, null);
+  assert.equal(page.records[0].Email, "local@example.org");
+  assert.equal(page.totalSize, 1);
+  assert.equal(page.records[0].FunraisinEventName, "Walk");
 });

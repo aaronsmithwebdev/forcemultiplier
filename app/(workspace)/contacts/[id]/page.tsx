@@ -1,3 +1,4 @@
+import { PersonSalesforceLink } from "@/components/person-salesforce-link";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -34,7 +35,9 @@ export default async function Page({
     (row) => row.send.status === "sent" && row.status === "submitted",
   );
   const backAudience = currentAudiences[0] ?? contact.audiences[0];
-  const suppressed = Boolean(contact.currentSuppression || contact.optedOut);
+  const suppressed = Boolean(
+    contact.currentSuppression || contact.optedOut || contact.unavailable,
+  );
 
   return (
     <div className="contact-detail-page">
@@ -61,6 +64,7 @@ export default async function Page({
         }
       />
 
+      {!contact.salesforceId && <PersonSalesforceLink id={contact.id} />}
       <div className="stats-grid contact-stats">
         <div className="stat-card">
           <span>
@@ -88,14 +92,16 @@ export default async function Page({
             <Mail size={18} /> Email status
           </span>
           <strong className="contact-status-value">
-            {suppressed ? "Suppressed" : "Eligible"}
+            {suppressed ? "Blocked" : "No recorded block"}
           </strong>
           <small>
-            {contact.optedOut
-              ? "Opted out in Salesforce"
-              : contact.currentSuppression
-                ? contact.currentSuppression.kind.replaceAll("_", " ")
-                : "No recorded opt-out"}
+            {contact.unavailable
+              ? "Salesforce Contact unavailable or excluded"
+              : contact.optedOut
+                ? "Opted out in Salesforce"
+                : contact.currentSuppression
+                  ? contact.currentSuppression.kind.replaceAll("_", " ")
+                  : "No recorded opt-out"}
           </small>
         </div>
       </div>
@@ -105,15 +111,22 @@ export default async function Page({
           <div className="section-toolbar">
             <div>
               <h2>Identity</h2>
-              <p>Durable Salesforce identity and latest contact details.</p>
+              <p>Permanent person identity and latest contact details.</p>
             </div>
           </div>
           <dl className="contact-facts">
             <div>
+              <dt>Force Multiplier person ID</dt>
+              <dd>
+                <code>{contact.id}</code>
+                <Copy value={contact.id} />
+              </dd>
+            </div>
+            <div>
               <dt>Salesforce Contact ID</dt>
               <dd>
-                <code>{contact.salesforceId}</code>
-                <Copy value={contact.salesforceId} />
+                <code>{contact.salesforceId || "Not linked"}</code>
+                {contact.salesforceId && <Copy value={contact.salesforceId} />}
               </dd>
             </div>
             <div>
@@ -145,7 +158,7 @@ export default async function Page({
           <div className="section-toolbar">
             <div>
               <h2>Consent and delivery</h2>
-              <p>Current snapshot plus the local suppression ledger.</p>
+              <p>Current person status and the local suppression ledger.</p>
             </div>
           </div>
           <dl className="contact-facts">
@@ -153,7 +166,11 @@ export default async function Page({
               <dt>Salesforce email opt-out</dt>
               <dd>
                 <Badge tone={contact.optedOut ? "amber" : "green"}>
-                  {contact.optedOut ? "Opted out" : "Not opted out"}
+                  {!contact.salesforceId
+                    ? "Not linked"
+                    : contact.optedOut
+                      ? "Opted out"
+                      : "Not opted out"}
                 </Badge>
               </dd>
             </div>
@@ -235,7 +252,7 @@ export default async function Page({
         <div className="section-toolbar">
           <div>
             <h2>Campaign history</h2>
-            <p>Every campaign where this Salesforce Contact was selected.</p>
+            <p>Every campaign where this person was selected.</p>
           </div>
         </div>
         {!contact.campaigns.length ? (

@@ -1,3 +1,9 @@
+import { saveSalesforcePeople, refreshPeople, personRecord } from "./people";
+import {
+  previewAudienceImport,
+  commitAudienceImport,
+  type ImportRow,
+} from "./audience-imports";
 import {
   FUNRAISIN_FIELDS,
   parseFunraisinAudience,
@@ -59,9 +65,9 @@ export async function updateAudienceQuery(id: string, query: string) {
   validateQuery(query);
   const audience = await db.audience.findUnique({ where: { id } });
   if (!audience) throw new AppError("Audience not found.", 404);
-  if (audience.sourceType === "funraisin")
+  if (["funraisin", "import"].includes(audience.sourceType))
     throw new AppError(
-      "Funraisin audiences use filters. Create a new audience to change them.",
+      "Imported and Funraisin audiences do not use editable SOQL. Use their list or filters instead.",
       409,
     );
   const config = await connection("salesforce");
@@ -75,25 +81,27 @@ export async function updateAudienceQuery(id: string, query: string) {
     data: { query, sourceType: "soql", sourceId: null },
   });
 }
-export async function addManualMember(id: string, email: string) {
-  const audience = await db.audience.findUnique({
-    where: { id },
-    select: { id: true },
-  });
-  if (!audience) throw new AppError("Audience not found.", 404);
-  return db.$transaction(async (tx) => {
-    const added = await tx.manualAudienceMember.createMany({
-      data: [{ audienceId: id, email }],
-      skipDuplicates: true,
-    });
-    if (added.count)
-      await tx.audience.update({
-        where: { id },
-        data: { manualVersion: { increment: 1 } },
-      });
-    return tx.manualAudienceMember.findUniqueOrThrow({
-      where: { audienceId_email: { audienceId: id, email } },
-    });
+export async function addManualMember(
+  id: string,
+  email: string,
+  userId: string,
+) {
+  const preview = await previewAudienceImport(
+    { audienceId: id, name: "Manual addition", text: email, format: "paste" },
+    userId,
+  );
+  if (
+    (preview.rows as unknown as ImportRow[]).some(
+      (r) => r.status === "ambiguous",
+    )
+  )
+    throw new AppError(
+      "Several people share this email. Use Import list to review the match.",
+      409,
+    );
+  await commitAudienceImport(preview.id, {}, userId);
+  return db.manualAudienceMember.findUniqueOrThrow({
+    where: { audienceId_email: { audienceId: id, email } },
   });
 }
 
@@ -127,12 +135,12 @@ export async function startPull(id: string) {
   if (audience.sourceType === "funraisin") {
     parseFunraisinAudience(query);
     await funraisinAudienceConnection(audience.orgId);
-  } else if (audience.sourceType !== "soql") {
+  } else if (!["soql", "import"].includes(audience.sourceType)) {
     const resolved = await sourceQuery(audience.sourceType, audience.sourceId!);
     if (!resolved.query) throw new AppError(resolved.notes.join(" "), 422);
     query = resolved.query;
   }
-  if (audience.sourceType !== "funraisin") {
+  if (!["funraisin", "import"].includes(audience.sourceType)) {
     validateQuery(query);
     await validatePaths(audience.fields as string[]);
   }
@@ -231,11 +239,19 @@ export async function pullStep(id: string) {
         "The Salesforce connection changed. Reconnect the original org.",
         409,
       );
+    const imported = run.query === "import";
     const funraisin = run.query.startsWith("{");
     const page = await pullStage(id, "fetch Salesforce page", () =>
-      funraisin
-        ? funraisinAudiencePage(run.query, run.cursor, 500, run.orgId)
-        : sfQuery(run.query, run.cursor),
+      imported
+        ? Promise.resolve({
+            records: [] as Record<string, any>[],
+            done: true,
+            totalSize: 0,
+            nextRecordsUrl: undefined,
+          })
+        : funraisin
+          ? funraisinAudiencePage(run.query, run.cursor, 500, run.orgId)
+          : sfQuery(run.query, run.cursor, run.orgId),
     );
     if (
       !Array.isArray(page.records) ||
@@ -256,15 +272,48 @@ export async function pullStep(id: string) {
       id,
       "enrich Salesforce contacts",
       () =>
-        funraisin
+        funraisin || imported
           ? Promise.resolve(page.records)
-          : enrich(page.records, run.fields as string[]),
+          : enrich(page.records, run.fields as string[], run.orgId),
     );
     if (records.length !== page.records.length)
       throw new AppError(
         "Salesforce returned duplicate Contact IDs. Restart this pull.",
         409,
       );
+    const sourcePeople =
+      funraisin || imported
+        ? []
+        : await saveSalesforcePeople(run.orgId, records);
+    const bySalesforce = new Map(
+      sourcePeople.map((p) => [p.salesforceId, p.id]),
+    );
+    const manualVersion = page.done
+      ? (await db.audience.findUniqueOrThrow({ where: { id: run.audienceId } }))
+          .manualVersion
+      : 0;
+    const manual = page.done
+      ? await db.manualAudienceMember.findMany({
+          where: { audienceId: run.audienceId },
+          include: { person: true },
+        })
+      : [];
+    const resolvedManual = await Promise.all(
+      manual.map(async (m) =>
+        m.person.mergedIntoId
+          ? {
+              ...m,
+              person: await db.person.findUniqueOrThrow({
+                where: { id: m.person.mergedIntoId },
+              }),
+            }
+          : m,
+      ),
+    );
+    const currentManual = await refreshPeople(
+      resolvedManual.map((m) => m.person),
+      run.orgId,
+    );
     const latest = await pullStage(id, "recheck Salesforce connection", () =>
       connection("salesforce"),
     );
@@ -292,14 +341,18 @@ export async function pullStep(id: string) {
     return await pullStage(id, "save page", () =>
       db.$transaction(
         async (tx) => {
-          const manualVersion = page.done
-            ? (
-                await tx.audience.findUniqueOrThrow({
-                  where: { id: run.audienceId },
-                  select: { manualVersion: true },
-                })
-              ).manualVersion
-            : undefined;
+          if (
+            page.done &&
+            (
+              await tx.audience.findUniqueOrThrow({
+                where: { id: run.audienceId },
+              })
+            ).manualVersion !== manualVersion
+          )
+            throw new AppError(
+              "Audience additions changed during this pull. Restart it.",
+              409,
+            );
           const owner = await tx.pullRun.updateMany({
             where: { id, leaseUntil: lease, status: "running" },
             data: {
@@ -320,7 +373,9 @@ export async function pullStep(id: string) {
           const inserted = await tx.audienceMember.createMany({
             data: records.map((record) => ({
               runId: id,
-              salesforceId: record.Id,
+              personId: record.PersonId || bySalesforce.get(record.Id)!,
+              deliveryKey: record.Id || `local:${record.PersonId}`,
+              salesforceId: record.Id || null,
               email: record.Email || null,
               normalizedEmail: normalizedEmail(record.Email),
               name: [record.FirstName, record.LastName]
@@ -336,37 +391,47 @@ export async function pullStep(id: string) {
               "Contact IDs repeated across pages. Restart this pull.",
               409,
             );
-          if (page.done) {
-            const manual = await tx.manualAudienceMember.findMany({
-              where: { audienceId: run.audienceId },
-              select: { email: true },
+          if (page.done && manual.length) {
+            const existing = await tx.audienceMember.findMany({
+              where: { runId: id },
+              select: { personId: true },
             });
-            if (manual.length) {
-              const existing = await tx.audienceMember.findMany({
-                where: {
+            const ids = new Set(existing.map((m) => m.personId));
+            const data = currentManual.flatMap((person) => {
+              if (ids.has(person.id)) return [];
+              ids.add(person.id);
+              const record = personRecord(person);
+              return [
+                {
                   runId: id,
-                  normalizedEmail: { in: manual.map((member) => member.email) },
+                  personId: person.id,
+                  deliveryKey: person.salesforceId || `local:${person.id}`,
+                  salesforceId: person.salesforceId,
+                  email: person.email,
+                  normalizedEmail: person.email,
+                  name:
+                    [person.firstName, person.lastName]
+                      .filter(Boolean)
+                      .join(" ") || null,
+                  optedOut: person.optedOut || person.unavailable,
+                  data: record as Prisma.InputJsonValue,
                 },
-                select: { normalizedEmail: true },
-              });
-              const emails = new Set(
-                existing.map((member) => member.normalizedEmail),
-              );
+              ];
+            });
+            if (data.length)
               await tx.audienceMember.createMany({
-                data: manual
-                  .filter((member) => !emails.has(member.email))
-                  .map(({ email }) => ({
-                    runId: id,
-                    salesforceId: `manual:${email}`,
-                    email,
-                    normalizedEmail: email,
-                    name: null,
-                    optedOut: false,
-                    data: { Email: email },
-                  })),
+                data,
                 skipDuplicates: true,
               });
-            }
+          }
+          if (imported) {
+            const count = await tx.audienceMember.count({
+              where: { runId: id },
+            });
+            await tx.pullRun.updateMany({
+              where: { id },
+              data: { processed: count, total: count },
+            });
           }
           return tx.pullRun.findUniqueOrThrow({ where: { id } });
         },

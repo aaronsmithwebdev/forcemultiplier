@@ -209,6 +209,8 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   );
   mockMethod(t, db.audienceMember, "findMany", async () => [
     {
+      deliveryKey: "003000000000000001",
+      personId: "person-one",
       salesforceId: "003000000000000001",
       email: "ada@example.com",
       normalizedEmail: "ada@example.com",
@@ -216,51 +218,55 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
       data: { FirstName: "Ada", LastName: "Lovelace" },
     },
     {
-      salesforceId: "003000000000000002",
+      deliveryKey: "003000000000000002",
       email: "ada@example.com",
       normalizedEmail: "ada@example.com",
       optedOut: false,
       data: { FirstName: "Different" },
     },
     {
-      salesforceId: "003000000000000003",
+      deliveryKey: "003000000000000003",
       email: "no@example.com",
       normalizedEmail: "no@example.com",
       optedOut: true,
       data: { FirstName: "No" },
     },
     {
-      salesforceId: "003000000000000004",
+      deliveryKey: "003000000000000004",
       email: "shared@example.com",
       normalizedEmail: "shared@example.com",
       optedOut: false,
       data: { FirstName: "Shared" },
     },
     {
-      salesforceId: "003000000000000005",
+      deliveryKey: "003000000000000005",
       email: "shared@example.com",
       normalizedEmail: "shared@example.com",
       optedOut: true,
       data: { FirstName: "Opted Out" },
     },
   ]);
-  mockMethod(t, db, "$queryRaw", async () => [
-    {
-      email: "ada@example.com",
-      salesforceId: "003000000000000001",
-      optedOut: false,
-    },
-    {
-      email: "no@example.com",
-      salesforceId: "003000000000000003",
-      optedOut: true,
-    },
-    {
-      email: "shared@example.com",
-      salesforceId: "003000000000000004",
-      optedOut: true,
-    },
-  ]);
+  mockMethod(t, db, "$queryRaw", async (sql: any) =>
+    sql.sql.includes('"Person"')
+      ? []
+      : [
+          {
+            email: "ada@example.com",
+            deliveryKey: "003000000000000001",
+            optedOut: false,
+          },
+          {
+            email: "no@example.com",
+            deliveryKey: "003000000000000003",
+            optedOut: true,
+          },
+          {
+            email: "shared@example.com",
+            deliveryKey: "003000000000000004",
+            optedOut: true,
+          },
+        ],
+  );
   mockMethod(t, db.unsubscribeEvent, "findMany", async () => []);
   mockMethod(t, db.suppression, "findMany", async () => []);
   mockMethod(t, db.connection, "findUnique", async () => ({

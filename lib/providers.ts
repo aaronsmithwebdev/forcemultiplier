@@ -419,10 +419,16 @@ export async function testConnection(provider: Provider) {
   });
   return info;
 }
-export async function sfQuery(query: string, cursor?: string | null) {
+export async function sfQuery(
+  query: string,
+  cursor?: string | null,
+  orgId?: string,
+) {
   return providerRequest(
     "salesforce",
     cursor ||
       `/services/data/${SF_VERSION}/query?q=${encodeURIComponent(query)}`,
+    {},
+    orgId ? { externalId: orgId } : undefined,
   );
 }

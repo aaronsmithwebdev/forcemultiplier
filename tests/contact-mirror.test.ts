@@ -94,6 +94,7 @@ test("Contact mirror checkpoints complete pages and covers changes and deletions
     Object.assign(sync, data);
     return { count: 1 };
   });
+  mock(t, db, "$queryRaw", async () => []);
   mock(t, db, "$transaction", async (fn: any) => fn(db));
   mock(t, db, "$executeRaw", async (sql: any) => {
     writes.push(sql);
@@ -401,6 +402,7 @@ test("Contact mirror field changes require a paused, same-org mirror and clear o
     Object.assign(sync, data);
     return { count: 1 };
   });
+  mock(t, db, "$queryRaw", async () => []);
   mock(t, db, "$transaction", async (fn: any) => fn(db));
   mock(t, db, "$executeRaw", async () => {
     cleared++;

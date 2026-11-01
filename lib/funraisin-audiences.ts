@@ -1,9 +1,9 @@
+import { refreshPeople, personRecord } from "./people";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db";
 import { AppError } from "./errors";
 import { connection } from "./providers";
-import { enrich } from "./salesforce";
 import { funraisinFundraisingUrl } from "./funraisin";
 
 import { FUNRAISIN_FIELDS } from "./template-merge-tags";
@@ -93,7 +93,7 @@ export async function funraisinAudiencePage(
   const source =
     filters.people === "entrants"
       ? Prisma.sql`
-    SELECT DISTINCT p."salesforceId"
+    SELECT DISTINCT p."personId"
     FROM "forcemultiplier"."FunraisinRegistration" r
     JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
     WHERE TRUE
@@ -101,9 +101,9 @@ export async function funraisinAudiencePage(
       ${filters.eventId ? Prisma.sql`AND r."eventId" = ${filters.eventId}` : Prisma.empty}
   `
       : Prisma.sql`
-    SELECT d."salesforceId" FROM "forcemultiplier"."FunraisinDonation" d
+    SELECT d."personId" FROM "forcemultiplier"."FunraisinDonation" d
     WHERE d.status = 'paid' AND d.amount > COALESCE(d."refundAmount", 0) ${eventFilter}
-    GROUP BY d."salesforceId"
+    GROUP BY d."personId"
     HAVING COUNT(*) >= ${filters.minDonations}
       ${filters.maxDonations ? Prisma.sql`AND COUNT(*) <= ${filters.maxDonations}` : Prisma.empty}
   `;
@@ -124,10 +124,10 @@ export async function funraisinAudiencePage(
     WITH source AS (${source}), numbered AS (SELECT *, COUNT(*) OVER () AS total FROM source),
     selected AS (
       SELECT * FROM numbered
-      ${previous ? Prisma.sql`WHERE "salesforceId" > ${previous.after}` : Prisma.empty}
-      ORDER BY "salesforceId" LIMIT ${limit + 1}
+      ${previous ? Prisma.sql`WHERE "personId" > ${previous.after}` : Prisma.empty}
+      ORDER BY "personId" LIMIT ${limit + 1}
     )
-    SELECT s."salesforceId" AS "Id", s.total,
+    SELECT s."personId" AS "Id", s.total,
       stats.count, stats.amount::text, latest."donatedAt", latest.target, entrant."dateOfBirth",
       ${filters.eventId ? Prisma.sql`(SELECT name FROM "forcemultiplier"."FunraisinEvent" WHERE id = ${filters.eventId})` : filters.people === "donors" ? Prisma.sql`latest.event` : Prisma.sql`entrant.name`} AS event, entrant.username, entrant."eventKey"
     FROM selected s
@@ -136,7 +136,7 @@ export async function funraisinAudiencePage(
       FROM "forcemultiplier"."FunraisinRegistration" r
       JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
       JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId"
-      WHERE ${filters.people === "entrants"} AND p."salesforceId" = s."salesforceId"
+      WHERE ${filters.people === "entrants"} AND p."personId" = s."personId"
         ${filters.paidOnly ? Prisma.sql`AND r."isPaid"` : Prisma.empty}
         ${filters.eventId ? Prisma.sql`AND r."eventId" = ${filters.eventId}` : Prisma.empty}
       ORDER BY e."eventDate" DESC NULLS LAST, r."historyId"::numeric DESC LIMIT 1
@@ -144,7 +144,7 @@ export async function funraisinAudiencePage(
     LEFT JOIN LATERAL (
       SELECT COUNT(*) AS count, COALESCE(SUM(d.amount - COALESCE(d."refundAmount", 0)), 0) AS amount
       FROM "forcemultiplier"."FunraisinDonation" d
-      WHERE d."salesforceId" = s."salesforceId" AND d.status = 'paid'
+      WHERE d."personId" = s."personId" AND d.status = 'paid'
         AND d.amount > COALESCE(d."refundAmount", 0) ${eventFilter}
     ) stats ON TRUE
     LEFT JOIN LATERAL (
@@ -153,38 +153,45 @@ export async function funraisinAudiencePage(
       LEFT JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = d."memberId"
       LEFT JOIN "forcemultiplier"."FunraisinTeam" t ON t."teamId" = d."teamId" AND t."eventId" = d."eventId"
       LEFT JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = d."eventId"
-      WHERE d."salesforceId" = s."salesforceId" AND d.status = 'paid'
+      WHERE d."personId" = s."personId" AND d.status = 'paid'
         AND d.amount > COALESCE(d."refundAmount", 0) ${eventFilter}
       ORDER BY d."donatedAt" DESC NULLS LAST, d."donationId"::numeric DESC LIMIT 1
     ) latest ON TRUE
-    ORDER BY s."salesforceId"
+    ORDER BY s."personId"
   `);
   const done = rows.length <= limit;
   if (!done) rows.pop();
-  const records = await enrich(
-    rows.map((row) => ({
-      Id: row.Id,
-      FunraisinEventName: row.event ?? "",
-      FunraisinUsername: row.username ?? "",
-      FunraisinEventKey: row.eventKey ?? "",
-      FunraisinFundraisingUrl: funraisinFundraisingUrl(
-        config.baseUrl,
-        row.username,
-        row.eventKey,
-      ),
-      ...(filters.people === "entrants"
-        ? {
-            FunraisinDateOfBirth:
-              row.dateOfBirth?.toISOString().slice(0, 10) ?? "",
-          }
-        : {}),
-      FunraisinDonationCount: Number(row.count),
-      FunraisinDonationTotal: row.amount,
-      FunraisinLastDonatedAt: row.donatedAt?.toISOString().slice(0, 10) ?? "",
-      FunraisinLastDonatedToName: row.target ?? "",
-    })),
-    [],
-  );
+  const people = await db.person.findMany({
+    where: { id: { in: rows.map((r) => r.Id) }, orgId: config.orgId },
+  });
+  if (people.length !== rows.length)
+    throw new AppError(
+      "Funraisin person identity is missing. Run a full sync.",
+      409,
+    );
+  const current = await refreshPeople(people, config.orgId);
+  const byId = new Map(current.map((p) => [p.id, p]));
+  const records = rows.map((row) => ({
+    ...personRecord(byId.get(row.Id)!),
+    FunraisinEventName: row.event ?? "",
+    FunraisinUsername: row.username ?? "",
+    FunraisinEventKey: row.eventKey ?? "",
+    FunraisinFundraisingUrl: funraisinFundraisingUrl(
+      config.baseUrl,
+      row.username,
+      row.eventKey,
+    ),
+    ...(filters.people === "entrants"
+      ? {
+          FunraisinDateOfBirth:
+            row.dateOfBirth?.toISOString().slice(0, 10) ?? "",
+        }
+      : {}),
+    FunraisinDonationCount: Number(row.count),
+    FunraisinDonationTotal: row.amount,
+    FunraisinLastDonatedAt: row.donatedAt?.toISOString().slice(0, 10) ?? "",
+    FunraisinLastDonatedToName: row.target ?? "",
+  }));
   const latest = await funraisinAudienceConnection(config.orgId);
   if (latest.version !== config.version)
     throw new AppError(

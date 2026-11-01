@@ -221,14 +221,18 @@ model PullRun {
 model AudienceMember {
   runId           String
   run             PullRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  salesforceId    String
+  personId        String
+  deliveryKey     String
+  person          Person  @relation(fields: [personId], references: [id])
+  salesforceId    String?
   email           String?
   normalizedEmail String?
   name            String?
   optedOut        Boolean @default(false)
   data            Json
 
-  @@id([runId, salesforceId])
+  @@id([runId, personId])
+  @@unique([runId, deliveryKey])
   @@index([runId, normalizedEmail])
   @@schema("forcemultiplier")
 }
@@ -237,6 +241,8 @@ model ManualAudienceMember {
   audienceId String
   audience   Audience @relation(fields: [audienceId], references: [id], onDelete: Cascade)
   email      String
+  personId   String
+  person     Person   @relation(fields: [personId], references: [id])
   createdAt  DateTime @default(now())
 
   @@id([audienceId, email])
@@ -592,6 +598,8 @@ model CampaignRecipient {
   email                    String
   name                     String?
   salesforceId             String?
+  personId                 String?
+  person                   Person?      @relation(fields: [personId], references: [id])
   status                   String       @default("selected")
   providerEmailId          String?
   messageId                String?
@@ -701,15 +709,17 @@ model FunraisinEvent {
 }
 
 model FunraisinParticipant {
-  username       String?
-  memberId       String                  @id
-  salesforceId   String
-  firstName      String?
-  name           String?
-  email          String?
-  dateOfBirth    DateTime?               @db.Date
-  lastSeenScan   String?
-  registrations  FunraisinRegistration[]
+  username      String?
+  memberId      String                  @id
+  salesforceId  String?
+  firstName     String?
+  name          String?
+  email         String?
+  dateOfBirth   DateTime?               @db.Date
+  personId      String
+  person        Person                  @relation(fields: [personId], references: [id])
+  lastSeenScan  String?
+  registrations FunraisinRegistration[]
 
   @@index([salesforceId])
   @@schema("forcemultiplier")
@@ -741,19 +751,21 @@ model FunraisinRegistration {
 }
 
 model FunraisinDonation {
-  donationId     String          @id
-  eventId        String?
-  event          FunraisinEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  salesforceId   String
-  memberId       String?
-  teamId         String?
-  donatedAt      DateTime?
-  name           String?
-  email          String?
-  status         String?
-  amount         Decimal?        @db.Decimal(15, 2)
-  refundAmount   Decimal?        @db.Decimal(15, 2)
-  lastSeenScan   String?
+  donationId   String          @id
+  eventId      String?
+  event        FunraisinEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  salesforceId String?
+  memberId     String?
+  teamId       String?
+  donatedAt    DateTime?
+  name         String?
+  email        String?
+  status       String?
+  amount       Decimal?        @db.Decimal(15, 2)
+  refundAmount Decimal?        @db.Decimal(15, 2)
+  personId     String
+  person       Person          @relation(fields: [personId], references: [id])
+  lastSeenScan String?
 
   @@index([eventId, salesforceId])
   @@index([salesforceId])
@@ -793,5 +805,69 @@ model FunraisinIssue {
   lastSeenScan String?
 
   @@id([phase, sourceId])
+  @@schema("forcemultiplier")
+}
+
+// Internal identity survives email changes and later Salesforce linking.
+model Person {
+  id            String                 @id @default(cuid())
+  orgId         String
+  salesforceId  String?
+  email         String?
+  firstName     String?
+  lastName      String?
+  optedOut      Boolean                @default(false)
+  unavailable   Boolean                @default(false)
+  mergedIntoId  String?
+  source        String
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  members       AudienceMember[]
+  manualMembers ManualAudienceMember[]
+  recipients    CampaignRecipient[]
+  participants  FunraisinParticipant[]
+  donations     FunraisinDonation[]
+  identities    PersonSource[]
+  emails        PersonEmail[]
+
+  @@unique([orgId, salesforceId])
+  @@index([orgId, email])
+  @@index([mergedIntoId])
+  @@schema("forcemultiplier")
+}
+
+model PersonSource {
+  orgId     String
+  source    String
+  sourceId  String
+  personId  String
+  person    Person   @relation(fields: [personId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([orgId, source, sourceId])
+  @@schema("forcemultiplier")
+}
+
+model PersonEmail {
+  personId String
+  person   Person @relation(fields: [personId], references: [id])
+  email    String
+
+  @@id([personId, email])
+  @@schema("forcemultiplier")
+}
+
+model AudienceImport {
+  id          String    @id @default(cuid())
+  orgId       String
+  audienceId  String?
+  name        String
+  createdBy   String
+  rows        Json
+  status      String    @default("preview")
+  createdAt   DateTime  @default(now())
+  committedAt DateTime?
+
+  @@index([orgId, createdAt])
   @@schema("forcemultiplier")
 }

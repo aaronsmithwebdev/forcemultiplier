@@ -1,0 +1,30 @@
+# Audience imports and person identity
+
+Audience → **Import list** creates a list from CSV or pasted email addresses. The same control inside an audience adds memberships to that audience. CSV requires exactly one Email or Email Address column; First Name and Last Name are optional. Paste accepts newlines, commas, or semicolons. Each preview is limited to 2,000 rows and 2 MB, with a one-hour confirmation window.
+
+Preview shows matches, new local people, ambiguous shared addresses, invalid addresses, duplicate rows, and marketing blocks. Salesforce is searched in complete, paginated batches, including Contacts outside the selected audience. Existing unambiguous people are reused; several candidates require an explicit selection or the row stays out of the import. Confirmation rechecks matches and serializes identity writes with other imports, source imports, and linking. Repeated confirmation and repeated list uploads do not duplicate memberships. Importing is not resubscription and does not clear consent or delivery blocks.
+
+Every person has a permanent internal ID, an org scope, and an optional Salesforce Contact ID. Email is normalized by trimming whitespace and ignoring case; Gmail dots and plus suffixes are retained. Shared email addresses do not make separate Salesforce Contacts the same person. Salesforce owns linked profile fields. Imported membership and its original address survive CRM profile changes; a subsequent audience pull uses the current Salesforce email and details. Completed snapshots retain the values the user reviewed. Pull the audience after importing before selecting its new membership for a campaign or list sync.
+
+Unmatched people stay local. Imports never create Contacts in Salesforce. A local person's detail page offers **Find Salesforce matches**, followed by explicit confirmation. Linking retains the local ID, aliases the former CRM person ID for history, retains both sets of snapshots and campaign recipients, copies email history, and records the actor. Source-provided Salesforce IDs from an established Funraisin identity can establish this link automatically. A conflicting existing Salesforce link pauses the Funraisin page for review.
+
+Funraisin keeps participants and donors without Salesforce IDs. Participant IDs and donation IDs remain distinct source identities. A donation's member/fundraiser reference is never used as its donor identity. Unambiguous email matches reuse people; unresolved shared addresses remain separate rather than merging established people. Donation counts, refunds, registration filters, and event fields retain their existing meanings. A source refresh can update its own local profile, but cannot replace Salesforce-owned profile fields.
+
+All marketing still requires the existing healthy Salesforce consent baseline, unsubscribe worker, Resend webhook, and suppression checks. Current person blocks and historical address suppressions also apply to imported/Funraisin recipients and prepared campaigns. Salesforce mirror exclusions are checked directly when resolving imported or linked people; excluded, deleted, or inaccessible Contacts do not silently become unrestricted local records. A later evidenced workspace resubscription can supersede an older marketing suppression through the existing workflow; that workflow still requires an unambiguous Salesforce match. Local people who have unsubscribed remain blocked until the supported resubscription conditions are met.
+
+Confirmed linking requeues unresolved outbound suppression events against the verified Contact ID. Salesforce failures remain retryable in the existing suppression ledger. Linking, imports, and source refreshes do not clear a local suppression. Salesforce remains the authority for CRM profile fields; the shared ledger remains the authority for unsubscribe history.
+
+## Migration and verification
+
+The migration backfills internal IDs from existing snapshots, manual memberships, and Salesforce/Funraisin records, preserving campaign recipient links. It does not merge legacy manual people with CRM people merely because an address matches. Existing list deliveries retain their original immutable ordering key so saved cursors and provider batches remain resumable. In-progress Funraisin audience pulls are cancelled with an explanation because their cursor now groups by person ID; start a new pull. The last complete snapshot remains available. The next full Funraisin cycle backfills records previously skipped for missing CRM IDs.
+
+Person, source identity, email history, and import audit tables are server-only, with RLS and no public/anonymous/authenticated table access. Imported rows record their matches, chosen person IDs, creator, and completion time. Person activity shows completed list imports. No Salesforce Contact creation or profile write-back is introduced.
+
+Run `npm test`, `npm run typecheck`, `npm run format:check`, and `npm run build`. To check migration backfill and the actual campaign selection SQL in an isolated PostgreSQL runtime without production credentials or a permanent dependency:
+
+```sh
+npm install --prefix /tmp/forcemultiplier-db-check @electric-sql/pglite --no-package-lock --ignore-scripts
+node --import tsx scripts/check-people-migration.mjs /tmp/forcemultiplier-db-check/node_modules/@electric-sql/pglite/dist/index.js
+```
+
+The check covers org boundaries, shared emails, local identities, memberships, campaign history, Funraisin source links, uniqueness, private tables, historical suppression, explicit resubscription, and final prepared-campaign blocking.

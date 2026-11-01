@@ -37,10 +37,15 @@ export function Audiences() {
       <Heading
         title="Audiences"
         action={
-          <Link className="button" href="/audiences/new">
-            <Plus size={17} />
-            New audience
-          </Link>
+          <div className="button-row">
+            <Link className="button secondary" href="/audiences/import">
+              Import list
+            </Link>
+            <Link className="button" href="/audiences/new">
+              <Plus size={17} />
+              New audience
+            </Link>
+          </div>
         }
       />
       <Notice message={error} />

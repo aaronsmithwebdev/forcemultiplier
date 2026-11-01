@@ -1,4 +1,5 @@
 "use client";
+import { AudienceImport } from "./audience-import";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -584,7 +585,9 @@ export function AudienceDetail({ id }: { id: string }) {
         <summary>
           {data.sourceType === "funraisin"
             ? "Funraisin filters and personalisation fields"
-            : "Audience SOQL and selected fields"}
+            : data.sourceType === "import"
+              ? "Imported list and personalisation fields"
+              : "Audience SOQL and selected fields"}
         </summary>
         {editingQuery ? (
           <>
@@ -599,7 +602,7 @@ export function AudienceDetail({ id }: { id: string }) {
                 spellCheck={false}
               />
             </label>
-            {data.sourceType !== "soql" && (
+            {!["soql", "import"].includes(data.sourceType) && (
               <p className="muted">
                 Saving converts this audience to independent SOQL. Future
                 changes to its Salesforce {data.sourceType} will no longer
@@ -636,9 +639,13 @@ export function AudienceDetail({ id }: { id: string }) {
                 })()}
               </p>
             ) : (
-              <pre>{data.query}</pre>
+              <pre>
+                {data.sourceType === "import"
+                  ? "Imported memberships are retained until removed. Pull to refresh linked Salesforce details."
+                  : data.query}
+              </pre>
             )}
-            {data.sourceType !== "funraisin" && (
+            {!["funraisin", "import"].includes(data.sourceType) && (
               <Button
                 variant="secondary"
                 disabled={busy || sending}
@@ -663,7 +670,7 @@ export function AudienceDetail({ id }: { id: string }) {
             sync. Create a new audience to use different filters.
           </p>
         ) : (
-          data.sourceType !== "soql" && (
+          !["soql", "import"].includes(data.sourceType) && (
             <p className="muted">
               Saved criteria shown above. A new pull reads the current
               Salesforce definition and records its executed query in pull
@@ -672,13 +679,19 @@ export function AudienceDetail({ id }: { id: string }) {
           )
         )}
       </details>
+      <AudienceImport
+        audienceId={id}
+        onImported={() => {
+          void load().catch((e) => setError(e.message));
+        }}
+      />
       <section className="card manual-emails-card">
         <div className="section-toolbar">
           <div>
             <h2>Manual emails</h2>
             <p>
               Add people who do not match the audience filters. A new pull
-              includes them in the snapshot used for Constant Contact syncs.
+              includes them in the snapshot used for campaigns and list syncs.
             </p>
           </div>
         </div>
@@ -783,30 +796,26 @@ export function AudienceDetail({ id }: { id: string }) {
                 </thead>
                 <tbody>
                   {data.members.map((m: any) => (
-                    <tr key={m.salesforceId}>
+                    <tr key={m.personId}>
                       <td>
-                        {m.salesforceId.startsWith("manual:") ? (
-                          <strong>Manual email</strong>
-                        ) : (
-                          <Link
-                            className="contact-link"
-                            href={`/contacts/${encodeURIComponent(m.salesforceId)}`}
-                          >
-                            <strong>{m.name || "Unnamed contact"}</strong>
-                            <small className="block muted">
-                              {m.salesforceId}
-                            </small>
-                          </Link>
-                        )}
+                        <Link
+                          className="contact-link"
+                          href={`/contacts/${encodeURIComponent(m.personId)}`}
+                        >
+                          <strong>{m.name || "Unnamed contact"}</strong>
+                          <small className="block muted">
+                            {m.salesforceId || "Local person"}
+                          </small>
+                        </Link>
                       </td>
                       <td>{m.email || "No email"}</td>
                       <td>
                         <Badge tone={m.optedOut ? "amber" : ""}>
-                          {m.salesforceId.startsWith("manual:")
-                            ? "Manual"
-                            : m.optedOut
-                              ? "Opted out"
-                              : "Not opted out in SF"}
+                          {m.optedOut
+                            ? "Opted out / blocked"
+                            : m.salesforceId
+                              ? "Not opted out in SF"
+                              : "Local · consent checks apply"}
                         </Badge>
                       </td>
                       {data.fields.map((f: string) => (
