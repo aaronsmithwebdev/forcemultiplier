@@ -304,6 +304,7 @@ test("a Funraisin pull publishes enriched members through the shared snapshot pa
   mock(t, db.pullRun, "findUnique", async () => run);
   mock(t, db, "$queryRaw", async () => [row]);
   mock(t, db.manualAudienceMember, "findMany", async () => []);
+  mock(t, db.manualAudienceMember, "count", async () => 0);
   mock(t, db.audience, "findUniqueOrThrow", async () => ({ manualVersion: 0 }));
   let saved = false;
   mock(t, db, "$transaction", async (fn: any) =>

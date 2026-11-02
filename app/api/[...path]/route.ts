@@ -353,10 +353,18 @@ async function handle(
       const data = z
         .object({
           permissionConfirmed: z.literal(true),
+          audienceId: z.string().min(1).max(100).optional(),
           resolutions: z.record(z.string(), z.string().max(100)).default({}),
         })
         .parse(await body(request, 300_000));
-      return json(await commitAudienceImport(p[1], data.resolutions, user.id));
+      return json(
+        await commitAudienceImport(
+          p[1],
+          data.resolutions,
+          user.id,
+          data.audienceId,
+        ),
+      );
     }
     if (
       p[0] === "contacts" &&

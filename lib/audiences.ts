@@ -1,3 +1,5 @@
+import type { PullRun } from "@prisma/client";
+import { AUDIENCE_IMPORT_BATCH_SIZE } from "./audience-import-input";
 import { saveSalesforcePeople, refreshPeople, personRecord } from "./people";
 import {
   previewAudienceImport,
@@ -151,6 +153,8 @@ export async function startPull(id: string) {
         query,
         fields: audience.fields as Prisma.InputJsonValue,
         orgId: audience.orgId,
+        manualVersion:
+          audience.sourceType === "import" ? audience.manualVersion : 0,
       },
     });
   } catch (error) {
@@ -207,6 +211,60 @@ async function pullStage<T>(
   }
   throw new Error("Unreachable pull retry state.");
 }
+async function manualAudiencePage(run: PullRun) {
+  const cursor = run.cursor
+    ? (JSON.parse(run.cursor.slice("manual:".length)) as {
+        after: string | null;
+        sourceTotal: number;
+        version: number;
+      })
+    : { after: null, sourceTotal: 0, version: run.manualVersion ?? 0 };
+  const audience = await db.audience.findUniqueOrThrow({
+    where: { id: run.audienceId },
+  });
+  if (audience.manualVersion !== cursor.version)
+    throw new AppError(
+      "Audience additions changed during this pull. Cancel it and start a new pull.",
+      409,
+    );
+  const [members, total] = await Promise.all([
+    db.manualAudienceMember.findMany({
+      where: {
+        audienceId: run.audienceId,
+        ...(cursor.after ? { email: { gt: cursor.after } } : {}),
+      },
+      orderBy: { email: "asc" },
+      take: AUDIENCE_IMPORT_BATCH_SIZE,
+      include: { person: true },
+    }),
+    db.manualAudienceMember.count({ where: { audienceId: run.audienceId } }),
+  ]);
+  if (!members.length && run.processed < cursor.sourceTotal + total)
+    throw new AppError(
+      "Audience membership paging was incomplete. Restart this pull.",
+      409,
+    );
+  const people = await Promise.all(
+    members.map((m) =>
+      m.person.mergedIntoId
+        ? db.person.findUniqueOrThrow({ where: { id: m.person.mergedIntoId } })
+        : m.person,
+    ),
+  );
+  const current = await refreshPeople(people, run.orgId);
+  const totalSize = cursor.sourceTotal + total;
+  const done = run.processed + members.length >= totalSize;
+  return {
+    records: current.map(personRecord),
+    totalSize,
+    done,
+    nextRecordsUrl: done
+      ? undefined
+      : "manual:" + JSON.stringify({ ...cursor, after: members.at(-1)?.email }),
+    manualVersion: cursor.version,
+  };
+}
+
 export async function pullStep(id: string) {
   const lease = new Date(Date.now() + 90000);
   const acquired = await pullStage(id, "claim run", () =>
@@ -240,15 +298,11 @@ export async function pullStep(id: string) {
         409,
       );
     const imported = run.query === "import";
+    const manualPhase = imported || !!run.cursor?.startsWith("manual:");
     const funraisin = run.query.startsWith("{");
     const page = await pullStage(id, "fetch Salesforce page", () =>
-      imported
-        ? Promise.resolve({
-            records: [] as Record<string, any>[],
-            done: true,
-            totalSize: 0,
-            nextRecordsUrl: undefined,
-          })
+      manualPhase
+        ? manualAudiencePage(run)
         : funraisin
           ? funraisinAudiencePage(run.query, run.cursor, 500, run.orgId)
           : sfQuery(run.query, run.cursor, run.orgId),
@@ -272,7 +326,7 @@ export async function pullStep(id: string) {
       id,
       "enrich Salesforce contacts",
       () =>
-        funraisin || imported
+        funraisin || manualPhase
           ? Promise.resolve(page.records)
           : enrich(page.records, run.fields as string[], run.orgId),
     );
@@ -282,38 +336,21 @@ export async function pullStep(id: string) {
         409,
       );
     const sourcePeople =
-      funraisin || imported
+      funraisin || manualPhase
         ? []
         : await saveSalesforcePeople(run.orgId, records);
     const bySalesforce = new Map(
       sourcePeople.map((p) => [p.salesforceId, p.id]),
     );
-    const manualVersion = page.done
-      ? (await db.audience.findUniqueOrThrow({ where: { id: run.audienceId } }))
-          .manualVersion
-      : 0;
-    const manual = page.done
-      ? await db.manualAudienceMember.findMany({
-          where: { audienceId: run.audienceId },
-          include: { person: true },
-        })
-      : [];
-    const resolvedManual = await Promise.all(
-      manual.map(async (m) =>
-        m.person.mergedIntoId
-          ? {
-              ...m,
-              person: await db.person.findUniqueOrThrow({
-                where: { id: m.person.mergedIntoId },
-              }),
-            }
-          : m,
-      ),
-    );
-    const currentManual = await refreshPeople(
-      resolvedManual.map((m) => m.person),
-      run.orgId,
-    );
+    const manualVersion = manualPhase
+      ? (run.manualVersion ?? 0)
+      : page.done
+        ? (
+            await db.audience.findUniqueOrThrow({
+              where: { id: run.audienceId },
+            })
+          ).manualVersion
+        : 0;
     const latest = await pullStage(id, "recheck Salesforce connection", () =>
       connection("salesforce"),
     );
@@ -327,7 +364,7 @@ export async function pullStep(id: string) {
         409,
       );
     const processed = run.processed + page.records.length;
-    const total = run.cursor ? run.total : Number(page.totalSize);
+    let total = run.cursor ? run.total : Number(page.totalSize);
     if (
       !Number.isFinite(total) ||
       total < 0 ||
@@ -338,11 +375,29 @@ export async function pullStep(id: string) {
         "The extracted record count does not match Salesforce. Restart this pull.",
         409,
       );
+    let enteringManual = false;
+    if (page.done && !manualPhase) {
+      const count = await db.manualAudienceMember.count({
+        where: { audienceId: run.audienceId },
+      });
+      if (count) {
+        enteringManual = true;
+        page.done = false;
+        page.nextRecordsUrl =
+          "manual:" +
+          JSON.stringify({
+            after: null,
+            sourceTotal: total,
+            version: manualVersion,
+          });
+        total += count;
+      }
+    }
     return await pullStage(id, "save page", () =>
       db.$transaction(
         async (tx) => {
           if (
-            page.done &&
+            (page.done || manualPhase || enteringManual) &&
             (
               await tx.audience.findUniqueOrThrow({
                 where: { id: run.audienceId },
@@ -357,7 +412,7 @@ export async function pullStep(id: string) {
             where: { id, leaseUntil: lease, status: "running" },
             data: {
               processed,
-              ...(page.done ? { manualVersion } : {}),
+              ...(page.done || enteringManual ? { manualVersion } : {}),
               total,
               cursor: page.done ? null : page.nextRecordsUrl,
               status: page.done ? "completed" : "running",
@@ -378,53 +433,20 @@ export async function pullStep(id: string) {
               salesforceId: record.Id || null,
               email: record.Email || null,
               normalizedEmail: normalizedEmail(record.Email),
-              name: [record.FirstName, record.LastName]
-                .filter(Boolean)
-                .join(" "),
+              name:
+                [record.FirstName, record.LastName].filter(Boolean).join(" ") ||
+                null,
               optedOut: record.HasOptedOutOfEmail === true,
               data: JSON.parse(JSON.stringify(record)),
             })),
             skipDuplicates: true,
           });
-          if (inserted.count !== records.length)
+          if (!manualPhase && inserted.count !== records.length)
             throw new AppError(
               "Contact IDs repeated across pages. Restart this pull.",
               409,
             );
-          if (page.done && manual.length) {
-            const existing = await tx.audienceMember.findMany({
-              where: { runId: id },
-              select: { personId: true },
-            });
-            const ids = new Set(existing.map((m) => m.personId));
-            const data = currentManual.flatMap((person) => {
-              if (ids.has(person.id)) return [];
-              ids.add(person.id);
-              const record = personRecord(person);
-              return [
-                {
-                  runId: id,
-                  personId: person.id,
-                  deliveryKey: person.salesforceId || `local:${person.id}`,
-                  salesforceId: person.salesforceId,
-                  email: person.email,
-                  normalizedEmail: person.email,
-                  name:
-                    [person.firstName, person.lastName]
-                      .filter(Boolean)
-                      .join(" ") || null,
-                  optedOut: person.optedOut || person.unavailable,
-                  data: record as Prisma.InputJsonValue,
-                },
-              ];
-            });
-            if (data.length)
-              await tx.audienceMember.createMany({
-                data,
-                skipDuplicates: true,
-              });
-          }
-          if (imported) {
+          if (page.done && manualPhase) {
             const count = await tx.audienceMember.count({
               where: { runId: id },
             });

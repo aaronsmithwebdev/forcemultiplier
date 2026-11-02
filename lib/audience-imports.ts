@@ -3,7 +3,12 @@ import { Prisma, type Person } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db";
 import { AppError } from "./errors";
-import { parseEmailCsv } from "./resubscribe-input";
+import {
+  AUDIENCE_IMPORT_BATCH_SIZE,
+  parseAudienceImport,
+  type ImportRow,
+} from "./audience-import-input";
+export { parseAudienceImport, type ImportRow } from "./audience-import-input";
 import {
   applySalesforceExclusions,
   findSalesforceEmails,
@@ -18,56 +23,6 @@ export const audienceImportInput = z.object({
   text: z.string().min(1).max(2_000_000),
   format: z.enum(["csv", "paste"]),
 });
-export type ImportRow = {
-  row: number;
-  email: string;
-  firstName: string;
-  lastName: string;
-  status: "invalid" | "duplicate" | "matched" | "new" | "ambiguous";
-  candidates: {
-    id: string;
-    name: string;
-    salesforceId: string | null;
-    currentEmail?: string | null;
-  }[];
-  existingMembership?: boolean;
-  blocked: boolean;
-  personId?: string;
-};
-export function parseAudienceImport(text: string, format: "csv" | "paste") {
-  const rows: ImportRow[] = [];
-  // ponytail: synchronous previews are limited to 2,000 rows / 2 MB; use a staged worker for larger lists.
-  if (text.length > 2_000_000)
-    throw new AppError("Import must be 2 MB or smaller.", 413);
-  const csv =
-    format === "paste"
-      ? "Email\n" +
-        text
-          .split(/[\r\n;,]+/)
-          .filter((v) => v.trim())
-          .join("\n")
-      : text;
-  try {
-    parseEmailCsv(csv, ({ values, headers, email, status }) => {
-      if (rows.length >= 2000)
-        throw new Error("Import at most 2,000 rows at a time.");
-      const value = (key: string) =>
-        (values[headers.indexOf(key)] || "").trim().slice(0, 150);
-      rows.push({
-        row: rows.length + 1,
-        email: email || value("email") || value("emailaddress"),
-        firstName: value("firstname"),
-        lastName: value("lastname"),
-        status: status === "valid" ? "new" : status,
-        candidates: [],
-        blocked: false,
-      });
-    });
-  } catch (error) {
-    throw new AppError((error as Error).message, 422);
-  }
-  return rows;
-}
 
 async function matchRows(
   rows: ImportRow[],
@@ -144,11 +99,10 @@ export async function previewAudienceImport(
     !(await db.audience.findFirst({ where: { id: input.audienceId, orgId } }))
   )
     throw new AppError("Audience not found in this Salesforce org.", 404);
-  const rows = await matchRows(
-    parseAudienceImport(input.text, input.format),
-    orgId,
-    input.audienceId,
-  );
+  const parsed = parseAudienceImport(input.text, input.format);
+  if (parsed.length > AUDIENCE_IMPORT_BATCH_SIZE)
+    throw new AppError("Preview large lists in batches of 500 rows.", 413);
+  const rows = await matchRows(parsed, orgId, input.audienceId);
   return db.audienceImport.create({
     data: {
       orgId,
@@ -164,11 +118,24 @@ export async function commitAudienceImport(
   id: string,
   resolutions: Record<string, string>,
   userId: string,
+  targetAudienceId?: string,
 ) {
   const { orgId } = await peopleOrg();
   const preview = await db.audienceImport.findUnique({ where: { id } });
   if (!preview || preview.orgId !== orgId || preview.createdBy !== userId)
     throw new AppError("Import preview not found.", 404);
+  if (
+    targetAudienceId &&
+    preview.audienceId &&
+    targetAudienceId !== preview.audienceId
+  )
+    throw new AppError("This batch belongs to a different audience.", 409);
+  const audienceId = preview.audienceId || targetAudienceId;
+  if (
+    audienceId &&
+    !(await db.audience.findFirst({ where: { id: audienceId, orgId } }))
+  )
+    throw new AppError("Audience not found in this Salesforce org.", 404);
   if (preview.status === "committed") {
     if (!preview.audienceId)
       throw new AppError("The imported audience is no longer available.", 409);
@@ -183,7 +150,7 @@ export async function commitAudienceImport(
   if (Date.now() - preview.createdAt.getTime() > 60 * 60_000)
     throw new AppError("This preview expired. Preview the list again.", 409);
   const before = preview.rows as unknown as ImportRow[];
-  const rows = await matchRows(before, orgId, preview.audienceId);
+  const rows = await matchRows(before, orgId, audienceId);
   for (let i = 0; i < rows.length; i++)
     if (
       JSON.stringify(rows[i].candidates) !==
@@ -202,9 +169,9 @@ export async function commitAudienceImport(
       });
       if (!owned.count)
         throw new AppError("Import already changed. Refresh the page.", 409);
-      const audience = preview.audienceId
+      const audience = audienceId
         ? await tx.audience.findFirst({
-            where: { id: preview.audienceId, orgId },
+            where: { id: audienceId, orgId },
           })
         : await tx.audience.create({
             data: {

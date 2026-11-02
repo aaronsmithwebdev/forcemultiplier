@@ -25,27 +25,41 @@ function fixture(t: any, total: number) {
   mockMethod(t, db.audience, "findUniqueOrThrow", async () => ({
     manualVersion: 0,
   }));
-  mockMethod(t, db.manualAudienceMember, "findMany", async () =>
-    manualEmails.map((email) => ({
-      email,
-      personId: `local:${email}`,
-      person: {
-        id:
-          email === "fixture@example.test" && total
-            ? "person:003000000000000000"
-            : `local:${email}`,
-        orgId: "org",
-        salesforceId:
-          email === "fixture@example.test" && total
-            ? "003000000000000000"
-            : null,
-        email,
-        firstName: null,
-        lastName: null,
-        optedOut: false,
-        unavailable: false,
-      },
-    })),
+  mockMethod(
+    t,
+    db.manualAudienceMember,
+    "count",
+    async () => manualEmails.length,
+  );
+  mockMethod(
+    t,
+    db.manualAudienceMember,
+    "findMany",
+    async ({ where, take }: any) =>
+      manualEmails
+        .filter((email) => !where.email?.gt || email > where.email.gt)
+        .sort()
+        .slice(0, take || manualEmails.length)
+        .map((email) => ({
+          email,
+          personId: `local:${email}`,
+          person: {
+            id:
+              email === "fixture@example.test" && total
+                ? "person:003000000000000000"
+                : `local:${email}`,
+            orgId: "org",
+            salesforceId:
+              email === "fixture@example.test" && total
+                ? "003000000000000000"
+                : null,
+            email,
+            firstName: null,
+            lastName: null,
+            optedOut: false,
+            unavailable: false,
+          },
+        })),
   );
   let failPage = -1;
   let failDatabaseOnce = false;
@@ -193,9 +207,11 @@ test("a full pull paginates beyond 2,000 and publishes every unique contact", as
 test("manual emails join each completed snapshot without duplicating pulled emails", async (t) => {
   const f = fixture(t, 1);
   f.manualEmails.push("manager@example.test", "fixture@example.test");
+  const source = await pullStep("run");
+  assert.equal(source.status, "running");
   const result = await pullStep("run");
   assert.equal(result.status, "completed");
-  assert.equal(result.processed, 1);
+  assert.equal(result.processed, 2);
   assert.equal(f.members.size, 2);
   assert.deepEqual(f.members.get("local:manager@example.test"), {
     runId: "run",
@@ -297,8 +313,32 @@ test("different people sharing an email retain separate audience memberships", a
       },
     },
   ]);
+  mockMethod(t, db.manualAudienceMember, "count", async () => 1);
+  await pullStep("run");
   await pullStep("run");
   assert.equal(f.members.size, 2);
   assert.ok(f.members.has("shared-local"));
   assert.ok(f.members.has("person:003000000000000000"));
+});
+
+test("a 50,000-person imported audience publishes only after all bounded pages finish", async (t) => {
+  const f = fixture(t, 0);
+  f.state.query = "import";
+  for (let index = 0; index < 50000; index++)
+    f.manualEmails.push(`p${String(index).padStart(5, "0")}@example.org`);
+  mockMethod(t, globalThis, "fetch", async () =>
+    assert.fail("Local people must not require Salesforce lookup"),
+  );
+  let pages = 0;
+  let run;
+  do {
+    run = await pullStep("run");
+    pages++;
+    if (pages < 100) assert.equal(run.status, "running");
+  } while (run.status !== "completed");
+  assert.equal(pages, 100);
+  assert.equal(run.total, 50000);
+  assert.equal(run.processed, 50000);
+  assert.equal(f.members.size, 50000);
+  assert.equal(run.cursor, null);
 });

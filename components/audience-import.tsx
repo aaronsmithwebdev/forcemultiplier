@@ -2,7 +2,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ImportRow } from "@/lib/audience-imports";
+import {
+  AUDIENCE_IMPORT_MAX_BYTES,
+  AUDIENCE_IMPORT_BATCH_SIZE,
+  parseAudienceImport,
+  audienceImportCsv,
+  type ImportRow,
+} from "@/lib/audience-import-input";
 import { api, Badge, Button, Notice } from "./common";
 export function AudienceImport({
   audienceId,
@@ -16,9 +22,12 @@ export function AudienceImport({
     [text, setText] = useState(""),
     [format, setFormat] = useState<"csv" | "paste">("paste");
   const [preview, setPreview] = useState<{
-    id: string;
     rows: ImportRow[];
+    batches: { id: string; rowNumbers: number[] }[];
   } | null>(null);
+  const [targetAudienceId, setTargetAudienceId] = useState(audienceId);
+  const [checkpoint, setCheckpoint] = useState({ next: 0, added: 0, held: 0 });
+  const [progress, setProgress] = useState("");
   const [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -32,44 +41,104 @@ export function AudienceImport({
     setPreview(null);
     setResolutions({});
     setPage(0);
+    setCheckpoint({ next: 0, added: 0, held: 0 });
     try {
-      setPreview(
-        await api("audience-imports", "POST", {
-          name,
-          audienceId,
-          text,
-          format,
-        }),
+      const rows = parseAudienceImport(text, format);
+      const unique = rows.filter(
+        (row) => row.status !== "invalid" && row.status !== "duplicate",
       );
+      const batches: { id: string; rowNumbers: number[] }[] = [];
+      for (
+        let offset = 0;
+        offset < unique.length;
+        offset += AUDIENCE_IMPORT_BATCH_SIZE
+      ) {
+        setProgress(
+          `Matching ${offset.toLocaleString()} of ${unique.length.toLocaleString()} email addresses. Keep this page open.`,
+        );
+        const batch = unique.slice(offset, offset + AUDIENCE_IMPORT_BATCH_SIZE);
+        const matched = await api("audience-imports", "POST", {
+          name,
+          audienceId: audienceId || targetAudienceId,
+          text: audienceImportCsv(batch),
+          format: "csv",
+        });
+        if (matched.rows.length !== batch.length)
+          throw new Error(
+            "The import preview was incomplete. Preview the list again.",
+          );
+        for (let index = 0; index < batch.length; index++)
+          rows[batch[index].row - 1] = {
+            ...matched.rows[index],
+            row: batch[index].row,
+          };
+        batches.push({
+          id: matched.id,
+          rowNumbers: batch.map((row) => row.row),
+        });
+      }
+      setPreview({ rows, batches });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      setProgress("");
     }
   }
   async function commit() {
     if (!preview) return;
     setBusy(true);
     setError("");
+    let target = audienceId || targetAudienceId;
+    let saved = { ...checkpoint };
     try {
-      const result = await api(
-        `audience-imports/${preview.id}/commit`,
-        "POST",
-        { resolutions, permissionConfirmed: confirmed },
-      );
+      for (let index = saved.next; index < preview.batches.length; index++) {
+        const batch = preview.batches[index];
+        setProgress(
+          `Importing batch ${(index + 1).toLocaleString()} of ${preview.batches.length.toLocaleString()}. Keep this page open; completed batches are saved.`,
+        );
+        const decisions = Object.fromEntries(
+          batch.rowNumbers.flatMap((row, index) =>
+            resolutions[String(row)]
+              ? [[String(index + 1), resolutions[String(row)]]]
+              : [],
+          ),
+        );
+        const result = await api(
+          `audience-imports/${batch.id}/commit`,
+          "POST",
+          {
+            resolutions: decisions,
+            permissionConfirmed: confirmed,
+            audienceId: target,
+          },
+        );
+        target = result.audienceId;
+        setTargetAudienceId(target);
+        saved = {
+          next: index + 1,
+          added: saved.added + (result.added || 0),
+          held: saved.held + (result.held || 0),
+        };
+        setCheckpoint(saved);
+      }
       setPreview(null);
       setText("");
       setConfirmed(false);
+      setCheckpoint({ next: 0, added: 0, held: 0 });
       if (audienceId) {
         setMessage(
-          `Added ${result.added ?? 0} memberships. ${result.held ?? 0} ambiguous rows held. Pull the audience to review the new snapshot.`,
+          `Added ${saved.added.toLocaleString()} memberships. ${saved.held.toLocaleString()} ambiguous rows held. Pull the audience to review the new snapshot.`,
         );
         onImported?.();
-      } else router.push(`/audiences/${result.audienceId}`);
+      } else router.push(`/audiences/${target}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        `${(e as Error).message} ${saved.next.toLocaleString()} of ${preview.batches.length.toLocaleString()} batches completed. Retry to continue, or go back and preview the list again. Completed batches remain saved.`,
+      );
     } finally {
       setBusy(false);
+      setProgress("");
     }
   }
   const rows = preview?.rows || [];
@@ -93,6 +162,7 @@ export function AudienceImport({
       <div className="audience-import-body">
         <Notice message={error} />
         <Notice message={message} success />
+        {progress && <p role="status">{progress}</p>}
         {!preview ? (
           <>
             {!audienceId && (
@@ -115,8 +185,8 @@ export function AudienceImport({
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  if (file.size > 2_000_000) {
-                    setError("Import must be 2 MB or smaller.");
+                  if (file.size > AUDIENCE_IMPORT_MAX_BYTES) {
+                    setError("Import must be 20 MB or smaller.");
                     return;
                   }
                   try {
@@ -133,7 +203,7 @@ export function AudienceImport({
             </label>
             <p className="muted">
               CSV needs an Email or Email Address column. First Name and Last
-              Name are optional. Up to 2,000 rows per import.
+              Name are optional. Up to 50,000 rows and 20 MB per import.
             </p>
             <label>
               Input format
@@ -154,7 +224,7 @@ export function AudienceImport({
                 rows={7}
                 value={text}
                 disabled={busy}
-                maxLength={2_000_000}
+                maxLength={AUDIENCE_IMPORT_MAX_BYTES}
                 onChange={(e) => setText(e.target.value)}
               />
             </label>
@@ -204,7 +274,7 @@ export function AudienceImport({
                           <select
                             aria-label={`Match for row ${row.row}`}
                             value={resolutions[String(row.row)] || ""}
-                            disabled={busy}
+                            disabled={busy || checkpoint.next > 0}
                             onChange={(e) =>
                               setResolutions({
                                 ...resolutions,
@@ -275,7 +345,7 @@ export function AudienceImport({
               <input
                 type="checkbox"
                 checked={confirmed}
-                disabled={busy}
+                disabled={busy || checkpoint.next > 0}
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
               I have reviewed these matches and have permission to use this
@@ -287,7 +357,9 @@ export function AudienceImport({
                 disabled={!confirmed || !ready}
                 onClick={commit}
               >
-                Import {ready} people
+                {checkpoint.next
+                  ? "Continue import"
+                  : `Import ${ready.toLocaleString()} people`}
               </Button>
               <Button
                 variant="secondary"

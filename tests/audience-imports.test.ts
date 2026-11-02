@@ -7,6 +7,10 @@ import {
   previewAudienceImport,
   commitAudienceImport,
 } from "../lib/audience-imports";
+import {
+  audienceImportCsv,
+  AUDIENCE_IMPORT_BATCH_SIZE,
+} from "../lib/audience-import-input";
 import { linkPeople, sourcePeople } from "../lib/people";
 
 test("list parsing reuses CSV quoting and preserves row diagnostics and optional names", () => {
@@ -36,10 +40,10 @@ test("list parsing reuses CSV quoting and preserves row diagnostics and optional
   assert.throws(
     () =>
       parseAudienceImport(
-        Array.from({ length: 2001 }, (_, i) => `p${i}@example.org`).join("\n"),
+        Array.from({ length: 50001 }, (_, i) => `p${i}@example.org`).join("\n"),
         "paste",
       ),
-    /2,000/,
+    /50,000/,
   );
 });
 function mock(t: TestContext, target: any, key: string, fn: any) {
@@ -463,4 +467,66 @@ test("reimporting an existing membership after a CRM email change retains its pe
   assert.equal((await commitAudienceImport(repeated.id, {}, "user")).added, 0);
   assert.equal(f.people.length, 1);
   assert.equal(f.memberships[0].personId, personId);
+});
+
+test("50,000-row CSV files retain names and cross-batch duplicate diagnostics", () => {
+  const text =
+    "Email,First Name,Last Name\n" +
+    Array.from(
+      { length: 50000 },
+      (_, index) =>
+        `p${index === 49999 ? 0 : index}@example.org,"Mary, Jane","O""Neil"`,
+    ).join("\n");
+  assert.ok(new TextEncoder().encode(text).byteLength > 2_000_000);
+  const rows = parseAudienceImport(text, "csv");
+  assert.equal(rows.length, 50000);
+  assert.equal(rows[49999].status, "duplicate");
+  assert.equal(rows[49998].firstName, "Mary, Jane");
+  const batch = parseAudienceImport(
+    audienceImportCsv(rows.slice(0, AUDIENCE_IMPORT_BATCH_SIZE)),
+    "csv",
+  );
+  assert.equal(batch.length, 500);
+  assert.equal(batch[0].lastName, 'O"Neil');
+});
+
+test("large-list requests are bounded and committed batches share one audience", async (t) => {
+  const f = setup(t);
+  await assert.rejects(
+    previewAudienceImport(
+      {
+        ...input,
+        text: Array.from({ length: 501 }, (_, i) => `p${i}@example.org`).join(
+          "\n",
+        ),
+      },
+      "user",
+    ),
+    /batches of 500/,
+  );
+  const first = await previewAudienceImport(
+    { ...input, text: "first@example.org" },
+    "user",
+  );
+  const second = await previewAudienceImport(
+    { ...input, text: "second@example.org" },
+    "user",
+  );
+  let created = 0;
+  const create = f.tx.audience.create;
+  f.tx.audience.create = async (args: any) => {
+    created++;
+    return create(args);
+  };
+  const result = await commitAudienceImport(first.id, {}, "user");
+  await commitAudienceImport(second.id, {}, "user", result.audienceId);
+  await commitAudienceImport(second.id, {}, "user", result.audienceId);
+  assert.equal(created, 1);
+  assert.equal(f.memberships.length, 2);
+  assert.equal(f.people.length, 2);
+  assert.ok(f.memberships.every((m) => m.audienceId === result.audienceId));
+  await assert.rejects(
+    commitAudienceImport(second.id, {}, "user", "different-audience"),
+    /different audience/,
+  );
 });
