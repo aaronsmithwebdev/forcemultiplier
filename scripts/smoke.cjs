@@ -21,7 +21,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(base + "/login");
-    await page.getByRole("heading", { name: "Welcome back" }).waitFor();
+    await page.getByRole("heading", { name: "Sign in" }).waitFor();
     await page.screenshot({
       path: path.join(os.tmpdir(), "forcemultiplier-login.png"),
       fullPage: true,
@@ -69,12 +69,12 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       403,
     );
     for (const [route, title] of [
-      ["/connections", "Make the connection."],
-      ["/audiences", "Your audiences."],
-      ["/audiences/new", "Start with the right people."],
+      ["/connections", "Connections"],
+      ["/audiences", "Audiences"],
+      ["/audiences/new", "New audience"],
       ["/templates", "Email templates"],
-      ["/lists", "Lists, all in one place."],
-      ["/activity", "Every pull, accounted for."],
+      ["/lists", "Constant Contact lists"],
+      ["/activity", "Pull history"],
     ]) {
       await page.goto(base + route);
       await page.getByRole("heading", { name: title, exact: true }).waitFor();
@@ -87,6 +87,27 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       );
       console.log("Browser passed:", route);
     }
+    await page.route("**/api/audiences", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Temporary test failure" }),
+      }),
+    );
+    await page.goto(base + "/audiences");
+    await page.getByText("Audiences could not load").waitFor();
+    await page.getByRole("status", { name: "Loading" }).waitFor({
+      state: "hidden",
+    });
+    await page.unroute("**/api/audiences");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await page.getByText("Audiences could not load").waitFor({
+      state: "hidden",
+    });
+    await page.getByRole("status", { name: "Loading" }).waitFor({
+      state: "hidden",
+    });
+    console.log("Browser passed: audience error and retry");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(base + "/connections");
     await page.getByRole("button", { name: "Sign out" }).waitFor();

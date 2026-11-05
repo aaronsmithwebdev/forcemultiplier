@@ -11,7 +11,7 @@ import {
   Search,
   ArrowRight,
 } from "lucide-react";
-import { api, Badge, Empty, Heading, Loading, Notice } from "./common";
+import { api, Badge, Button, Empty, Heading, Loading, Notice } from "./common";
 import { useDate, useTimeZone } from "./time-zone";
 export function Audiences() {
   const date = useDate();
@@ -19,13 +19,23 @@ export function Audiences() {
   const [rows, setRows] = useState<any[] | null>(null),
     [connections, setConnections] = useState<any[]>([]),
     [error, setError] = useState(""),
+    [audiencesFailed, setAudiencesFailed] = useState(false),
     [search, setSearch] = useState("");
+  async function loadAudiences() {
+    setRows(null);
+    setAudiencesFailed(false);
+    setError("");
+    try {
+      setRows(await api("audiences"));
+    } catch (cause) {
+      setAudiencesFailed(true);
+      setError((cause as Error).message);
+    }
+  }
   useEffect(() => {
-    Promise.all([api("audiences"), api("connections")])
-      .then(([a, c]) => {
-        setRows(a);
-        setConnections(c);
-      })
+    void loadAudiences();
+    api("connections")
+      .then(setConnections)
       .catch((e) => setError(e.message));
   }, []);
   const connected = connections.filter((c) => c.connected).length;
@@ -116,7 +126,16 @@ export function Audiences() {
           </div>
         </div>
         {!rows ? (
-          <Loading />
+          audiencesFailed ? (
+            <Empty
+              title="Audiences could not load"
+              description="Try again after the connection is restored."
+            >
+              <Button onClick={() => void loadAudiences()}>Try again</Button>
+            </Empty>
+          ) : (
+            <Loading />
+          )
         ) : !filtered?.length ? (
           <Empty
             title={search ? "No matching audiences" : "No audiences"}
