@@ -62,6 +62,7 @@ import {
   removeManualMember,
   startPull,
   updateAudienceQuery,
+  updateAudienceExclusions,
 } from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
 import { resendStatus } from "@/lib/resend";
@@ -1040,11 +1041,25 @@ async function handle(
             "funraisin",
           ]),
           sourceId: z.string().optional(),
+          exclusionAudienceIds: z
+            .array(z.string().min(1).max(100))
+            .max(100)
+            .default([]),
         })
         .parse(await body(request));
       return json(await createAudience(data), 201);
     }
     if (p[0] === "audiences" && p[1]) {
+      if (p[2] === "exclusions" && p.length === 3 && method === "PUT") {
+        const data = z
+          .object({
+            exclusionAudienceIds: z.array(z.string().min(1).max(100)).max(100),
+          })
+          .parse(await body(request));
+        return json(
+          await updateAudienceExclusions(p[1], data.exclusionAudienceIds),
+        );
+      }
       if (
         p[2] === "manual-members" &&
         p.length === 3 &&

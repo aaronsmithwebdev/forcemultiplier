@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../lib/db";
-import { updateAudienceQuery } from "../lib/audiences";
+import {
+  updateAudienceQuery,
+  updateAudienceExclusions,
+} from "../lib/audiences";
 
 function mockMethod(t: any, target: any, name: string, fn: any) {
   const original = target[name];
@@ -45,5 +48,24 @@ test("editing rejects unsafe SOQL before writing", async (t) => {
   await assert.rejects(
     updateAudienceQuery("audience-one", "SELECT Name FROM Account"),
     /select from Contact/i,
+  );
+});
+
+test("audience exclusions reject self and audiences outside the Salesforce org", async (t) => {
+  mockMethod(t, db.audience, "findUnique", async () => ({
+    id: "one",
+    orgId: "org",
+  }));
+  mockMethod(t, db.audience, "count", async () => 0);
+  mockMethod(t, db.audience, "update", async () => {
+    throw new Error("Unexpected write");
+  });
+  await assert.rejects(
+    updateAudienceExclusions("one", ["one"]),
+    /other than this audience/,
+  );
+  await assert.rejects(
+    updateAudienceExclusions("one", ["other"]),
+    /unavailable in this Salesforce org/,
   );
 });

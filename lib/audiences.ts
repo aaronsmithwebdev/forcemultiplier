@@ -25,6 +25,7 @@ export async function createAudience(input: {
   sourceId?: string;
   query: string;
   fields: string[];
+  exclusionAudienceIds?: string[];
 }) {
   const config = await connection("salesforce");
   if (!config.tokens || !config.externalId)
@@ -32,12 +33,17 @@ export async function createAudience(input: {
   if (input.sourceType === "funraisin") {
     const sync = await funraisinAudienceConnection();
     const filters = parseFunraisinAudience(input.query);
+    await validateAudienceExclusions(
+      sync.orgId,
+      input.exclusionAudienceIds ?? [],
+    );
     return db.audience.create({
       data: {
         name: input.name,
         sourceType: "funraisin",
         query: JSON.stringify(filters),
         orgId: sync.orgId,
+        exclusionAudienceIds: input.exclusionAudienceIds ?? [],
         fields: FUNRAISIN_FIELDS.filter(
           (field) =>
             filters.people === "entrants" || field !== "FunraisinDateOfBirth",
@@ -53,6 +59,10 @@ export async function createAudience(input: {
   }
   validateQuery(query);
   await validatePaths(input.fields);
+  await validateAudienceExclusions(
+    config.externalId,
+    input.exclusionAudienceIds ?? [],
+  );
   return db.audience.create({
     data: {
       ...input,
@@ -61,6 +71,30 @@ export async function createAudience(input: {
       orgId: config.externalId,
       fields: input.fields,
     },
+  });
+}
+async function validateAudienceExclusions(
+  orgId: string,
+  ids: string[],
+  selfId?: string,
+) {
+  if (ids.includes(selfId ?? "") || new Set(ids).size !== ids.length)
+    throw new AppError("Choose distinct audiences other than this audience.");
+  if (!ids.length) return;
+  const found = await db.audience.count({ where: { id: { in: ids }, orgId } });
+  if (found !== ids.length)
+    throw new AppError(
+      "An excluded audience is unavailable in this Salesforce org.",
+      409,
+    );
+}
+export async function updateAudienceExclusions(id: string, ids: string[]) {
+  const audience = await db.audience.findUnique({ where: { id } });
+  if (!audience) throw new AppError("Audience not found.", 404);
+  await validateAudienceExclusions(audience.orgId, ids, id);
+  return db.audience.update({
+    where: { id },
+    data: { exclusionAudienceIds: ids },
   });
 }
 export async function updateAudienceQuery(id: string, query: string) {

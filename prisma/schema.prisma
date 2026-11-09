@@ -55,6 +55,7 @@ model Audience {
   schedule      SyncSchedule?
   manualMembers ManualAudienceMember[]
   manualVersion Int                    @default(0)
+  exclusionAudienceIds String[]         @default([])
 
   @@schema("forcemultiplier")
 }
@@ -118,6 +119,7 @@ model DeliveryRun {
   audience           Audience        @relation(fields: [audienceId], references: [id], onDelete: Cascade)
   issues             DeliveryIssue[]
   sourceRunId        String
+  excludeRunIds      String[]        @default([])
   accountId          String
   listId             String
   listName           String

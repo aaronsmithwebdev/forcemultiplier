@@ -158,6 +158,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   let state: any = {
     id: "delivery",
     sourceRunId: "pull",
+    excludeRunIds: ["excluded-pull"],
     accountId: "account",
     listId: "11111111-1111-4111-8111-111111111111",
     listName: "Members",
@@ -169,7 +170,7 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
     activityProgress: 0,
     batch: null,
     mappings: [],
-    total: 5,
+    total: 6,
     processed: 0,
     submitted: 0,
     skipped: 0,
@@ -207,45 +208,56 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   mockMethod(t, db, "$transaction", async (operations: any) =>
     Array.isArray(operations) ? Promise.all(operations) : operations(db),
   );
-  mockMethod(t, db.audienceMember, "findMany", async () => [
-    {
-      deliveryKey: "003000000000000001",
-      personId: "person-one",
-      salesforceId: "003000000000000001",
-      email: "ada@example.com",
-      normalizedEmail: "ada@example.com",
-      optedOut: false,
-      data: { FirstName: "Ada", LastName: "Lovelace" },
-    },
-    {
-      deliveryKey: "003000000000000002",
-      email: "ada@example.com",
-      normalizedEmail: "ada@example.com",
-      optedOut: false,
-      data: { FirstName: "Different" },
-    },
-    {
-      deliveryKey: "003000000000000003",
-      email: "no@example.com",
-      normalizedEmail: "no@example.com",
-      optedOut: true,
-      data: { FirstName: "No" },
-    },
-    {
-      deliveryKey: "003000000000000004",
-      email: "shared@example.com",
-      normalizedEmail: "shared@example.com",
-      optedOut: false,
-      data: { FirstName: "Shared" },
-    },
-    {
-      deliveryKey: "003000000000000005",
-      email: "shared@example.com",
-      normalizedEmail: "shared@example.com",
-      optedOut: true,
-      data: { FirstName: "Opted Out" },
-    },
-  ]);
+  mockMethod(t, db.audienceMember, "findMany", async ({ where }: any) =>
+    where.runId?.in?.includes("excluded-pull")
+      ? [{ normalizedEmail: "ada@example.com" }]
+      : [
+          {
+            deliveryKey: "003000000000000001",
+            personId: "person-one",
+            salesforceId: "003000000000000001",
+            email: "ada@example.com",
+            normalizedEmail: "ada@example.com",
+            optedOut: false,
+            data: { FirstName: "Ada", LastName: "Lovelace" },
+          },
+          {
+            deliveryKey: "003000000000000002",
+            email: "ada@example.com",
+            normalizedEmail: "ada@example.com",
+            optedOut: false,
+            data: { FirstName: "Different" },
+          },
+          {
+            deliveryKey: "003000000000000003",
+            email: "no@example.com",
+            normalizedEmail: "no@example.com",
+            optedOut: true,
+            data: { FirstName: "No" },
+          },
+          {
+            deliveryKey: "003000000000000004",
+            email: "shared@example.com",
+            normalizedEmail: "shared@example.com",
+            optedOut: false,
+            data: { FirstName: "Shared" },
+          },
+          {
+            deliveryKey: "003000000000000005",
+            email: "shared@example.com",
+            normalizedEmail: "shared@example.com",
+            optedOut: true,
+            data: { FirstName: "Opted Out" },
+          },
+          {
+            deliveryKey: "003000000000000006",
+            email: "keep@example.com",
+            normalizedEmail: "keep@example.com",
+            optedOut: false,
+            data: { FirstName: "Keep" },
+          },
+        ],
+  );
   mockMethod(t, db, "$queryRaw", async (sql: any) =>
     sql.sql.includes('"Person"')
       ? []
@@ -264,6 +276,11 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
             email: "shared@example.com",
             deliveryKey: "003000000000000004",
             optedOut: true,
+          },
+          {
+            email: "keep@example.com",
+            deliveryKey: "003000000000000006",
+            optedOut: false,
           },
         ],
   );
@@ -301,16 +318,15 @@ test("a delivery waits for Constant Contact and commits exclusions once", async 
   assert.equal(waiting.activityId, "22222222-2222-4222-8222-222222222222");
   assert.deepEqual(payload.import_data, [
     {
-      email: "ada@example.com",
-      first_name: "Ada",
-      last_name: "Lovelace",
+      email: "keep@example.com",
+      first_name: "Keep",
     },
   ]);
   const imported = await deliveryStep("delivery");
   assert.equal(imported.status, "reconciling");
-  assert.equal(imported.processed, 5);
+  assert.equal(imported.processed, 6);
   assert.equal(imported.submitted, 1);
-  assert.equal(imported.skipped, 4);
+  assert.equal(imported.skipped, 5);
 });
 
 test("list reconciliation tracks desired contacts and preserves unrelated members", () => {
@@ -346,6 +362,35 @@ test("list reconciliation tracks desired contacts and preserves unrelated member
         contactId: "stale-id",
         seenDeliveryId: "new-delivery",
         desiredDeliveryId: "old-delivery",
+      },
+    ],
+  );
+});
+
+test("list reconciliation removes explicitly excluded contacts already on a list", () => {
+  assert.deepEqual(
+    managedContactRows(
+      [
+        {
+          contact_id: "excluded-id",
+          email_address: { address: "Excluded@Example.com" },
+        },
+        {
+          contact_id: "unrelated-id",
+          email_address: { address: "unrelated@example.com" },
+        },
+      ],
+      new Set(),
+      new Map(),
+      "delivery",
+      new Set(["excluded@example.com"]),
+    ),
+    [
+      {
+        email: "excluded@example.com",
+        contactId: "excluded-id",
+        seenDeliveryId: "delivery",
+        desiredDeliveryId: null,
       },
     ],
   );

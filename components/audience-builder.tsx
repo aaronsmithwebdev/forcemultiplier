@@ -17,6 +17,7 @@ import {
 import { api, Badge, Button, Heading, Notice, valueAt } from "./common";
 import { FieldBrowser } from "./field-browser";
 import { ContactQueryBuilder } from "./query-builder";
+import { AudienceExclusions } from "./audience-exclusions";
 const types = [
   ["funraisin", "Funraisin", "Filter event entrants and donors.", Flag],
   ["soql", "SOQL query", "Write exactly who you need.", Code2],
@@ -49,6 +50,9 @@ export function AudienceBuilder() {
     [search, setSearch] = useState(""),
     [cursor, setCursor] = useState(""),
     [showFields, setShowFields] = useState(false);
+  const [exclusionAudienceIds, setExclusionAudienceIds] = useState<string[]>(
+    [],
+  );
   const updateQuery = useCallback((value: string) => {
     setQuery(value);
     setRecords(null);
@@ -407,6 +411,14 @@ export function AudienceBuilder() {
               ))}
             </div>
           )}
+          <div className="section-title second">
+            <span className="step-number">3</span>
+            <h2>Exclude other audiences</h2>
+          </div>
+          <AudienceExclusions
+            selected={exclusionAudienceIds}
+            onChange={setExclusionAudienceIds}
+          />
           <div className="builder-actions">
             <Button
               variant="secondary"
@@ -442,6 +454,7 @@ export function AudienceBuilder() {
                     sourceId: sourceId || undefined,
                     query,
                     fields,
+                    exclusionAudienceIds,
                   });
                   window.location.assign("/audiences/" + row.id);
                 })

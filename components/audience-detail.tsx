@@ -1,5 +1,6 @@
 "use client";
 import { AudienceImport } from "./audience-import";
+import { AudienceExclusions } from "./audience-exclusions";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -55,6 +56,9 @@ export function AudienceDetail({ id }: { id: string }) {
     [querySaving, setQuerySaving] = useState(false),
     [manualEmail, setManualEmail] = useState(""),
     [manualBusy, setManualBusy] = useState(false);
+  const [editingExclusions, setEditingExclusions] = useState(false);
+  const [exclusionDraft, setExclusionDraft] = useState<string[]>([]);
+  const [exclusionSaving, setExclusionSaving] = useState(false);
   const stop = useRef(false);
   const loadVersion = useRef(0);
   const load = async () => {
@@ -283,6 +287,24 @@ export function AudienceDetail({ id }: { id: string }) {
       setError((e as Error).message);
     } finally {
       setQuerySaving(false);
+    }
+  }
+  async function saveExclusions() {
+    setExclusionSaving(true);
+    setError("");
+    try {
+      await api(`audiences/${id}/exclusions`, "PUT", {
+        exclusionAudienceIds: exclusionDraft,
+      });
+      setEditingExclusions(false);
+      setMessage(
+        "Audience exclusions saved. The next list delivery will use them.",
+      );
+      await load();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setExclusionSaving(false);
     }
   }
   async function changeManualMember(email: string, method: "POST" | "DELETE") {
@@ -679,6 +701,53 @@ export function AudienceDetail({ id }: { id: string }) {
           )
         )}
       </details>
+      <section className="card query-details">
+        <h2>Excluded audiences</h2>
+        {editingExclusions ? (
+          <>
+            <AudienceExclusions
+              selected={exclusionDraft}
+              onChange={setExclusionDraft}
+              orgId={data.orgId}
+              audienceId={id}
+            />
+            <div className="button-row">
+              <Button
+                busy={exclusionSaving}
+                disabled={busy || sending}
+                onClick={saveExclusions}
+              >
+                <Save size={15} /> Save exclusions
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={exclusionSaving}
+                onClick={() => setEditingExclusions(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p>
+              {data.exclusionAudienceIds.length
+                ? `${data.exclusionAudienceIds.length} audience${data.exclusionAudienceIds.length === 1 ? "" : "s"} excluded from Constant Contact list deliveries.`
+                : "No audiences excluded from Constant Contact list deliveries."}
+            </p>
+            <Button
+              variant="secondary"
+              disabled={busy || sending}
+              onClick={() => {
+                setExclusionDraft(data.exclusionAudienceIds);
+                setEditingExclusions(true);
+              }}
+            >
+              <Pencil size={15} /> Edit exclusions
+            </Button>
+          </>
+        )}
+      </section>
       <AudienceImport
         audienceId={id}
         onImported={() => {
@@ -1169,8 +1238,10 @@ export function AudienceDetail({ id }: { id: string }) {
                     excluded. Existing Constant Contact unsubscribe status will
                     be preserved. After the first delivery establishes a safe
                     baseline, contacts previously managed by this audience who
-                    are no longer eligible will be removed from this list. Other
-                    list members will be preserved.
+                    are no longer eligible will be removed from this list.
+                    Contacts in excluded audiences will also be removed, even if
+                    they were already on the list. Other list members will be
+                    preserved.
                   </span>
                 </label>
                 <Button type="submit" busy={sending}>

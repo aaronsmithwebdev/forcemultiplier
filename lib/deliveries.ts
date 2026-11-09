@@ -175,6 +175,18 @@ export function prepareContact(
   return { contact, issue: null };
 }
 
+async function excludedEmails(runIds: string[], emails: string[]) {
+  if (!runIds.length || !emails.length) return new Set<string>();
+  const rows = await db.audienceMember.findMany({
+    where: { runId: { in: runIds }, normalizedEmail: { in: emails } },
+    distinct: ["normalizedEmail"],
+    select: { normalizedEmail: true },
+  });
+  return new Set(
+    rows.flatMap((row) => (row.normalizedEmail ? [row.normalizedEmail] : [])),
+  );
+}
+
 export async function resolveDestination(
   sourceFields: unknown,
   listId: string,
@@ -323,12 +335,43 @@ async function createDelivery(
           data: { managedListId: managedList.id },
         });
   }
+  const audience = await db.audience.findUniqueOrThrow({
+    where: { id: audienceId },
+    select: { orgId: true, exclusionAudienceIds: true },
+  });
+  const ids = audience.exclusionAudienceIds;
+  const exclusions = ids.length
+    ? await db.audience.findMany({
+        where: { id: { in: ids }, orgId: audience.orgId },
+        select: {
+          id: true,
+          runs: {
+            where: { status: "completed" },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: { id: true },
+          },
+        },
+      })
+    : [];
+  if (
+    exclusions.length !== ids.length ||
+    exclusions.some((row) => !row.runs[0])
+  )
+    throw new AppError(
+      "Pull every excluded audience before sending to Constant Contact.",
+      409,
+    );
+  const excludeRunIds = ids.map(
+    (id) => exclusions.find((row) => row.id === id)!.runs[0]!.id,
+  );
   const managedList = await claimManagedList(audienceId, destination);
   try {
     return await db.deliveryRun.create({
       data: {
         audienceId,
         sourceRunId,
+        excludeRunIds,
         accountId: destination.accountId,
         listId: destination.listId,
         listName: destination.listName,
@@ -500,7 +543,7 @@ export async function deliveryStep(id: string) {
         )
       )
     `);
-    const [legacyUnsubscribes, suppressions, duplicateGroups] =
+    const [legacyUnsubscribes, suppressions, duplicateGroups, excluded] =
       await Promise.all([
         db.unsubscribeEvent.findMany({
           where: {
@@ -526,6 +569,7 @@ export async function deliveryStep(id: string) {
             GROUP BY "normalizedEmail"
           `)
           : [],
+        excludedEmails(run.excludeRunIds ?? [], emailCandidates),
       ]);
     const knownUnsubscribes = new Set(
       [...legacyUnsubscribes, ...suppressions, ...personBlocks].map(
@@ -538,6 +582,8 @@ export async function deliveryStep(id: string) {
         ? byEmail.get(member.normalizedEmail)
         : null;
       if (group && member.deliveryKey !== group.deliveryKey)
+        return { contact: null, issue: null };
+      if (member.normalizedEmail && excluded.has(member.normalizedEmail))
         return { contact: null, issue: null };
       return prepareContact(
         { ...member, optedOut: member.optedOut || !!group?.optedOut },
@@ -792,6 +838,7 @@ export function managedContactRows(
   desired: Set<string>,
   managed: Map<string, { desiredDeliveryId: string | null }>,
   deliveryId: string,
+  excluded: Set<string> = new Set(),
 ) {
   return contacts.flatMap((contact) => {
     const email = normalizedEmail(
@@ -801,7 +848,7 @@ export function managedContactRows(
     );
     if (!email || typeof contact.contact_id !== "string") return [];
     const current = managed.get(email);
-    if (!desired.has(email) && !current) return [];
+    if (!desired.has(email) && !current && !excluded.has(email)) return [];
     return [
       {
         email,
@@ -809,7 +856,7 @@ export function managedContactRows(
         seenDeliveryId: deliveryId,
         desiredDeliveryId: desired.has(email)
           ? deliveryId
-          : current!.desiredDeliveryId,
+          : (current?.desiredDeliveryId ?? null),
       },
     ];
   });
@@ -858,8 +905,8 @@ async function reconcileStep(
       run.sourceRunId,
       ...(previousDelivery ? [previousDelivery.sourceRunId] : []),
     ];
-    const [sourceMembers, existingMembers, optedOutMembers] = await Promise.all(
-      [
+    const [sourceMembers, existingMembers, optedOutMembers, excluded] =
+      await Promise.all([
         db.audienceMember.findMany({
           where: {
             runId: { in: sourceRunIds },
@@ -882,8 +929,8 @@ async function reconcileStep(
           distinct: ["normalizedEmail"],
           select: { normalizedEmail: true },
         }),
-      ],
-    );
+        excludedEmails(run.excludeRunIds ?? [], emails),
+      ]);
     const optedOutEmails = new Set(
       optedOutMembers.map((member) => member.normalizedEmail),
     );
@@ -891,7 +938,8 @@ async function reconcileStep(
       sourceMembers.flatMap((member) =>
         member.runId === run.sourceRunId &&
         member.normalizedEmail &&
-        !optedOutEmails.has(member.normalizedEmail)
+        !optedOutEmails.has(member.normalizedEmail) &&
+        !excluded.has(member.normalizedEmail)
           ? [member.normalizedEmail]
           : [],
       ),
@@ -910,7 +958,13 @@ async function reconcileStep(
             email: member.normalizedEmail,
             desiredDeliveryId: previousDelivery.id,
           });
-    const rows = managedContactRows(page.contacts, desired, managed, run.id);
+    const rows = managedContactRows(
+      page.contacts,
+      desired,
+      managed,
+      run.id,
+      excluded,
+    );
     if (rows.length) {
       const values = Prisma.join(
         rows.map(
@@ -968,7 +1022,11 @@ async function reconcileStep(
         : []),
     ]);
     await recordMissingContacts(run);
-    if (!managedList.initializedAt && !previousDelivery)
+    if (
+      !managedList.initializedAt &&
+      !previousDelivery &&
+      !run.excludeRunIds?.length
+    )
       return finishReconciliation(run.id, lease);
     await db.deliveryRun.updateMany({
       where: { id: run.id, leaseUntil: lease },
@@ -1019,6 +1077,13 @@ async function reconcileStep(
 async function recordMissingContacts(
   run: Awaited<ReturnType<typeof db.deliveryRun.findUniqueOrThrow>>,
 ) {
+  const excluded = run.excludeRunIds?.length
+    ? Prisma.sql`AND NOT EXISTS (
+        SELECT 1 FROM "forcemultiplier"."AudienceMember" excluded
+        WHERE excluded."runId" IN (${Prisma.join(run.excludeRunIds)})
+          AND excluded."normalizedEmail" = member."normalizedEmail"
+      )`
+    : Prisma.empty;
   await db.$executeRaw(Prisma.sql`
     INSERT INTO "forcemultiplier"."DeliveryIssue"
       ("deliveryId", "key", "category", "reason", "salesforceId", "name", "email", "detail")
@@ -1038,6 +1103,7 @@ async function recordMissingContacts(
     WHERE member."runId" = ${run.sourceRunId}
       AND member."optedOut" = false
       AND member."normalizedEmail" IS NOT NULL
+      ${excluded}
       AND NOT EXISTS (
         SELECT 1 FROM "forcemultiplier"."AudienceMember" opted_out
         WHERE opted_out."runId" = member."runId"
