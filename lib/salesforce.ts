@@ -118,10 +118,29 @@ export async function sourceQuery(kind: string, id: string) {
       "salesforce",
       `/services/data/${SF_VERSION}/analytics/reports/${id}/describe`,
     );
+    const related: Record<string, ObjectMetadata> = {};
+    for (const cross of data.reportMetadata?.crossFilters ?? []) {
+      const names =
+        cross.relatedEntity === "OCR-Opportunity"
+          ? ["OpportunityContactRole", "Opportunity"]
+          : [cross.relatedEntity];
+      for (const name of names)
+        if (/^[A-Za-z][A-Za-z0-9_]*$/.test(name) && !related[name])
+          related[name] = await describe(name);
+    }
+    const recordTypes = related.Opportunity
+      ? (
+          await sfQuery(
+            "SELECT Id, Name FROM RecordType WHERE SobjectType = 'Opportunity'",
+          )
+        ).records
+      : [];
     return translateReport(
       data,
       await describe("Contact"),
       await describe("Account"),
+      related,
+      recordTypes,
     );
   }
   throw new AppError("Unknown Salesforce source.");
@@ -131,6 +150,8 @@ export function translateReport(
   data: Record<string, any>,
   contact: ObjectMetadata,
   account: ObjectMetadata,
+  related: Record<string, ObjectMetadata> = {},
+  recordTypes: { Id: string; Name: string }[] = [],
 ) {
   const m = data.reportMetadata ?? {};
   const gaps: string[] = [];
@@ -160,8 +181,15 @@ export function translateReport(
     gaps.push(
       "Set Show Me to All Contacts; personal/team scopes are not translated yet.",
     );
-  if (m.crossFilters?.length)
-    gaps.push("Cross-filters need a reviewed SOQL query in this version.");
+  if ((m.crossFilters?.length ?? 0) > 2)
+    gaps.push("Salesforce SOQL supports at most two cross-filter joins.");
+  if (
+    m.crossFilters?.length &&
+    /\b(?:OR|NOT)\b/i.test(m.reportBooleanFilter ?? "")
+  )
+    gaps.push(
+      "Cross-filters cannot use OR or NOT report filter logic in SOQL.",
+    );
   if (m.topRows?.rowLimit || m.userOrHierarchyFilterId || m.division)
     gaps.push(
       "Row limits, hierarchy filters, or divisions require a reviewed query.",
@@ -192,19 +220,12 @@ export function translateReport(
     data.reportTypeMetadata?.categories ?? {},
   ) as any[])
     Object.assign(columns, category.columns ?? {});
-  const filters: string[] = [];
-  for (const f of m.reportFilters ?? []) {
-    const column = columns[f.column];
-    const entity = column?.entityColumnName;
-    let path = "",
-      field: MetadataField | undefined;
-    if (typeof entity === "string" && entity.startsWith("Contact.")) {
-      path = entity.slice(8);
-      field = contact.fields.find((v) => v.name === path);
-    } else if (typeof entity === "string" && entity.startsWith("Account.")) {
-      path = "Account." + entity.slice(8);
-      field = account.fields.find((v) => v.name === entity.slice(8));
-    }
+  function filterClause(
+    f: any,
+    path: string,
+    field: MetadataField | undefined,
+    column: any,
+  ) {
     if (
       !field ||
       field.filterable === false ||
@@ -214,26 +235,44 @@ export function translateReport(
       gaps.push(
         `Cannot resolve filter ${f.column} to an unambiguous supported field.`,
       );
-      continue;
+      return null;
     }
     const raw = String(f.value ?? "");
     if (raw === "" || raw.includes(",")) {
       gaps.push(`Blank or multi-value filter ${f.column} requires review.`);
-      continue;
+      return null;
     }
     let literal: string;
     if (field.type === "boolean") {
       if (!/^(true|false)$/i.test(raw)) {
         gaps.push(`Invalid boolean filter ${f.column}.`);
-        continue;
+        return null;
       }
       literal = raw.toLowerCase();
     } else if (["double", "int", "percent"].includes(field.type)) {
       if (!/^-?\d+(\.\d+)?$/.test(raw)) {
         gaps.push(`Invalid number in ${f.column}.`);
-        continue;
+        return null;
       }
       literal = raw;
+    } else if (field.type === "date") {
+      const months = /^LAST ([1-9]\d*) MONTHS$/i.exec(raw);
+      if (
+        months &&
+        Number.isSafeInteger(Number(months[1])) &&
+        f.operator === "equals"
+      )
+        literal = `LAST_N_MONTHS:${Number(months[1])}`;
+      else if (
+        /^\d{4}-\d{2}-\d{2}$/.test(raw) &&
+        !Number.isNaN(Date.parse(raw)) &&
+        new Date(raw).toISOString().slice(0, 10) === raw
+      )
+        literal = raw;
+      else {
+        gaps.push(`Date filter ${f.column} needs a reviewed query.`);
+        return null;
+      }
     } else if (
       [
         "string",
@@ -251,13 +290,13 @@ export function translateReport(
         );
         if (!choice) {
           gaps.push(`Unknown picklist value in ${f.column}.`);
-          continue;
+          return null;
         }
         literal = quote(choice.name);
       } else literal = quote(raw);
     } else {
       gaps.push(`Filter type ${field.type} needs a reviewed query.`);
-      continue;
+      return null;
     }
     const op: Record<string, string> = {
       equals: "=",
@@ -267,20 +306,111 @@ export function translateReport(
       lessOrEqual: "<=",
       greaterOrEqual: ">=",
     };
-    if (op[f.operator]) filters.push(`${path} ${op[f.operator]} ${literal}`);
-    else if (
+    if (op[f.operator]) return `${path} ${op[f.operator]} ${literal}`;
+    if (
       ["contains", "startsWith"].includes(f.operator) &&
       ["string", "email", "phone", "url"].includes(field.type)
     ) {
       const escaped = raw.replace(/[%_]/g, "\\$&");
-      filters.push(
-        `${path} LIKE ${quote((f.operator === "contains" ? "%" : "") + escaped + "%")}`,
+      return `${path} LIKE ${quote((f.operator === "contains" ? "%" : "") + escaped + "%")}`;
+    }
+    gaps.push(`Unsupported operator ${f.operator} on ${f.column}.`);
+    return null;
+  }
+  const filters: string[] = [];
+  for (const f of m.reportFilters ?? []) {
+    const column = columns[f.column];
+    const entity = column?.entityColumnName;
+    let path = "",
+      field: MetadataField | undefined;
+    if (typeof entity === "string" && entity.startsWith("Contact.")) {
+      path = entity.slice(8);
+      field = contact.fields.find((v) => v.name === path);
+    } else if (typeof entity === "string" && entity.startsWith("Account.")) {
+      path = "Account." + entity.slice(8);
+      field = account.fields.find((v) => v.name === entity.slice(8));
+    }
+    const clause = filterClause(f, path, field, column);
+    if (clause) filters.push(clause);
+  }
+  const crossClauses: string[] = [];
+  for (const cross of m.crossFilters ?? []) {
+    const opportunity = cross.relatedEntity === "OCR-Opportunity";
+    const child =
+      related[opportunity ? "OpportunityContactRole" : cross.relatedEntity];
+    const criteriaObject = opportunity ? related.Opportunity : child;
+    const join = child?.fields.find(
+      (field) => field.name === cross.relatedEntityJoinField,
+    );
+    if (
+      cross.primaryEntityField !== "CONTACT_ID" ||
+      typeof cross.includesObject !== "boolean" ||
+      !child ||
+      child.name === "Contact" ||
+      !criteriaObject ||
+      join?.referenceTo?.length !== 1 ||
+      join.referenceTo[0] !== "Contact" ||
+      (opportunity &&
+        !child.fields.some(
+          (field) =>
+            field.relationshipName === "Opportunity" &&
+            field.referenceTo?.length === 1 &&
+            field.referenceTo[0] === "Opportunity",
+        ))
+    ) {
+      gaps.push(
+        `Cross-filter ${cross.relatedEntity} has an unsupported relationship.`,
       );
-    } else gaps.push(`Unsupported operator ${f.operator} on ${f.column}.`);
+      continue;
+    }
+    const criteria: string[] = [];
+    for (const f of cross.criteria ?? []) {
+      if (
+        opportunity &&
+        f.column === "RecordTypeId" &&
+        f.operator === "equals"
+      ) {
+        const names = String(f.value ?? "")
+          .split(",")
+          .map((v) => v.trim());
+        const ids = names.map((name) =>
+          recordTypes.filter((type) => type.Name === name && sfId(type.Id)),
+        );
+        if (
+          names.some((name) => !name) ||
+          ids.some((matches) => matches.length !== 1)
+        ) {
+          gaps.push(
+            "Opportunity record types in the cross-filter could not be resolved.",
+          );
+          continue;
+        }
+        criteria.push(
+          `Opportunity.RecordTypeId IN (${ids.map((matches) => quote(matches[0].Id)).join(", ")})`,
+        );
+        continue;
+      }
+      const name = String(f.column ?? "").replace(
+        new RegExp(`^${criteriaObject.name}\\.`),
+        "",
+      );
+      const field = criteriaObject.fields.find((item) => item.name === name);
+      const path = `${opportunity ? "Opportunity." : ""}${name}`;
+      const clause = filterClause(f, path, field, columns[f.column]);
+      if (clause) criteria.push(clause);
+    }
+    if (criteria.length !== (cross.criteria ?? []).length) continue;
+    crossClauses.push(
+      `Id ${cross.includesObject ? "IN" : "NOT IN"} (SELECT ${join.name} FROM ${child.name}${criteria.length ? " WHERE " + criteria.map((clause) => `(${clause})`).join(" AND ") : ""})`,
+    );
   }
   if (gaps.length) return { query: null, notes: gaps };
   const where = combineFilterLogic(m.reportBooleanFilter, filters);
-  const query = `SELECT Id FROM Contact${where ? " WHERE " + where : ""}`;
+  const clauses = [
+    where,
+    ...crossClauses.map((clause) => `(${clause})`),
+  ].filter(Boolean);
+  const query = `SELECT Id FROM Contact${clauses.length ? " WHERE " + clauses.join(" AND ") : ""}`;
   validateQuery(query);
   return {
     query,

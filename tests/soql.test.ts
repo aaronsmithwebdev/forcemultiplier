@@ -124,6 +124,130 @@ test("translates a Contact-rooted custom report type with optional joins", () =>
     "SELECT Id FROM Contact WHERE (MailingCountry = 'Australia')",
   );
 });
+test("translates related-record cross filters and relative date criteria", () => {
+  const r = report();
+  r.reportMetadata.reportFilters[0] = {
+    column: "LAST_DONATION",
+    operator: "equals",
+    value: "LAST 24 MONTHS",
+  };
+  Object.assign(r.reportTypeMetadata.categories.contacts.columns, {
+    LAST_DONATION: { entityColumnName: "Contact.Last_Donation_Date__c" },
+  });
+  const datedContact = {
+    ...contact,
+    fields: [
+      ...contact.fields,
+      {
+        name: "Last_Donation_Date__c",
+        label: "Last Donation Date",
+        type: "date",
+        filterable: true,
+      },
+    ],
+  };
+  const cross = {
+    primaryEntityField: "CONTACT_ID",
+    relatedEntity: "OCR-Opportunity",
+    relatedEntityJoinField: "ContactId",
+    includesObject: false,
+    criteria: [
+      {
+        column: "RecordTypeId",
+        operator: "equals",
+        value: "Major Donor,Trust",
+      },
+      { column: "CloseDate", operator: "greaterThan", value: "2025-07-01" },
+    ],
+  };
+  Object.assign(r.reportMetadata, { crossFilters: [cross] });
+  const related: Record<string, ObjectMetadata> = {
+    OpportunityContactRole: {
+      name: "OpportunityContactRole",
+      label: "Opportunity Contact Role",
+      fields: [
+        {
+          name: "ContactId",
+          label: "Contact",
+          type: "reference",
+          referenceTo: ["Contact"],
+        },
+        {
+          name: "OpportunityId",
+          label: "Opportunity",
+          type: "reference",
+          referenceTo: ["Opportunity"],
+          relationshipName: "Opportunity",
+        },
+      ],
+      childRelationships: [],
+    },
+    Opportunity: {
+      name: "Opportunity",
+      label: "Opportunity",
+      fields: [
+        { name: "RecordTypeId", label: "Record Type", type: "reference" },
+        { name: "CloseDate", label: "Close Date", type: "date" },
+      ],
+      childRelationships: [],
+    },
+  };
+  const recordTypes = [
+    { Id: "012000000000001", Name: "Major Donor" },
+    { Id: "012000000000002", Name: "Trust" },
+  ];
+  assert.equal(
+    translateReport(r, datedContact, account, related, recordTypes).query,
+    "SELECT Id FROM Contact WHERE (Last_Donation_Date__c = LAST_N_MONTHS:24) AND (Id NOT IN (SELECT ContactId FROM OpportunityContactRole WHERE (Opportunity.RecordTypeId IN ('012000000000001', '012000000000002')) AND (Opportunity.CloseDate > 2025-07-01)))",
+  );
+  assert.equal(translateReport(r, datedContact, account, related).query, null);
+  cross.includesObject = true;
+  cross.criteria = [];
+  assert.equal(
+    translateReport(r, datedContact, account, related).query,
+    "SELECT Id FROM Contact WHERE (Last_Donation_Date__c = LAST_N_MONTHS:24) AND (Id IN (SELECT ContactId FROM OpportunityContactRole))",
+  );
+});
+test("translates direct child cross filters on the same related record", () => {
+  const r = report();
+  Object.assign(r.reportMetadata, {
+    crossFilters: [
+      {
+        primaryEntityField: "CONTACT_ID",
+        relatedEntity: "CampaignMember",
+        relatedEntityJoinField: "ContactId",
+        includesObject: true,
+        criteria: [
+          { column: "Status", operator: "equals", value: "Sent" },
+          { column: "HasResponded", operator: "equals", value: "false" },
+        ],
+      },
+    ],
+  });
+  const related = {
+    CampaignMember: {
+      name: "CampaignMember",
+      label: "Campaign Member",
+      fields: [
+        {
+          name: "ContactId",
+          label: "Contact",
+          type: "reference",
+          referenceTo: ["Contact"],
+        },
+        { name: "Status", label: "Status", type: "string" },
+        { name: "HasResponded", label: "Responded", type: "boolean" },
+      ],
+      childRelationships: [],
+    },
+  };
+  assert.equal(
+    translateReport(r, contact, account, related).query,
+    "SELECT Id FROM Contact WHERE (MailingCountry = 'Australia') AND (Id IN (SELECT ContactId FROM CampaignMember WHERE (Status = 'Sent') AND (HasResponded = false)))",
+  );
+  Object.assign(r.reportMetadata, { reportBooleanFilter: "1 OR 1" });
+  assert.equal(translateReport(r, contact, account, related).query, null);
+});
 test("rejects custom report types with another root or required child joins", () => {
   for (const objects of [
     [{ apiName: "Account", joinType: "ROOT" }],
