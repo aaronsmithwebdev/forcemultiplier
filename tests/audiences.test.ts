@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../lib/db";
+import { encrypt } from "../lib/security";
 import {
   updateAudienceQuery,
+  updateAudienceFields,
   updateAudienceExclusions,
 } from "../lib/audiences";
 
@@ -49,6 +51,54 @@ test("editing rejects unsafe SOQL before writing", async (t) => {
     updateAudienceQuery("audience-one", "SELECT Name FROM Account"),
     /select from Contact/i,
   );
+});
+
+test("editing Salesforce fields preserves the source and validates the selection", async (t) => {
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.APP_ENCRYPTION_KEY;
+    else process.env.APP_ENCRYPTION_KEY = previousKey;
+  });
+  const audience = {
+    id: "audience-one",
+    orgId: "org-one",
+    sourceType: "report",
+    sourceId: "00O000000000001",
+    query: "SELECT Id FROM Contact",
+    fields: [],
+  };
+  mockMethod(t, db.audience, "findUnique", async () => audience);
+  mockMethod(t, db.connection, "findUnique", async () => ({
+    provider: "salesforce",
+    instanceUrl: "https://example.my.salesforce.com",
+    externalId: "org-one",
+    version: 1,
+    tokens: encrypt(
+      JSON.stringify({ accessToken: "test", refreshToken: "test" }),
+    ),
+    expiresAt: new Date(Date.now() + 3_600_000),
+  }));
+  mockMethod(t, globalThis, "fetch", async () =>
+    Response.json({
+      name: "Contact",
+      fields: [{ name: "Donor_Type__c", type: "string" }],
+    }),
+  );
+  let saved: any;
+  mockMethod(t, db.audience, "update", async ({ data }: any) => {
+    saved = data;
+    return { ...audience, ...data };
+  });
+  const updated = await updateAudienceFields(audience.id, ["Donor_Type__c"]);
+  assert.deepEqual(updated.fields, ["Donor_Type__c"]);
+  assert.deepEqual(saved, { fields: ["Donor_Type__c"] });
+  saved = undefined;
+  await assert.rejects(
+    updateAudienceFields(audience.id, ["Unknown__c"]),
+    /unavailable/,
+  );
+  assert.equal(saved, undefined);
 });
 
 test("audience exclusions reject self and audiences outside the Salesforce org", async (t) => {

@@ -1,6 +1,7 @@
 "use client";
 import { AudienceImport } from "./audience-import";
 import { AudienceExclusions } from "./audience-exclusions";
+import { FieldBrowser } from "./field-browser";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -57,6 +58,9 @@ export function AudienceDetail({ id }: { id: string }) {
     [manualEmail, setManualEmail] = useState(""),
     [manualBusy, setManualBusy] = useState(false);
   const [editingExclusions, setEditingExclusions] = useState(false);
+  const [editingFields, setEditingFields] = useState(false);
+  const [fieldsDraft, setFieldsDraft] = useState<string[]>([]);
+  const [fieldsSaving, setFieldsSaving] = useState(false);
   const [exclusionDraft, setExclusionDraft] = useState<string[]>([]);
   const [exclusionSaving, setExclusionSaving] = useState(false);
   const stop = useRef(false);
@@ -167,7 +171,10 @@ export function AudienceDetail({ id }: { id: string }) {
               .toLowerCase();
           const suggested = new Set<string>();
           return Object.fromEntries(
-            data.fields.map((source: string) => {
+            (mode === "send"
+              ? data.completeRun?.fields || []
+              : data.fields
+            ).map((source: string) => {
               const sourceName = source.split(".").at(-1)!;
               const match = fields.find(
                 (field: any) =>
@@ -237,7 +244,9 @@ export function AudienceDetail({ id }: { id: string }) {
         listId: selectedListId,
         permissionConfirmed: true,
         mappings: Object.entries(fieldMappings)
-          .filter(([, targetId]) => targetId)
+          .filter(
+            ([source, targetId]) => targetId && data.fields.includes(source),
+          )
           .map(([source, targetId]) => ({ source, targetId })),
         cadence,
         intervalHours: cadence === "hours" ? intervalHours : null,
@@ -307,6 +316,24 @@ export function AudienceDetail({ id }: { id: string }) {
       setExclusionSaving(false);
     }
   }
+  async function saveFields() {
+    setFieldsSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`audiences/${id}/fields`, "PUT", { fields: fieldsDraft });
+      setEditingFields(false);
+      setFieldMappings({});
+      setMessage(
+        "Fields saved. Start a new pull to populate them, then map them when sending to Constant Contact.",
+      );
+      await load();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setFieldsSaving(false);
+    }
+  }
   async function changeManualMember(email: string, method: "POST" | "DELETE") {
     setManualBusy(true);
     setError("");
@@ -342,6 +369,8 @@ export function AudienceDetail({ id }: { id: string }) {
   const manualChangesPending =
     data.manualVersion !== (data.completeRun?.manualVersion ?? 0);
   const schedule = data.schedule;
+  const mappingFields =
+    dialog === "send" ? data.completeRun?.fields || [] : data.fields;
   const weekdays = [
     "Sunday",
     "Monday",
@@ -688,11 +717,53 @@ export function AudienceDetail({ id }: { id: string }) {
               )}
           </>
         )}
-        <div className="selected-fields">
-          {data.fields.map((f: string) => (
-            <Badge key={f}>{f}</Badge>
-          ))}
-        </div>
+        {editingFields ? (
+          <>
+            <FieldBrowser selected={fieldsDraft} onChange={setFieldsDraft} />
+            <div className="button-row">
+              <Button
+                busy={fieldsSaving}
+                disabled={busy || sending}
+                onClick={saveFields}
+              >
+                <Save size={15} /> Save fields
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={fieldsSaving}
+                onClick={() => setEditingFields(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="selected-fields">
+              {data.fields.map((f: string) => (
+                <Badge key={f}>{f}</Badge>
+              ))}
+            </div>
+            {!["funraisin", "import"].includes(data.sourceType) && (
+              <Button
+                variant="secondary"
+                disabled={busy || sending}
+                onClick={() => {
+                  setFieldsDraft([...data.fields]);
+                  setEditingFields(true);
+                }}
+              >
+                <Pencil size={15} /> Edit fields
+              </Button>
+            )}
+          </>
+        )}
+        {!["funraisin", "import"].includes(data.sourceType) && (
+          <p className="muted">
+            Start a new pull after changing fields. Map new fields when sending
+            to Constant Contact.
+          </p>
+        )}
         {data.sourceType === "funraisin" ? (
           <p className="muted">
             Each pull uses these filters against the latest completed Funraisin
@@ -866,7 +937,7 @@ export function AudienceDetail({ id }: { id: string }) {
                     <th>Contact</th>
                     <th>Email</th>
                     <th>Consent</th>
-                    {data.fields.map((f: string) => (
+                    {(data.completeRun?.fields || []).map((f: string) => (
                       <th key={f}>{f}</th>
                     ))}
                   </tr>
@@ -895,7 +966,7 @@ export function AudienceDetail({ id }: { id: string }) {
                               : "Local · consent checks apply"}
                         </Badge>
                       </td>
-                      {data.fields.map((f: string) => (
+                      {(data.completeRun?.fields || []).map((f: string) => (
                         <td key={f}>{String(valueAt(m.data, f) ?? "—")}</td>
                       ))}
                     </tr>
@@ -1080,7 +1151,10 @@ export function AudienceDetail({ id }: { id: string }) {
                       undefined,
                       selectedListId,
                       Object.entries(fieldMappings)
-                        .filter(([, targetId]) => targetId)
+                        .filter(
+                          ([source, targetId]) =>
+                            targetId && mappingFields.includes(source),
+                        )
                         .map(([source, targetId]) => ({ source, targetId })),
                     );
                 }}
@@ -1125,7 +1199,7 @@ export function AudienceDetail({ id }: { id: string }) {
                     </p>
                   )}
                 </div>
-                {data.fields.length > 0 && (
+                {mappingFields.length > 0 && (
                   <div className="field-mapping">
                     <div>
                       <label>Custom field mapping</label>
@@ -1134,10 +1208,13 @@ export function AudienceDetail({ id }: { id: string }) {
                         Blank values will not overwrite Constant Contact data.
                       </p>
                     </div>
-                    {data.fields.map((source: string) => {
+                    {mappingFields.map((source: string) => {
                       const selectedElsewhere = new Set(
                         Object.entries(fieldMappings)
-                          .filter(([key]) => key !== source)
+                          .filter(
+                            ([key]) =>
+                              key !== source && mappingFields.includes(key),
+                          )
                           .map(([, target]) => target),
                       );
                       return (

@@ -63,6 +63,7 @@ import {
   removeManualMember,
   startPull,
   updateAudienceQuery,
+  updateAudienceFields,
   updateAudienceExclusions,
 } from "@/lib/audiences";
 import { deliveryStep, startDelivery } from "@/lib/deliveries";
@@ -1068,6 +1069,12 @@ async function handle(
       return json(await createAudience(data), 201);
     }
     if (p[0] === "audiences" && p[1]) {
+      if (p[2] === "fields" && p.length === 3 && method === "PUT") {
+        const { fields } = z
+          .object({ fields: z.array(z.string().max(200)).max(30) })
+          .parse(await body(request));
+        return json(await updateAudienceFields(p[1], fields));
+      }
       if (p[2] === "exclusions" && p.length === 3 && method === "PUT") {
         const data = z
           .object({

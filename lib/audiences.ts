@@ -120,6 +120,25 @@ export async function updateAudienceQuery(id: string, query: string) {
     data: { query, sourceType: "soql", sourceId: null },
   });
 }
+export async function updateAudienceFields(id: string, fields: string[]) {
+  const audience = await db.audience.findUnique({ where: { id } });
+  if (!audience) throw new AppError("Audience not found.", 404);
+  if (["funraisin", "import"].includes(audience.sourceType))
+    throw new AppError(
+      "Only Salesforce audiences support editable fields.",
+      409,
+    );
+  const config = await connection("salesforce");
+  if (!config.tokens || config.externalId !== audience.orgId)
+    throw new AppError(
+      "Reconnect the Salesforce org that owns this audience.",
+      409,
+    );
+  if (new Set(fields).size !== fields.length)
+    throw new AppError("Choose each field only once.");
+  await validatePaths(fields);
+  return db.audience.update({ where: { id }, data: { fields } });
+}
 export async function addManualMember(
   id: string,
   email: string,
