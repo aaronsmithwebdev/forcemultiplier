@@ -1,6 +1,7 @@
 import { db } from "../lib/db";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
+import { encrypt } from "../lib/security";
 import {
   funraisinContactId,
   funraisinId,
@@ -383,6 +384,52 @@ function syncSetup(t: TestContext, overrides: Record<string, unknown> = {}) {
   });
   return { sync, mock, queries, eventQueries, requests };
 }
+
+test("participant sync keeps the fundraising email when its Contact ID is unavailable", async (t) => {
+  const { sync, mock, queries } = syncSetup(t, {
+    mode: "full",
+    phase: "participants",
+    scanUntil: new Date(),
+    scanId: "scan-1",
+  });
+  process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
+  mock(db.connection, "findUnique", async () => ({
+    externalId: "org-1",
+    instanceUrl: "https://example.my.salesforce.com",
+    tokens: encrypt(
+      JSON.stringify({ accessToken: "test", refreshToken: "test" }),
+    ),
+    version: 1,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  }));
+  mock(globalThis, "fetch", async (url: URL) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("/participants"))
+      return Response.json({
+        total_records: 1,
+        data: [
+          {
+            member_id: "7",
+            crm_member_id: "003ABCDEFGHIJKL",
+            m_email: "sam@example.org",
+          },
+        ],
+      });
+    if (path.includes("/query"))
+      return Response.json({ done: true, totalSize: 0, records: [] });
+    throw new Error("Stop after participants");
+  });
+  await assert.rejects(
+    runFunraisinSyncStep(),
+    /participantsevents could not be reached/,
+  );
+  assert.equal(sync.phase, "registrations");
+  const insert = queries.find((sql) =>
+    /INSERT INTO.*FunraisinParticipant/.test(sql.sql),
+  );
+  assert.ok(insert);
+  assert.ok(insert.values.includes("sam@example.org"));
+});
 
 test("daily event scope uses the workspace year and preserves older data", async (t) => {
   const { sync, eventQueries, queries, mock } = syncSetup(t, {

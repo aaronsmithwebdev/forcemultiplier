@@ -57,6 +57,7 @@ function setup(t: TestContext) {
     lastCompletedAt: new Date(),
     scanUntil: null,
     error: null,
+    offset: 0,
     updatedAt: new Date("2026-10-19T00:00:00Z"),
   };
   mock(t, db.connection, "findUnique", async () => ({
@@ -105,6 +106,7 @@ const row = {
   username: "samwalker",
   eventKey: "autumn-walk",
   dateOfBirth: new Date("1990-02-28"),
+  sourceEmail: "sam@example.org",
 };
 
 test("Funraisin filters reject unsafe IDs, fractional counts and inverted ranges", () => {
@@ -214,13 +216,16 @@ test("pagination uses a lookahead and rejects sync changes before publishing", a
   assert.equal(page.done, false);
   assert.equal(page.records.length, 1);
   assert.equal(JSON.parse(page.nextRecordsUrl!).after, row.Id);
+  const version = (await funraisinAudienceConnection()).version;
   sync.updatedAt = new Date("2026-10-19T01:00:00Z");
+  assert.equal((await funraisinAudienceConnection()).version, version);
+  sync.offset = 1000;
   await assert.rejects(
     funraisinAudiencePage(filters, page.nextRecordsUrl!),
     /changed during this pull/,
   );
   mock(t, db, "$queryRaw", async () => {
-    sync.updatedAt = new Date("2026-10-19T02:00:00Z");
+    sync.offset = 2000;
     return [];
   });
   await assert.rejects(
@@ -229,21 +234,21 @@ test("pagination uses a lookahead and rejects sync changes before publishing", a
   );
 });
 
-test("incomplete syncs and a different org cannot supply audiences", async (t) => {
+test("an initial sync and a different org cannot supply audiences", async (t) => {
   const sync = setup(t);
-  sync.error = "Sync failed" as any;
+  sync.lastCompletedAt = null as any;
   await assert.rejects(
     funraisinAudiencePage(filters),
-    /successful Funraisin sync/,
+    /initial Funraisin sync/,
   );
-  sync.error = null;
+  sync.lastCompletedAt = new Date();
   await assert.rejects(
     funraisinAudiencePage(filters, null, 25, "other-org"),
     /linked to the Funraisin sync/,
   );
 });
 
-test("event browsing allows incomplete syncs but still requires the linked Salesforce org", async (t) => {
+test("audiences use a previous completed sync after a newer attempt fails", async (t) => {
   const sync = setup(t);
   for (const state of [
     { lastCompletedAt: null, scanUntil: new Date(), error: null },
@@ -255,16 +260,46 @@ test("event browsing allows incomplete syncs but still requires the linked Sales
       requireCompletedSync: false,
     });
     assert.equal(config.orgId, "org-1");
-    await assert.rejects(
-      funraisinAudienceConnection(),
-      /successful Funraisin sync/,
-    );
+    if (state.lastCompletedAt)
+      assert.equal((await funraisinAudienceConnection()).orgId, "org-1");
+    else
+      await assert.rejects(
+        funraisinAudienceConnection(),
+        /initial Funraisin sync/,
+      );
   }
   sync.orgId = "other-org";
   await assert.rejects(
     funraisinAudienceConnection(undefined, { requireCompletedSync: false }),
     /linked to the Funraisin sync/,
   );
+});
+
+test("a missing Salesforce Contact stays in the stored audience but cannot be sent", async (t) => {
+  const sync = setup(t);
+  Object.assign(sync, { scanUntil: new Date(), error: "Newer sync failed" });
+  mock(t, db, "$queryRaw", async () => [
+    { ...row, sourceEmail: "fundraising@example.org" },
+  ]);
+  mock(t, db.person, "findMany", async () => [
+    {
+      id: row.Id,
+      orgId: "org-1",
+      salesforceId: id,
+      email: "crm@example.org",
+      firstName: "Sam",
+      lastName: null,
+      optedOut: false,
+      unavailable: false,
+    },
+  ]);
+  mock(t, globalThis, "fetch", async () =>
+    Response.json({ done: true, totalSize: 0, records: [] }),
+  );
+  const page = await funraisinAudiencePage(filters);
+  assert.equal(page.totalSize, 1);
+  assert.equal(page.records[0].Email, "fundraising@example.org");
+  assert.equal(page.records[0].HasOptedOutOfEmail, true);
 });
 
 test("creating and starting a Funraisin audience preserves filters and fields", async (t) => {
@@ -362,7 +397,9 @@ test("unchecking paid entrants includes registrations without status filters", a
 test("Funraisin audiences retain local entrants without Salesforce Contact IDs", async (t) => {
   setup(t);
   const localId = "local-entrant";
-  mock(t, db, "$queryRaw", async () => [{ ...row, Id: localId }]);
+  mock(t, db, "$queryRaw", async () => [
+    { ...row, Id: localId, sourceEmail: "fundraising@example.org" },
+  ]);
   mock(t, db.person, "findMany", async () => [
     {
       id: localId,
@@ -381,7 +418,7 @@ test("Funraisin audiences retain local entrants without Salesforce Contact IDs",
   const page = await funraisinAudiencePage(filters);
   assert.equal(page.records[0].PersonId, localId);
   assert.equal(page.records[0].Id, null);
-  assert.equal(page.records[0].Email, "local@example.org");
+  assert.equal(page.records[0].Email, "fundraising@example.org");
   assert.equal(page.totalSize, 1);
   assert.equal(page.records[0].FunraisinEventName, "Walk");
 });

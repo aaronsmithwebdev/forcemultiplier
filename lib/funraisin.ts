@@ -403,6 +403,7 @@ async function savePage(
         linkedIds.map((Id) => ({ Id })),
         [],
         sync.orgId!,
+        true,
       )
     : [];
   if (identityPhase)

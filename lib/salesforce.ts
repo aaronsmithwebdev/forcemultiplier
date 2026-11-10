@@ -423,6 +423,7 @@ export async function enrich(
   records: Record<string, any>[],
   fields: string[],
   orgId?: string,
+  allowMissing = false,
 ) {
   const ids = [...new Set(records.map((r) => r.Id))];
   if (ids.some((id) => typeof id !== "string" || !sfId(id)))
@@ -461,8 +462,8 @@ export async function enrich(
   }
   // A record disappearing between queries must not produce an apparently complete snapshot.
   if (
-    output.length !== ids.length ||
-    new Set(output.map((r) => r.Id)).size !== ids.length ||
+    (!allowMissing && output.length !== ids.length) ||
+    new Set(output.map((r) => r.Id)).size !== output.length ||
     output.some((r) => !ids.includes(r.Id))
   )
     throw new AppError(

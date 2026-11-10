@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db";
 import { AppError } from "./errors";
+import { normalizedEmail } from "./email";
 import { connection } from "./providers";
 import { funraisinFundraisingUrl } from "./funraisin";
 
@@ -50,17 +51,22 @@ export async function funraisinAudienceConnection(
       "Connect the Salesforce org linked to the Funraisin sync.",
       409,
     );
-  if (
-    requireCompletedSync &&
-    (!sync.lastCompletedAt || sync.scanUntil || sync.error)
-  )
+  if (requireCompletedSync && !sync.lastCompletedAt)
     throw new AppError(
-      "Wait for a successful Funraisin sync to finish before pulling an audience.",
+      "Complete an initial Funraisin sync before pulling an audience.",
       409,
     );
   return {
     orgId: sync.orgId,
-    version: sync.updatedAt.toISOString(),
+    version: JSON.stringify([
+      sync.lastCompletedAt,
+      sync.scanUntil,
+      sync.scanId,
+      sync.mode,
+      sync.phase,
+      sync.offset,
+      sync.eventIndex,
+    ]),
     baseUrl: sync.baseUrl,
   };
 }
@@ -119,6 +125,7 @@ export async function funraisinAudiencePage(
       username: string | null;
       eventKey: string | null;
       dateOfBirth: Date | null;
+      sourceEmail: string | null;
     }[]
   >(Prisma.sql`
     WITH source AS (${source}), numbered AS (SELECT *, COUNT(*) OVER () AS total FROM source),
@@ -129,10 +136,11 @@ export async function funraisinAudiencePage(
     )
     SELECT s."personId" AS "Id", s.total,
       stats.count, stats.amount::text, latest."donatedAt", latest.target, entrant."dateOfBirth",
+      ${filters.people === "entrants" ? Prisma.sql`entrant.email` : Prisma.sql`latest.email`} AS "sourceEmail",
       ${filters.eventId ? Prisma.sql`(SELECT name FROM "forcemultiplier"."FunraisinEvent" WHERE id = ${filters.eventId})` : filters.people === "donors" ? Prisma.sql`latest.event` : Prisma.sql`entrant.name`} AS event, entrant.username, entrant."eventKey"
     FROM selected s
     LEFT JOIN LATERAL (
-      SELECT p.username, p."dateOfBirth", e."eventKey", e.name
+      SELECT p.username, p."dateOfBirth", p.email, e."eventKey", e.name
       FROM "forcemultiplier"."FunraisinRegistration" r
       JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = r."memberId"
       JOIN "forcemultiplier"."FunraisinEvent" e ON e.id = r."eventId"
@@ -148,7 +156,7 @@ export async function funraisinAudiencePage(
         AND d.amount > COALESCE(d."refundAmount", 0) ${eventFilter}
     ) stats ON TRUE
     LEFT JOIN LATERAL (
-      SELECT d."donatedAt", COALESCE(p.name, t.name, e.name) AS target, e.name AS event
+      SELECT d."donatedAt", d.email, COALESCE(p.name, t.name, e.name) AS target, e.name AS event
       FROM "forcemultiplier"."FunraisinDonation" d
       LEFT JOIN "forcemultiplier"."FunraisinParticipant" p ON p."memberId" = d."memberId"
       LEFT JOIN "forcemultiplier"."FunraisinTeam" t ON t."teamId" = d."teamId" AND t."eventId" = d."eventId"
@@ -173,6 +181,7 @@ export async function funraisinAudiencePage(
   const byId = new Map(current.map((p) => [p.id, p]));
   const records = rows.map((row) => ({
     ...personRecord(byId.get(row.Id)!),
+    Email: normalizedEmail(row.sourceEmail) ?? byId.get(row.Id)!.email,
     FunraisinEventName: row.event ?? "",
     FunraisinUsername: row.username ?? "",
     FunraisinEventKey: row.eventKey ?? "",

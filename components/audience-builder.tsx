@@ -85,7 +85,7 @@ export function AudienceBuilder() {
         ? JSON.stringify({
             type: "funraisin",
             people: "entrants",
-            paidOnly: true,
+            paidOnly: false,
             minDonations: 1,
           })
         : ["soql", "builder"].includes(value)

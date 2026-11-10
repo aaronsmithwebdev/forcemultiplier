@@ -241,16 +241,23 @@ export async function findSalesforceEmails(emails: string[], orgId: string) {
 export async function refreshPeople(people: Person[], orgId: string) {
   const linked = people.filter((p) => p.salesforceId);
   if (!linked.length) return people;
-  // A deleted or inaccessible Contact blocks publication rather than becoming local.
   const records = await enrich(
     linked.map((p) => ({ Id: p.salesforceId })),
     [],
     orgId,
+    true,
   );
   const updated = await saveSalesforcePeople(orgId, records);
   await applySalesforceExclusions(orgId, updated);
+  const visible = new Set(records.map((r) => r.Id));
   const byId = new Map(updated.map((p) => [p.id, p]));
-  return people.map((p) => byId.get(p.id) || p);
+  return people.map(
+    (p) =>
+      byId.get(p.id) ||
+      (p.salesforceId && !visible.has(p.salesforceId)
+        ? { ...p, optedOut: true, unavailable: true }
+        : p),
+  );
 }
 
 export function personRecord(person: Person) {
