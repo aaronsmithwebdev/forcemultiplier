@@ -483,7 +483,7 @@ export function CampaignRecipients({
               }}
             />
             <AudiencePicker
-              title="Exclude audiences"
+              title="Exclude audiences by email address"
               optional
               audiences={review.audiences}
               selected={excluded}

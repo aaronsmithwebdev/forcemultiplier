@@ -107,6 +107,8 @@ test("preview candidates use the production audience precedence and all exclusio
   ])
     assert.ok(query.values.includes(value));
   assert.match(query.sql, /array_position/);
+  assert.match(query.sql, /GROUP BY m\."normalizedEmail"/);
+  assert.match(query.sql, /x\."normalizedEmail" = i\.email/);
   assert.match(query.sql, /BOOL_AND\(m\."fieldExcluded"\)/);
   assert.match(query.sql, /ARRAY_AGG\(m\.name ORDER BY m\."fieldExcluded"/);
   assert.match(query.sql, /ARRAY_AGG\(m\.data ORDER BY m\."fieldExcluded"/);

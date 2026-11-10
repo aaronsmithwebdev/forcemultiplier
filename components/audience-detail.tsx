@@ -732,7 +732,7 @@ export function AudienceDetail({ id }: { id: string }) {
           <>
             <p>
               {data.exclusionAudienceIds.length
-                ? `${data.exclusionAudienceIds.length} audience${data.exclusionAudienceIds.length === 1 ? "" : "s"} excluded from Constant Contact list deliveries.`
+                ? `${data.exclusionAudienceIds.length} audience${data.exclusionAudienceIds.length === 1 ? "" : "s"} excluded by email address from Constant Contact list deliveries.`
                 : "No audiences excluded from Constant Contact list deliveries."}
             </p>
             <Button

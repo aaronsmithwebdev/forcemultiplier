@@ -154,7 +154,7 @@ test("delivery issues explain local exclusions and provider row errors", () => {
   );
 });
 
-test("a delivery waits for Constant Contact and commits exclusions once", async (t) => {
+test("a delivery excludes every contact sharing an excluded email and commits once", async (t) => {
   let state: any = {
     id: "delivery",
     sourceRunId: "pull",
