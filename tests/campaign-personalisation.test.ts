@@ -5,6 +5,8 @@ import { db } from "../lib/db";
 import {
   previewCampaignRecipients,
   prepareServiceNoticeHtml,
+  saveAndPreviewCampaignAudience,
+  startCampaignSend,
 } from "../lib/campaign-sends";
 import { sendResendTestHtml } from "../lib/campaign-email";
 
@@ -41,7 +43,7 @@ function mock(t: TestContext, target: any, key: string, fn: any) {
     target[key] = original;
   });
 }
-function setup(t: TestContext) {
+function setup(t: TestContext, inherited: string[] = [], unpulled?: string) {
   const campaign = { serviceNotice: false, footer: { content: footer } };
   const rows = [
     {
@@ -51,6 +53,7 @@ function setup(t: TestContext) {
         FunraisinEventName: "Autumn Walk",
         FunraisinFundraisingUrl: "https://example.org/fundraisers/sam/autumn",
       },
+      sourceRows: 1n,
       optedOut: false,
       suppressed: false,
       audienceExcluded: false,
@@ -62,6 +65,7 @@ function setup(t: TestContext) {
       email: "pat@example.org",
       name: "Pat Jones",
       data: { FunraisinEventName: "Spring Walk" },
+      sourceRows: 1n,
       optedOut: false,
       suppressed: false,
       audienceExcluded: false,
@@ -73,7 +77,11 @@ function setup(t: TestContext) {
   const queries: any[] = [];
   mock(t, db.campaign, "findUnique", async () => campaign);
   mock(t, db.audience, "findMany", async ({ where }: any) =>
-    where.id.in.map((id: string) => ({ id, runs: [{ id: `run-${id}` }] })),
+    where.id.in.map((id: string) => ({
+      id,
+      exclusionAudienceIds: id === "autumn" ? inherited : [],
+      runs: id === unpulled ? [] : [{ id: `run-${id}` }],
+    })),
   );
   mock(t, db.pullRun, "findMany", async () => [
     { fields: ["FunraisinEventName", "FunraisinFundraisingUrl"] },
@@ -120,6 +128,98 @@ test("preview candidates use the production audience precedence and all exclusio
   assert.match(query.sql, /NOT "manuallyExcluded" AND NOT "deliveryBlocked"/);
   assert.match(query.sql, /NOT "optedOut" AND NOT suppressed/);
   assert.match(query.sql, /LIMIT 25/);
+});
+
+test("included audiences add their saved exclusions to campaign previews", async (t) => {
+  const { queries } = setup(t, ["inherited", "spring", "excluded"]);
+  await previewCampaignRecipients("campaign-1", selection);
+  const query = queries[0];
+  assert.match(query.sql, /AND x\."runId" IN \(\?,\?,\?\)/);
+  assert.ok(query.values.includes("run-inherited"));
+  assert.equal(
+    query.values.filter((value: string) => value === "run-excluded").length,
+    1,
+  );
+});
+
+test("recipient counts include inherited exclusions without saving them as manual choices", async (t) => {
+  const { queries } = setup(t, ["inherited"]);
+  let saved: any;
+  mock(t, db.campaign, "update", async ({ data }: any) => {
+    saved = data;
+    return { serviceNotice: false };
+  });
+  const counts = await saveAndPreviewCampaignAudience("campaign-1", selection);
+  assert.equal(counts.recipients, 2);
+  assert.ok(queries[0].values.includes("run-inherited"));
+  assert.deepEqual(saved.exclusionAudienceIds, ["excluded"]);
+});
+
+test("an inherited exclusion without a completed pull blocks campaign preview", async (t) => {
+  setup(t, ["unpulled"], "unpulled");
+  await assert.rejects(
+    previewCampaignRecipients("campaign-1", selection),
+    /Every excluded audience needs a completed Salesforce snapshot/,
+  );
+});
+
+test("a send freezes inherited email exclusions with the selected exclusions", async (t) => {
+  const originalKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "test-key";
+  t.after(() => {
+    if (originalKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = originalKey;
+  });
+  mock(t, db.campaign, "findUnique", async () => ({
+    id: "campaign-1",
+    send: null,
+    sourceArchiveId: null,
+    audienceIds: ["autumn", "spring"],
+    exclusionAudienceIds: ["selected", "inherited"],
+    subject: "Test",
+    fromName: "Sender",
+    fromEmail: "sender@example.org",
+    replyToEmail: "sender@example.org",
+    content,
+    footer: null,
+    serviceNotice: true,
+    manualExclusions: [],
+    exclusionRules: { conjunction: "AND", items: [] },
+  }));
+  mock(t, db.audience, "findMany", async ({ where }: any) =>
+    where.id.in.map((id: string) => ({
+      id,
+      exclusionAudienceIds: id === "autumn" ? ["inherited", "spring"] : [],
+      runs: [{ id: `run-${id}` }],
+    })),
+  );
+  mock(t, globalThis, "fetch", async () =>
+    Response.json({
+      data: [
+        {
+          name: "example.org",
+          status: "verified",
+          capabilities: { sending: "enabled" },
+        },
+      ],
+    }),
+  );
+  let saved: any;
+  mock(t, db.campaignSend, "create", async ({ data }: any) => {
+    saved = data;
+    return data;
+  });
+  await startCampaignSend("campaign-1", "user-1");
+  assert.deepEqual(saved.excludeAudienceIds, [
+    "selected",
+    "inherited",
+    "spring",
+  ]);
+  assert.deepEqual(saved.excludeRunIds, [
+    "run-selected",
+    "run-inherited",
+    "run-spring",
+  ]);
 });
 
 test("two recipient previews resolve names, event URLs and missing values without changing the design", async (t) => {

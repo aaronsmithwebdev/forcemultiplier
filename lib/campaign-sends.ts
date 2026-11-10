@@ -196,6 +196,30 @@ async function resolveRuns(ids: string[], label: string) {
   return ids.map((id) => byId.get(id)!);
 }
 
+async function campaignRuns(
+  includeIds: string[],
+  selectedExcludeIds: string[],
+) {
+  const audienceIds = [...new Set(includeIds)];
+  const included = await db.audience.findMany({
+    where: { id: { in: audienceIds } },
+    select: { id: true, exclusionAudienceIds: true },
+  });
+  if (included.length !== audienceIds.length)
+    throw new AppError("An included audience is unavailable.", 409);
+  const exclusionAudienceIds = [
+    ...new Set([
+      ...selectedExcludeIds.filter((id) => !audienceIds.includes(id)),
+      ...included.flatMap((audience) => audience.exclusionAudienceIds ?? []),
+    ]),
+  ];
+  const [includeRunIds, excludeRunIds] = await Promise.all([
+    resolveRuns(audienceIds, "included"),
+    resolveRuns(exclusionAudienceIds, "excluded"),
+  ]);
+  return { audienceIds, exclusionAudienceIds, includeRunIds, excludeRunIds };
+}
+
 export async function recipientRows(
   includeRunIds: string[],
   excludeRunIds: string[],
@@ -431,14 +455,10 @@ export async function previewCampaignRecipients(
       "Choose a send audience before previewing recipients.",
       409,
     );
-  const audienceIds = [...new Set(selection.audienceIds)];
-  const exclusionAudienceIds = [
-    ...new Set(selection.exclusionAudienceIds),
-  ].filter((id) => !audienceIds.includes(id));
-  const [includeRunIds, excludeRunIds] = await Promise.all([
-    resolveRuns(audienceIds, "included"),
-    resolveRuns(exclusionAudienceIds, "excluded"),
-  ]);
+  const { includeRunIds, excludeRunIds } = await campaignRuns(
+    selection.audienceIds,
+    selection.exclusionAudienceIds,
+  );
   await validateExclusionRules(selection.exclusionRules, includeRunIds);
   const emails = uniqueEmails(options.emails || []);
   if (emails.length > 2)
@@ -535,6 +555,7 @@ export async function campaignAudienceOptions(campaignId: string) {
         id: true,
         name: true,
         fields: true,
+        exclusionAudienceIds: true,
         runs: {
           where: { status: "completed" },
           orderBy: { createdAt: "desc" },
@@ -551,6 +572,7 @@ export async function campaignAudienceOptions(campaignId: string) {
     audiences: audiences.map((audience) => ({
       id: audience.id,
       name: audience.name,
+      exclusionAudienceIds: audience.exclusionAudienceIds,
       fields: Array.isArray(audience.fields)
         ? audience.fields.filter(
             (field): field is string => typeof field === "string",
@@ -565,15 +587,14 @@ export async function saveAndPreviewCampaignAudience(
   campaignId: string,
   selection: AudienceSelection,
 ) {
-  const audienceIds = [...new Set(selection.audienceIds)];
+  const manualExclusions = uniqueEmails(selection.manualExclusions);
+  const { audienceIds, includeRunIds, excludeRunIds } = await campaignRuns(
+    selection.audienceIds,
+    selection.exclusionAudienceIds,
+  );
   const exclusionAudienceIds = [
     ...new Set(selection.exclusionAudienceIds),
   ].filter((id) => !audienceIds.includes(id));
-  const manualExclusions = uniqueEmails(selection.manualExclusions);
-  const [includeRunIds, excludeRunIds] = await Promise.all([
-    resolveRuns(audienceIds, "included"),
-    resolveRuns(exclusionAudienceIds, "excluded"),
-  ]);
   await validateExclusionRules(selection.exclusionRules, includeRunIds);
   const rows = await recipientRows(
     includeRunIds,
@@ -627,10 +648,8 @@ export async function startCampaignSend(
       "Resend Broadcasts reply to the From address. Make Reply-to match From before sending.",
       409,
     );
-  const [includeRunIds, excludeRunIds] = await Promise.all([
-    resolveRuns(campaign.audienceIds, "included"),
-    resolveRuns(campaign.exclusionAudienceIds, "excluded"),
-  ]);
+  const { includeRunIds, excludeRunIds, exclusionAudienceIds } =
+    await campaignRuns(campaign.audienceIds, campaign.exclusionAudienceIds);
   if (!campaign.serviceNotice) {
     const consent = await marketingConsentReadiness([
       ...includeRunIds,
@@ -668,7 +687,7 @@ export async function startCampaignSend(
             ? Prisma.JsonNull
             : (footerContent as unknown as Prisma.InputJsonValue),
         includeAudienceIds: campaign.audienceIds,
-        excludeAudienceIds: campaign.exclusionAudienceIds,
+        excludeAudienceIds: exclusionAudienceIds,
         includeRunIds,
         excludeRunIds,
         manualExclusions: campaign.manualExclusions,

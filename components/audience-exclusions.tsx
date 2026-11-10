@@ -28,9 +28,9 @@ export function AudienceExclusions({
     <div>
       <p className="muted">
         Email addresses in the latest completed pull of any selected audience
-        will be left out of Constant Contact list deliveries, even if another
-        Contact has the same address. Pull each excluded audience before
-        sending.
+        will be left out of Constant Contact list deliveries and Resend
+        campaigns using this audience, even if another Contact has the same
+        address. Pull each excluded audience before sending.
       </p>
       <Notice message={error} />
       {!options && !error && <p className="muted">Loading audiences…</p>}

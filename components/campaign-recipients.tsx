@@ -21,6 +21,7 @@ type Audience = {
   id: string;
   name: string;
   fields: string[];
+  exclusionAudienceIds: string[];
   snapshot: null | { processed: number; finishedAt: string };
 };
 type Counts = {
@@ -225,6 +226,16 @@ export function CampaignRecipients({
   }, [load]);
 
   const parsed = useMemo(() => parseEmails(manual), [manual]);
+  const inheritedExclusions = useMemo(
+    () => [
+      ...new Set(
+        review?.audiences
+          .filter((audience) => included.includes(audience.id))
+          .flatMap((audience) => audience.exclusionAudienceIds) ?? [],
+      ),
+    ],
+    [included, review?.audiences],
+  );
   const allowedFields = useMemo(() => {
     const selected =
       review?.audiences.filter((audience) => included.includes(audience.id)) ||
@@ -496,6 +507,21 @@ export function CampaignRecipients({
                 selectionChanged();
               }}
             />
+            {!!inheritedExclusions.length && (
+              <p className="muted">
+                Automatically excluded by included audiences:{" "}
+                {inheritedExclusions
+                  .map(
+                    (audienceId) =>
+                      review.audiences.find(
+                        (audience) => audience.id === audienceId,
+                      )?.name ?? audienceId,
+                  )
+                  .join(", ")}
+                . Matching email addresses are excluded even when another
+                Contact has the same address.
+              </p>
+            )}
           </div>
           {!!included.length && (
             <div className="campaign-rule-builder">
