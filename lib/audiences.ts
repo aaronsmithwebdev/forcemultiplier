@@ -15,7 +15,7 @@ import {
 import { db } from "./db";
 import { AppError, publicError, transientError } from "./errors";
 import { connection, sfQuery } from "./providers";
-import { sourceQuery, validatePaths, enrich } from "./salesforce";
+import { sourceQuery, validatePaths, enrich, reportPage } from "./salesforce";
 import { validateQuery } from "./soql";
 import { Prisma } from "@prisma/client";
 import { normalizedEmail } from "./email";
@@ -55,9 +55,12 @@ export async function createAudience(input: {
   if (input.sourceType !== "soql") {
     const resolved = await sourceQuery(input.sourceType, input.sourceId ?? "");
     if (!resolved.query) throw new AppError(resolved.notes.join(" "), 422);
-    query = resolved.query;
+    query =
+      "executionQuery" in resolved ? resolved.executionQuery : resolved.query;
   }
-  validateQuery(query);
+  validateQuery(
+    query.startsWith("report:") ? JSON.parse(query.slice(7)).query : query,
+  );
   await validatePaths(input.fields);
   await validateAudienceExclusions(
     config.externalId,
@@ -174,10 +177,13 @@ export async function startPull(id: string) {
   } else if (!["soql", "import"].includes(audience.sourceType)) {
     const resolved = await sourceQuery(audience.sourceType, audience.sourceId!);
     if (!resolved.query) throw new AppError(resolved.notes.join(" "), 422);
-    query = resolved.query;
+    query =
+      "executionQuery" in resolved ? resolved.executionQuery : resolved.query;
   }
   if (!["funraisin", "import"].includes(audience.sourceType)) {
-    validateQuery(query);
+    validateQuery(
+      query.startsWith("report:") ? JSON.parse(query.slice(7)).query : query,
+    );
     await validatePaths(audience.fields as string[]);
   }
   try {
@@ -334,12 +340,15 @@ export async function pullStep(id: string) {
     const imported = run.query === "import";
     const manualPhase = imported || !!run.cursor?.startsWith("manual:");
     const funraisin = run.query.startsWith("{");
+    const report = run.query.startsWith("report:");
     const page = await pullStage(id, "fetch Salesforce page", () =>
       manualPhase
         ? manualAudiencePage(run)
         : funraisin
           ? funraisinAudiencePage(run.query, run.cursor, 500, run.orgId)
-          : sfQuery(run.query, run.cursor, run.orgId),
+          : report
+            ? reportPage(run.query, run.cursor, run.orgId)
+            : sfQuery(run.query, run.cursor, run.orgId),
     );
     if (
       !Array.isArray(page.records) ||
@@ -353,7 +362,8 @@ export async function pullStep(id: string) {
       );
     if (
       Number(page.totalSize) > 150000 ||
-      run.processed + page.records.length > 150000
+      run.processed + ("scanned" in page ? page.scanned : page.records.length) >
+        150000
     )
       throw new AppError(
         "This audience exceeds the 150,000-record manual pull limit. Narrow the query; Bulk extraction is a later milestone.",
@@ -400,7 +410,8 @@ export async function pullStep(id: string) {
         "Connection changed during extraction. Resume after reconnecting the original org.",
         409,
       );
-    const processed = run.processed + page.records.length;
+    const processed =
+      run.processed + ("scanned" in page ? page.scanned : page.records.length);
     let total = run.cursor ? run.total : Number(page.totalSize);
     if (
       !Number.isFinite(total) ||
@@ -490,6 +501,29 @@ export async function pullStep(id: string) {
             await tx.pullRun.updateMany({
               where: { id },
               data: { processed: count, total: count },
+            });
+          }
+          if (report && (page.done || enteringManual)) {
+            const count = await tx.audienceMember.count({
+              where: { runId: id },
+            });
+            await tx.pullRun.updateMany({
+              where: { id },
+              data: {
+                processed: count,
+                total: count + (enteringManual ? total - processed : 0),
+                ...(enteringManual
+                  ? {
+                      cursor:
+                        "manual:" +
+                        JSON.stringify({
+                          after: null,
+                          sourceTotal: count,
+                          version: manualVersion,
+                        }),
+                    }
+                  : {}),
+              },
             });
           }
           return tx.pullRun.findUniqueOrThrow({ where: { id } });

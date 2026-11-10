@@ -53,6 +53,7 @@ export function AudienceBuilder() {
   const [exclusionAudienceIds, setExclusionAudienceIds] = useState<string[]>(
     [],
   );
+  const [reportPostFilter, setReportPostFilter] = useState(false);
   const updateQuery = useCallback((value: string) => {
     setQuery(value);
     setRecords(null);
@@ -74,6 +75,7 @@ export function AudienceBuilder() {
     setSourceId("");
     setNotes([]);
     setRecords(null);
+    setReportPostFilter(false);
     setCursor("");
     setFields(value === "funraisin" ? [...FUNRAISIN_FIELDS] : []);
     if (value === "funraisin")
@@ -117,12 +119,14 @@ export function AudienceBuilder() {
     setQuery("");
     setNotes([]);
     setRecords(null);
+    setReportPostFilter(false);
     const source = sources.find((s) => (s.Id || s.id) === id);
     if (!name) setName(source?.Name || source?.label || "");
     await work("resolve", async () => {
       const data = await api("salesforce/source", "POST", { kind: type, id });
       setQuery(data.query || "");
       setNotes(data.notes || []);
+      setReportPostFilter(!!data.executionQuery);
     });
   }
   const funFilters = type === "funraisin" ? JSON.parse(query) : null;
@@ -158,7 +162,7 @@ export function AudienceBuilder() {
         Select Id from Contact. Full pulls follow every result page; preview
         displays at most 25 contacts.
       </small>
-      {type !== "soql" && query && (
+      {type !== "soql" && query && !reportPostFilter && (
         <Button
           variant="ghost"
           onClick={() => {
@@ -429,11 +433,14 @@ export function AudienceBuilder() {
                   const data = await api(
                     type === "funraisin"
                       ? "funraisin/preview"
-                      : "salesforce/preview",
+                      : type === "report"
+                        ? "salesforce/report-preview"
+                        : "salesforce/preview",
                     "POST",
                     {
                       query,
                       fields,
+                      ...(type === "report" ? { sourceId } : {}),
                     },
                   );
                   setRecords(data.records);

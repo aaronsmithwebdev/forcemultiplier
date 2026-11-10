@@ -53,6 +53,7 @@ import {
   enrich,
   sourceQuery,
   validatePaths,
+  reportPage,
 } from "@/lib/salesforce";
 import { previewQuery, validateQuery, sfId } from "@/lib/soql";
 import {
@@ -1003,6 +1004,23 @@ async function handle(
       const data = queryBody.parse(await body(request));
       await validatePaths(data.fields);
       const page = await sfQuery(previewQuery(data.query));
+      return json({
+        records: await enrich(page.records, data.fields),
+        sample: true,
+        limit: 25,
+      });
+    }
+    if (key === "salesforce/report-preview" && method === "POST") {
+      const data = z
+        .object({ sourceId: z.string(), fields: queryBody.shape.fields })
+        .parse(await body(request));
+      await validatePaths(data.fields);
+      const source = await sourceQuery("report", data.sourceId);
+      if (!source.query) throw new AppError(source.notes.join(" "), 422);
+      const page =
+        "executionQuery" in source && source.executionQuery
+          ? await reportPage(source.executionQuery, null, undefined, true)
+          : await sfQuery(previewQuery(source.query));
       return json({
         records: await enrich(page.records, data.fields),
         sample: true,

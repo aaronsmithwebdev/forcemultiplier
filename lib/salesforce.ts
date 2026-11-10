@@ -1,6 +1,12 @@
 import { providerRequest, SF_VERSION, sfQuery } from "./providers";
 import { AppError } from "./errors";
-import { quote, sfId, validateQuery, combineFilterLogic } from "./soql";
+import {
+  quote,
+  sfId,
+  validateQuery,
+  combineFilterLogic,
+  previewQuery,
+} from "./soql";
 export type MetadataField = {
   name: string;
   label: string;
@@ -145,6 +151,74 @@ export async function sourceQuery(kind: string, id: string) {
   }
   throw new AppError("Unknown Salesforce source.");
 }
+type ReportPostFilter = {
+  object: string;
+  joinField: string;
+  criteria: string[];
+  includesObject: boolean;
+};
+const reportPrefix = "report:";
+export async function reportPage(
+  savedQuery: string,
+  cursor: string | null = null,
+  orgId?: string,
+  preview = false,
+) {
+  if (!savedQuery.startsWith(reportPrefix))
+    throw new AppError("Stored report query is invalid.", 409);
+  let plan: {
+    query: string;
+    postFilter: ReportPostFilter;
+  };
+  try {
+    plan = JSON.parse(savedQuery.slice(reportPrefix.length));
+  } catch {
+    throw new AppError("Stored report query is invalid.", 409);
+  }
+  if (typeof plan.query !== "string" || !plan.postFilter)
+    throw new AppError("Stored report query is invalid.", 409);
+  validateQuery(plan.query);
+  const { object, joinField, criteria, includesObject } = plan.postFilter;
+  if (
+    !/^[A-Za-z][A-Za-z0-9_]*$/.test(object) ||
+    !/^[A-Za-z][A-Za-z0-9_]*$/.test(joinField) ||
+    !Array.isArray(criteria) ||
+    typeof includesObject !== "boolean"
+  )
+    throw new AppError("Stored report query is invalid.", 409);
+  const page = await sfQuery(
+    preview ? previewQuery(plan.query) : plan.query,
+    cursor,
+    orgId,
+  );
+  if (!Array.isArray(page.records))
+    throw new AppError("Salesforce returned an incomplete report page.", 502);
+  const ids = page.records.map((record: any) => record.Id);
+  if (!ids.length) return { ...page, scanned: 0 };
+  const query = `SELECT ${joinField} FROM ${object} WHERE ${joinField} IN (${ids.map(quote).join(",")})${criteria.length ? " AND " + criteria.map((clause) => `(${clause})`).join(" AND ") : ""}`;
+  const matches = new Set<string>();
+  const seen = new Set<string>();
+  let next: string | undefined;
+  do {
+    const related = await sfQuery(query, next, orgId);
+    if (!Array.isArray(related.records))
+      throw new AppError("Report cross-filter results were incomplete.", 502);
+    for (const row of related.records)
+      if (row[joinField]) matches.add(row[joinField]);
+    next = related.done ? undefined : related.nextRecordsUrl;
+    if (!related.done && (!next || seen.has(next)))
+      throw new AppError("Report cross-filter results were incomplete.", 502);
+    if (next) seen.add(next);
+  } while (next);
+  return {
+    ...page,
+    scanned: page.records.length,
+    records: page.records.filter(
+      (record: any) => matches.has(record.Id) === includesObject,
+    ),
+  };
+}
+
 // Narrow, fail-closed translator. Required child joins need an explicit SOQL semi-join.
 export function translateReport(
   data: Record<string, any>,
@@ -164,12 +238,26 @@ export function translateReport(
       gaps.push(
         "This custom report type must use Contact as its primary object.",
       );
+    const required = Array.isArray(objects)
+      ? objects.filter((object: any) => object.joinType === "INNER")
+      : [];
     if (
       !Array.isArray(objects) ||
       objects.some(
-        (object: any) =>
-          object.joinType !== "ROOT" && object.joinType !== "OUTER",
-      )
+        (object: any) => !["ROOT", "OUTER", "INNER"].includes(object.joinType),
+      ) ||
+      (required.length > 0 &&
+        !(
+          m.reportType?.type === "Contacts_with_Donor_Opportunities__c" &&
+          required.length === 1 &&
+          required[0].apiName === "Opportunity" &&
+          m.crossFilters?.some(
+            (cross: any) =>
+              cross.relatedEntity === "Opportunity" &&
+              cross.relatedEntityJoinField === "Donor__c" &&
+              cross.includesObject === true,
+          )
+        ))
     )
       gaps.push(
         "Custom report types with required related records need a reviewed SOQL semi-join.",
@@ -181,8 +269,8 @@ export function translateReport(
     gaps.push(
       "Set Show Me to All Contacts; personal/team scopes are not translated yet.",
     );
-  if ((m.crossFilters?.length ?? 0) > 2)
-    gaps.push("Salesforce SOQL supports at most two cross-filter joins.");
+  if ((m.crossFilters?.length ?? 0) > 3)
+    gaps.push("Reports with more than three cross-filters need review.");
   if (
     m.crossFilters?.length &&
     /\b(?:OR|NOT)\b/i.test(m.reportBooleanFilter ?? "")
@@ -314,6 +402,13 @@ export function translateReport(
       const escaped = raw.replace(/[%_]/g, "\\$&");
       return `${path} LIKE ${quote((f.operator === "contains" ? "%" : "") + escaped + "%")}`;
     }
+    if (
+      f.operator === "notContain" &&
+      ["string", "email", "phone", "url"].includes(field.type)
+    ) {
+      const escaped = raw.replace(/[%_]/g, "\\$&");
+      return `NOT (${path} LIKE ${quote("%" + escaped + "%")})`;
+    }
     gaps.push(`Unsupported operator ${f.operator} on ${f.column}.`);
     return null;
   }
@@ -334,6 +429,7 @@ export function translateReport(
     if (clause) filters.push(clause);
   }
   const crossClauses: string[] = [];
+  let postFilter: ReportPostFilter | null = null;
   for (const cross of m.crossFilters ?? []) {
     const opportunity = cross.relatedEntity === "OCR-Opportunity";
     const child =
@@ -343,7 +439,8 @@ export function translateReport(
       (field) => field.name === cross.relatedEntityJoinField,
     );
     if (
-      cross.primaryEntityField !== "CONTACT_ID" ||
+      (cross.primaryEntityField !== "CONTACT_ID" &&
+        !sfId(cross.primaryEntityField)) ||
       typeof cross.includesObject !== "boolean" ||
       !child ||
       child.name === "Contact" ||
@@ -400,9 +497,18 @@ export function translateReport(
       if (clause) criteria.push(clause);
     }
     if (criteria.length !== (cross.criteria ?? []).length) continue;
-    crossClauses.push(
-      `Id ${cross.includesObject ? "IN" : "NOT IN"} (SELECT ${join.name} FROM ${child.name}${criteria.length ? " WHERE " + criteria.map((clause) => `(${clause})`).join(" AND ") : ""})`,
-    );
+    if (crossClauses.length < 2)
+      crossClauses.push(
+        `Id ${cross.includesObject ? "IN" : "NOT IN"} (SELECT ${join.name} FROM ${child.name}${criteria.length ? " WHERE " + criteria.map((clause) => `(${clause})`).join(" AND ") : ""})`,
+      );
+    else if (!postFilter && !opportunity)
+      postFilter = {
+        object: child.name,
+        joinField: join.name,
+        criteria,
+        includesObject: cross.includesObject,
+      };
+    else gaps.push("The additional cross-filter needs a reviewed query.");
   }
   if (gaps.length) return { query: null, notes: gaps };
   const where = combineFilterLogic(m.reportBooleanFilter, filters);
@@ -414,8 +520,18 @@ export function translateReport(
   validateQuery(query);
   return {
     query,
+    ...(postFilter
+      ? {
+          executionQuery: reportPrefix + JSON.stringify({ query, postFilter }),
+        }
+      : {}),
     notes: [
       "Translated supported report criteria. Additional contact fields are fetched separately. Compare membership with Salesforce before using this audience for outbound sync.",
+      ...(postFilter
+        ? [
+            "A third cross-filter is applied to each pull page; the displayed SOQL is only the first stage.",
+          ]
+        : []),
     ],
   };
 }

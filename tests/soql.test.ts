@@ -1,12 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { db } from "../lib/db";
+import { encrypt } from "../lib/security";
 import {
   validateQuery,
   previewQuery,
   combineFilterLogic,
   quote,
 } from "../lib/soql";
-import { translateReport, type ObjectMetadata } from "../lib/salesforce";
+import {
+  reportPage,
+  translateReport,
+  type ObjectMetadata,
+} from "../lib/salesforce";
 
 test("contact queries preserve semijoins and related fields", () => {
   const result = validateQuery(
@@ -247,6 +253,130 @@ test("translates direct child cross filters on the same related record", () => {
   );
   Object.assign(r.reportMetadata, { reportBooleanFilter: "1 OR 1" });
   assert.equal(translateReport(r, contact, account, related).query, null);
+});
+test("three direct cross filters keep the last rule during each report page", async (t) => {
+  const r = report();
+  r.reportMetadata.reportType = {
+    type: "Contacts_with_Donor_Opportunities__c",
+  };
+  Object.assign(r.reportTypeMetadata, {
+    objects: [
+      { apiName: "Contact", joinType: "ROOT" },
+      { apiName: "Opportunity", joinType: "INNER" },
+    ],
+  });
+  r.reportMetadata.reportFilters.push({
+    column: "DONOR_TYPE",
+    operator: "notContain",
+    value: "major",
+  });
+  Object.assign(r.reportTypeMetadata.categories.contacts.columns, {
+    DONOR_TYPE: { entityColumnName: "Contact.Donor_Type__c" },
+  });
+  Object.assign(r.reportMetadata, {
+    crossFilters: [
+      ["Donor__c", true, "2024-01-01"],
+      ["Funraisin__Fundraiser__c", false, "2026-01-01"],
+      ["Donor__c", false, "2026-10-20"],
+    ].map(([join, includesObject, date]) => ({
+      primaryEntityField: "072000000000000",
+      relatedEntity: "Opportunity",
+      relatedEntityJoinField: join,
+      includesObject,
+      criteria: [{ column: "CloseDate", operator: "greaterThan", value: date }],
+    })),
+  });
+  const related = {
+    Opportunity: {
+      name: "Opportunity",
+      label: "Opportunity",
+      fields: [
+        {
+          name: "Donor__c",
+          label: "Donor",
+          type: "reference",
+          referenceTo: ["Contact"],
+        },
+        {
+          name: "Funraisin__Fundraiser__c",
+          label: "Fundraiser",
+          type: "reference",
+          referenceTo: ["Contact"],
+        },
+        { name: "CloseDate", label: "Close Date", type: "date" },
+      ],
+      childRelationships: [],
+    },
+  };
+  const result = translateReport(
+    r,
+    {
+      ...contact,
+      fields: [
+        ...contact.fields,
+        { name: "Donor_Type__c", label: "Donor Type", type: "string" },
+      ],
+    },
+    account,
+    related,
+  );
+  const executable = "executionQuery" in result && result.executionQuery;
+  assert.ok(executable);
+  assert.equal(
+    (result.query!.match(/SELECT [A-Za-z_]+ FROM Opportunity/g) || []).length,
+    2,
+  );
+  assert.match(result.query!, /NOT \(Donor_Type__c LIKE '%major%'\)/);
+  const plan = JSON.parse(executable.slice(7));
+  assert.deepEqual(plan.postFilter, {
+    object: "Opportunity",
+    joinField: "Donor__c",
+    criteria: ["CloseDate > 2026-10-20"],
+    includesObject: false,
+  });
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.APP_ENCRYPTION_KEY;
+    else process.env.APP_ENCRYPTION_KEY = previousKey;
+  });
+  const originalFind = db.connection.findUnique;
+  db.connection.findUnique = (async () => ({
+    provider: "salesforce",
+    instanceUrl: "https://example.my.salesforce.com",
+    externalId: "org",
+    version: 1,
+    tokens: encrypt(
+      JSON.stringify({ accessToken: "test", refreshToken: "test" }),
+    ),
+    expiresAt: new Date(Date.now() + 3_600_000),
+  })) as any;
+  t.after(() => {
+    db.connection.findUnique = originalFind;
+  });
+  const originalFetch = globalThis.fetch;
+  const ids = [
+    "003000000000000001",
+    "003000000000000002",
+    "003000000000000003",
+  ];
+  globalThis.fetch = (async (url: any) => {
+    const query = new URL(url).searchParams.get("q") || "";
+    return Response.json(
+      query.startsWith("SELECT Donor__c FROM Opportunity")
+        ? { done: true, totalSize: 1, records: [{ Donor__c: ids[1] }] }
+        : { done: true, totalSize: 3, records: ids.map((Id) => ({ Id })) },
+    );
+  }) as any;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const page = await reportPage(executable, null, undefined, true);
+  assert.equal(page.scanned, 3);
+  assert.deepEqual(
+    page.records.map((record: any) => record.Id),
+    [ids[0], ids[2]],
+  );
 });
 test("rejects custom report types with another root or required child joins", () => {
   for (const objects of [

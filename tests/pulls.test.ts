@@ -211,6 +211,41 @@ test("an oversized Salesforce query stops before saving its first page", async (
   assert.equal(f.state.processed, 0);
   assert.equal(f.members.size, 0);
 });
+test("a report page applies its third cross-filter before publishing the snapshot", async (t) => {
+  const f = fixture(t, 3);
+  f.state.query =
+    "report:" +
+    JSON.stringify({
+      query: "SELECT Id FROM Contact",
+      postFilter: {
+        object: "Opportunity",
+        joinField: "Donor__c",
+        criteria: ["CloseDate > 2026-10-20"],
+        includesObject: false,
+      },
+    });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, options: any) => {
+    const query = new URL(url).searchParams.get("q") || "";
+    return query.startsWith("SELECT Donor__c FROM Opportunity")
+      ? Response.json({
+          done: true,
+          totalSize: 1,
+          records: [{ Donor__c: "003000000000000001" }],
+        })
+      : originalFetch(url, options);
+  }) as any;
+  try {
+    const run = await pullStep("run");
+    assert.equal(run.status, "completed");
+    assert.equal(run.processed, 2);
+    assert.equal(run.total, 2);
+    assert.equal(f.members.size, 2);
+    assert.ok(!f.members.has("person:003000000000000001"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("manual emails join each completed snapshot without duplicating pulled emails", async (t) => {
   const f = fixture(t, 1);
   f.manualEmails.push("manager@example.test", "fixture@example.test");

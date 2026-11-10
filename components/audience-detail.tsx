@@ -668,21 +668,24 @@ export function AudienceDetail({ id }: { id: string }) {
               <pre>
                 {data.sourceType === "import"
                   ? "Imported memberships are retained until removed. Pull to refresh linked Salesforce details."
-                  : data.query}
+                  : data.query.startsWith("report:")
+                    ? `${JSON.parse(data.query.slice(7)).query}\n\nA further cross-filter from the report is applied to each pull page.`
+                    : data.query}
               </pre>
             )}
-            {!["funraisin", "import"].includes(data.sourceType) && (
-              <Button
-                variant="secondary"
-                disabled={busy || sending}
-                onClick={() => {
-                  setQueryDraft(data.query);
-                  setEditingQuery(true);
-                }}
-              >
-                <Pencil size={15} /> Edit SOQL
-              </Button>
-            )}
+            {!["funraisin", "import"].includes(data.sourceType) &&
+              !data.query.startsWith("report:") && (
+                <Button
+                  variant="secondary"
+                  disabled={busy || sending}
+                  onClick={() => {
+                    setQueryDraft(data.query);
+                    setEditingQuery(true);
+                  }}
+                >
+                  <Pencil size={15} /> Edit SOQL
+                </Button>
+              )}
           </>
         )}
         <div className="selected-fields">
