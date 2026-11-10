@@ -53,3 +53,17 @@ export function publicError(error: unknown) {
     status: 500,
   };
 }
+export function retryablePullError(error: unknown, failures: number) {
+  const value = error as { status?: number; message?: string };
+  return (
+    failures < 8 &&
+    (value?.status === 429 ||
+      [500, 503, 504].includes(value?.status ?? 0) ||
+      (value?.status === 409 &&
+        value?.message?.startsWith("This pull is busy")) ||
+      (value?.status === undefined &&
+        (error instanceof TypeError ||
+          value?.message ===
+            "The server did not return a valid response. Try again.")))
+  );
+}

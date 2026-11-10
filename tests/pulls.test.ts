@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { db } from "../lib/db";
 import { encrypt } from "../lib/security";
 import { pullStep } from "../lib/audiences";
+import { retryablePullError } from "../lib/errors";
 process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
 function fixture(t: any, total: number) {
   let state: any = {
@@ -63,6 +64,7 @@ function fixture(t: any, total: number) {
   );
   let failPage = -1;
   let failDatabaseOnce = false;
+  let failPeopleOnce = false;
   let malformed = false;
   const config: any = {
     provider: "salesforce",
@@ -96,7 +98,15 @@ function fixture(t: any, total: number) {
     try {
       return await fn({
         $executeRaw: async () => 0,
-        $queryRaw: async (sql: any) => salesforcePeopleFixture(sql),
+        $queryRaw: async (sql: any) => {
+          if (failPeopleOnce) {
+            failPeopleOnce = false;
+            throw Object.assign(new Error("Transaction expired"), {
+              code: "P2028",
+            });
+          }
+          return salesforcePeopleFixture(sql);
+        },
         personEmail: { createMany: async () => ({ count: 0 }) },
         audience: { findUniqueOrThrow: async () => ({ manualVersion: 0 }) },
         pullRun: {
@@ -187,6 +197,9 @@ function fixture(t: any, total: number) {
     },
     failDatabaseOnce: () => {
       failDatabaseOnce = true;
+    },
+    failPeopleOnce: () => {
+      failPeopleOnce = true;
     },
     malform: () => {
       malformed = true;
@@ -300,6 +313,34 @@ test("a temporary database timeout is retried without pausing or duplicating a p
   assert.equal(f.members.size, 200);
   assert.equal(logged[1].stage, "save page");
   assert.equal(logged[1].retry, true);
+});
+test("a timed-out person save retries without losing the pull cursor", async (t) => {
+  const f = fixture(t, 200);
+  let logged: any[] = [];
+  mockMethod(t, console, "error", (...values: any[]) => (logged = values));
+  f.failPeopleOnce();
+  const result = await pullStep("run");
+  assert.equal(result.status, "completed");
+  assert.equal(result.processed, 200);
+  assert.equal(f.members.size, 200);
+  assert.equal(logged[1].stage, "save Salesforce people");
+  assert.equal(logged[1].retry, true);
+});
+test("pull retries temporary request failures but stops on permanent errors", () => {
+  assert.equal(retryablePullError({ status: 500 }, 1), true);
+  assert.equal(retryablePullError({ status: 503 }, 1), true);
+  assert.equal(retryablePullError({ status: 429 }, 1), true);
+  assert.equal(retryablePullError(new TypeError("Failed to fetch"), 1), true);
+  assert.equal(
+    retryablePullError(
+      { status: 409, message: "This pull is busy or has been cancelled." },
+      1,
+    ),
+    true,
+  );
+  assert.equal(retryablePullError({ status: 403 }, 1), false);
+  assert.equal(retryablePullError({ status: 422 }, 1), false);
+  assert.equal(retryablePullError({ status: 500 }, 8), false);
 });
 test("truncated extraction pauses instead of publishing a partial snapshot", async (t) => {
   const f = fixture(t, 25);

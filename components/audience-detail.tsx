@@ -2,6 +2,7 @@
 import { AudienceImport } from "./audience-import";
 import { AudienceExclusions } from "./audience-exclusions";
 import { FieldBrowser } from "./field-browser";
+import { retryablePullError } from "@/lib/errors";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -99,9 +100,23 @@ export function AudienceDetail({ id }: { id: string }) {
     try {
       let run = await api(`audiences/${id}/pull`, "POST");
       setProgress(run);
+      let failures = 0;
       while (!stop.current && run.status !== "completed") {
-        run = await api(`runs/${run.id}/step`, "POST");
-        setProgress(run);
+        try {
+          run = await api(`runs/${run.id}/step`, "POST");
+          setProgress(run);
+          setError("");
+          failures = 0;
+        } catch (cause) {
+          failures++;
+          if (stop.current) break;
+          if (!retryablePullError(cause, failures)) throw cause;
+          const seconds = Math.min(2 ** failures, 30);
+          setError(
+            `Pull interrupted. Retrying automatically in ${seconds} seconds…`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+        }
       }
       await load();
     } catch (e) {

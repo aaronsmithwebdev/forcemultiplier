@@ -22,7 +22,9 @@ export async function api(path: string, method = "GET", body?: unknown) {
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith("auth/"))
       window.location.assign("/login");
-    throw new Error(data.error || "Request failed.");
+    throw Object.assign(new Error(data.error || "Request failed."), {
+      status: response.status,
+    });
   }
   return data;
 }

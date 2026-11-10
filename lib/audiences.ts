@@ -243,7 +243,8 @@ async function pullStage<T>(
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
       const retry =
-        transientError(error) &&
+        (transientError(error) ||
+          (stage === "save Salesforce people" && code === "P2028")) &&
         attempt === 0 &&
         (stage !== "save page" || code === "P2024");
       if (!(error instanceof AppError))
@@ -404,7 +405,9 @@ export async function pullStep(id: string) {
     const sourcePeople =
       funraisin || manualPhase
         ? []
-        : await saveSalesforcePeople(run.orgId, records);
+        : await pullStage(id, "save Salesforce people", () =>
+            saveSalesforcePeople(run.orgId, records),
+          );
     const bySalesforce = new Map(
       sourcePeople.map((p) => [p.salesforceId, p.id]),
     );
