@@ -351,7 +351,10 @@ export async function pullStep(id: string) {
         "Salesforce returned an incomplete page. No snapshot was published.",
         502,
       );
-    if (run.processed + page.records.length > 150000)
+    if (
+      Number(page.totalSize) > 150000 ||
+      run.processed + page.records.length > 150000
+    )
       throw new AppError(
         "This audience exceeds the 150,000-record manual pull limit. Narrow the query; Bulk extraction is a later milestone.",
         422,

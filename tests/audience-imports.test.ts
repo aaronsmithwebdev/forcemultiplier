@@ -290,6 +290,14 @@ test("unmatched imports keep local IDs and repeated imports preserve names and m
 });
 test("matching searches Salesforce outside the audience and never overwrites its profile from CSV", async (t) => {
   const f = setup(t);
+  f.people.push({
+    id: "stale-contact",
+    orgId: "org",
+    email: input.text,
+    salesforceId: "003000000000000002",
+    source: "salesforce",
+    mergedIntoId: null,
+  });
   f.setCrm([
     {
       Id: "003000000000000001",
@@ -308,10 +316,22 @@ test("matching searches Salesforce outside the audience and never overwrites its
     "user",
   );
   assert.equal((p.rows as any)[0].status, "matched");
+  assert.notEqual((p.rows as any)[0].candidates[0].id, "stale-contact");
+  const stored = f.imports.get(p.id).rows[0].candidates[0];
+  f.imports.get(p.id).rows[0].candidates[0] = {
+    id: stored.id,
+    name: stored.name,
+    currentEmail: stored.currentEmail,
+    salesforceId: stored.salesforceId,
+  }; // PostgreSQL JSONB reorders object keys after saving the preview.
   await commitAudienceImport(p.id, {}, "user");
-  assert.equal(f.people.length, 1);
-  assert.equal(f.people[0].firstName, "CRM");
-  assert.equal(f.memberships[0].personId, f.people[0].id);
+  assert.equal(f.people.length, 2);
+  assert.equal(f.memberships[0].personId, (p.rows as any)[0].candidates[0].id);
+  assert.equal(
+    f.people.find((person) => person.id === f.memberships[0].personId)
+      .firstName,
+    "CRM",
+  );
 });
 test("shared addresses are held unless reviewed; suppressed people remain suppressed", async (t) => {
   const f = setup(t);

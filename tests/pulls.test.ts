@@ -204,6 +204,13 @@ test("a full pull paginates beyond 2,000 and publishes every unique contact", as
   assert.equal(result.cursor, null);
   assert.equal((await pullStep("run")).status, "completed");
 });
+test("an oversized Salesforce query stops before saving its first page", async (t) => {
+  const f = fixture(t, 150001);
+  await assert.rejects(pullStep("run"), /150,000-record manual pull limit/);
+  assert.equal(f.state.status, "paused");
+  assert.equal(f.state.processed, 0);
+  assert.equal(f.members.size, 0);
+});
 test("manual emails join each completed snapshot without duplicating pulled emails", async (t) => {
   const f = fixture(t, 1);
   f.manualEmails.push("manager@example.test", "fixture@example.test");

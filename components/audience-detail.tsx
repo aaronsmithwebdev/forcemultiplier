@@ -373,7 +373,11 @@ export function AudienceDetail({ id }: { id: string }) {
           <div className="button-row">
             <Button busy={busy} disabled={busy || sending} onClick={pull}>
               <Download size={17} />
-              {active ? "Resume pull" : "Pull contacts"}
+              {active
+                ? "Resume pull"
+                : data.sourceType === "soql"
+                  ? "Pull from SOQL"
+                  : "Pull contacts"}
             </Button>
             {data.completeRun && (
               <Button
@@ -750,6 +754,7 @@ export function AudienceDetail({ id }: { id: string }) {
       </section>
       <AudienceImport
         audienceId={id}
+        sourceType={data.sourceType}
         onImported={() => {
           void load().catch((e) => setError(e.message));
         }}

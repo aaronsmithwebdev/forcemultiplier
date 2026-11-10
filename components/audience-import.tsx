@@ -12,9 +12,11 @@ import {
 import { api, Badge, Button, Notice } from "./common";
 export function AudienceImport({
   audienceId,
+  sourceType,
   onImported,
 }: {
   audienceId?: string;
+  sourceType?: string;
   onImported?: () => void;
 }) {
   const router = useRouter();
@@ -157,6 +159,14 @@ export function AudienceImport({
             Match existing people by email or create local people. Salesforce
             Contact IDs are optional.
           </p>
+          {audienceId && sourceType !== "import" && (
+            <p>
+              Pasted emails add to this audience; pulling it also runs its saved
+              {sourceType === "soql" ? " SOQL query" : " source"}. For a list
+              containing only pasted emails,{" "}
+              <Link href="/audiences/import">import a new audience</Link>.
+            </p>
+          )}
         </div>
       </div>
       <div className="audience-import-body">

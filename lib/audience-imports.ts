@@ -53,10 +53,18 @@ async function matchRows(
     }),
     db.suppression.findMany({ where: { email: { in: emails } } }),
   ]);
+  const visibleSalesforceIds = new Set(records.map((r) => r.Id));
+  const pinnedIds = new Set(memberIds);
+  const candidates = people.filter(
+    (p) =>
+      !p.salesforceId ||
+      visibleSalesforceIds.has(p.salesforceId) ||
+      pinnedIds.has(p.id),
+  );
   const byEmail = new Map<string, Person[]>();
-  for (const p of people)
+  for (const p of candidates)
     if (p.email) byEmail.set(p.email, [...(byEmail.get(p.email) || []), p]);
-  const byId = new Map(people.map((p) => [p.id, p]));
+  const byId = new Map(candidates.map((p) => [p.id, p]));
   const pinned = new Map(
     memberships.map((m) => [
       m.email,
@@ -153,8 +161,8 @@ export async function commitAudienceImport(
   const rows = await matchRows(before, orgId, audienceId);
   for (let i = 0; i < rows.length; i++)
     if (
-      JSON.stringify(rows[i].candidates) !==
-      JSON.stringify(before[i].candidates)
+      JSON.stringify(rows[i].candidates.map((p) => p.id).sort()) !==
+      JSON.stringify(before[i].candidates.map((p) => p.id).sort())
     )
       throw new AppError(
         "Matches changed. Preview this list again before importing.",
@@ -197,9 +205,13 @@ export async function commitAudienceImport(
         },
         orderBy: { id: "asc" },
       });
+      const matchedIds = new Set(
+        rows.flatMap((r) => r.candidates.map((p) => p.id)),
+      );
       const byEmail = new Map<string, Person[]>();
       for (const p of people)
-        if (p.email) byEmail.set(p.email, [...(byEmail.get(p.email) || []), p]);
+        if (p.email && matchedIds.has(p.id))
+          byEmail.set(p.email, [...(byEmail.get(p.email) || []), p]);
       const existingMembers = await tx.manualAudienceMember.findMany({
         where: { audienceId: audience.id, email: { in: emails } },
         include: { person: true },
